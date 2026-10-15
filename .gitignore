@@ -1,0 +1,30 @@
+# Build output
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+compile_commands.json
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.code-workspace
+*.sln
+*.vcxproj*
+*.suo
+*.user
+.cache/
+.clangd/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime
+imgui.ini
+*.log
+logs/

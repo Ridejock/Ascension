@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": "iron_sword",
+      "name": "Iron Sword",
+      "description": "A plain, dependable blade.",
+      "slot": "weapon",
+      "bonus": { "strength": 3 },
+      "value": 25
+    },
+    {
+      "id": "oak_shield",
+      "name": "Oak Shield",
+      "description": "A light shield of banded oak.",
+      "slot": "armor",
+      "bonus": { "defense": 2 },
+      "value": 15
+    },
+    {
+      "id": "chain_shirt",
+      "name": "Chain Shirt",
+      "description": "Rings over a quilted gambeson. Heavy, and worth it.",
+      "slot": "armor",
+      "bonus": { "defense": 4, "vitality": 1 },
+      "value": 40
+    },
+    {
+      "id": "focus_charm",
+      "name": "Focus Charm",
+      "description": "A river stone on a cord. It steadies the breath.",
+      "slot": "accessory",
+      "bonus": { "focus": 2 },
+      "value": 30
+    }
+  ]
+}
