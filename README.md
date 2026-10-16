@@ -1,6 +1,6 @@
 # Ascension
 
-A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton and the JSON data layer. The window draws the loaded Fighter with rectangles and Emerald's built-in debug font. Combat is not in yet.
+A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox: one level-1 Fighter against one enemy. The window draws that fight with rectangles and Emerald's built-in debug font.
 
 Emerald is fetched by CMake and pinned to commit `f45d5a65ab03fe533f2d0f37282602991da67165` (see `CMakeLists.txt`). To use a local checkout instead:
 
@@ -58,7 +58,7 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ctest --test-dir build/debug --output-on-failure
 ```
 
-`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. It does not open a window.
+`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. Neither test opens a window.
 
 ## Data
 
@@ -71,12 +71,29 @@ ctest --test-dir build/debug --output-on-failure
 | `classes.json` | Fighter, and the level-5 evolutions Berserker and Guardian |
 | `enemies.json` | Enemies (level, stats, skills, experience, gold) |
 | `items.json` | Gear (weapon, armor, accessory) and the stats it adds |
+| `combat.json` | Health per vitality, minimum damage, and the attack and defense divisors |
 
-Fighter is the base class. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels.
+Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. Class change is not in the fight yet.
 
-The public headers (`include/Ascension/Data/`) are plain structs. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
+A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. Those divisors are 1 in the sample, so the stat is added and subtracted whole. Brace's `power` is the percent of the next hit that is ignored. Max health is vitality times `hpPerVitality`. Focus is the focus stat, and it does not come back until the fight restarts. Higher agility acts first each round; a tie lets the Fighter go first. The order comes from a turn model (`AgilityRoundModel`), so a later active-time model can replace it without rewriting damage.
 
-While the game is running it checks the five files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay on screen and the error is shown. The revision in the corner goes up on every successful reload. Edit `vitality` under Fighter in `data/classes.json`, save, and the bar updates.
+The public headers (`include/Ascension/Data/` and `include/Ascension/Combat/`) are plain structs and the battle. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
+
+While the game is running it checks the data files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay and the error is shown. The revision in the corner goes up on every successful reload. The fight keeps its wounds and whose turn it is. Edit Strike's `power` in `data/skills.json`, or `hpPerVitality` in `data/combat.json`, save, and the next blow uses the new numbers.
+
+## Combat
+
+Run the game. The Wolf is faster, so it bites first. Then:
+
+| Key | Action |
+|---|---|
+| `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind |
+| Space | Wait, and let the enemy act |
+| `R` | Restart this fight |
+| `N` | The next enemy in `enemies.json` (Wolf, Bandit, Cairn Guard) |
+| Escape | Quit |
+
+Waiting against the Wolf loses. Strike three times and it dies. `N` restarts on the next foe.
 
 ## Package
 

@@ -17,7 +17,7 @@ struct DataError {
     std::string Message;
 };
 
-// The five JSON files in a data directory (stats, skills, classes, enemies, items), checked
+// The JSON files in a data directory (stats, skills, classes, enemies, items, combat), checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file that
 // changed, and then stayed unchanged for one more check, is read again. A failed read keeps the
 // previous definitions and sets GetLastError().
@@ -51,6 +51,7 @@ public:
     [[nodiscard]] std::span<const ClassDef> GetClasses() const { return m_Classes; }
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
+    [[nodiscard]] const CombatRules& GetRules() const { return m_Rules; }
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
@@ -90,6 +91,7 @@ private:
     std::vector<ClassDef> m_Classes;
     std::vector<EnemyDef> m_Enemies;
     std::vector<ItemDef> m_Items;
+    CombatRules m_Rules;
     std::string m_LastError;
     u32 m_Revision = 0;
 };

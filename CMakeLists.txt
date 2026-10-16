@@ -65,7 +65,17 @@ target_link_libraries(AscensionData
 emerald_set_warnings(AscensionData)
 
 # ---------------------------------------------------------------------------
-# The placeholder app. It has no shaders of its own; emerald_add_shaders compiles
+# Combat. The turn model is swappable; the sandbox uses one agility round.
+# ---------------------------------------------------------------------------
+add_library(AscensionCombat STATIC
+    src/Combat/Battle.cpp
+    include/Ascension/Combat/Battle.h
+)
+target_link_libraries(AscensionCombat PUBLIC AscensionData)
+emerald_set_warnings(AscensionCombat)
+
+# ---------------------------------------------------------------------------
+# The combat sandbox. It has no shaders of its own; emerald_add_shaders compiles
 # the engine's with shadercross (the only shader compiler; .hlsl is not handed to fxc).
 # ---------------------------------------------------------------------------
 add_executable(Ascension
@@ -73,7 +83,7 @@ add_executable(Ascension
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
 )
-target_link_libraries(Ascension PRIVATE AscensionData)
+target_link_libraries(Ascension PRIVATE AscensionCombat)
 # A dev build watches the source data/ so saving a JSON file updates the running
 # game. The directory is missing in a packaged build, and the app then reads the
 # data/ copied next to the executable.
@@ -106,6 +116,13 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionDataTests)
     add_test(NAME Data COMMAND AscensionDataTests)
+
+    add_executable(AscensionCombatTests tests/CombatTests.cpp tests/Check.h)
+    target_link_libraries(AscensionCombatTests PRIVATE AscensionCombat)
+    target_compile_definitions(AscensionCombatTests PRIVATE
+        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionCombatTests)
+    add_test(NAME Combat COMMAND AscensionCombatTests)
 endif()
 
 # ---------------------------------------------------------------------------

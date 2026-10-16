@@ -18,7 +18,7 @@
         "agility": 1,
         "focus": 1
       },
-      "skills": ["strike", "brace"],
+      "skills": ["strike", "brace", "heavy_blow", "second_wind"],
       "passives": []
     },
     {
