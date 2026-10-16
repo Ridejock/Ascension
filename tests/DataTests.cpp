@@ -88,7 +88,13 @@ void TestSample()
               data.GetRules().FocusOnWait == 2,
           "combat.json supplies the damage rules and focus regen");
     Check(data.GetEnemies().size() == 6, "six enemies, counting the boss");
-    Check(data.GetItems().size() == 4, "four items");
+    Check(data.GetItems().size() == 7, "seven items");
+    const ShopDef& shop = data.GetShop();
+    Check(shop.Id == "pells_provisions" && shop.Name == "Old Pell's Provisions" &&
+              shop.Keeper == "Pell Harrow" && shop.BagSlots == 12 && shop.StackSize == 5 &&
+              shop.SellNumerator == 1 && shop.SellDenominator == 2 && shop.Stock.size() == 7,
+          "Pell Harrow runs a 12-slot bag with stacks of 5");
+    Check(SellPrice(shop, 10) == 5 && SellPrice(shop, 35) == 17, "selling pays half, rounded down");
     const ProgressRules& progress = data.GetProgress();
     Check(progress.XpToReach.size() == 10 && progress.XpToReach[0] == 0 &&
               progress.XpToReach[1] == 8,
@@ -221,9 +227,36 @@ void TestSample()
           "enraged adds 30 percent dealt and 15 percent taken");
     Check(stunned != nullptr && stunned->SkipAction && stunned->Turns == 1,
           "stunned skips the next action");
-    const ItemDef* sword = data.FindItem("iron_sword");
-    Check(sword != nullptr && sword->Slot == GearSlot::Weapon && sword->Bonus.Strength == 3,
-          "iron sword is a weapon with +3 strength");
+    const ItemDef* sword = data.FindItem("rusty_sword");
+    const ItemDef* axe = data.FindItem("notched_greataxe");
+    const ItemDef* shield = data.FindItem("oak_shield");
+    const ItemDef* plate = data.FindItem("oathkeepers_plate");
+    const ItemDef* charm = data.FindItem("wolfhide_charm");
+    const ItemDef* potion = data.FindItem("minor_potion");
+    const ItemDef* tonic = data.FindItem("focus_tonic");
+    Check(sword != nullptr && sword->Slot == GearSlot::Weapon && !sword->TwoHanded &&
+              sword->Bonus.Strength == 1 && sword->Value == 12,
+          "rusty sword is a one-handed weapon with +1 strength");
+    Check(axe != nullptr && axe->TwoHanded && axe->Bonus.Strength == 6 &&
+              axe->Bonus.Defense == -2 && axe->Value == 60,
+          "the notched greataxe is two-handed, +6 strength and -2 defense");
+    Check(shield != nullptr && shield->Slot == GearSlot::Offhand && shield->Bonus.Defense == 2,
+          "oak shield sits in the offhand");
+    Check(plate != nullptr && plate->Name == "Oathkeeper's Plate" &&
+              plate->Slot == GearSlot::Armor && plate->Bonus.Defense == 6 &&
+              plate->Bonus.Agility == -1,
+          "Oathkeeper's Plate is +6 defense and -1 agility");
+    Check(charm != nullptr && charm->Slot == GearSlot::Accessory && charm->Bonus.Agility == 2 &&
+              charm->Value == 35,
+          "wolfhide charm is +2 agility and costs 35");
+    Check(potion != nullptr && potion->Slot == GearSlot::Consumable && potion->Heal == 30 &&
+              potion->Value == 10,
+          "minor potion heals 30 and costs 10");
+    Check(tonic != nullptr && tonic->Slot == GearSlot::Consumable && tonic->Focus == 4 &&
+              tonic->Value == 15,
+          "focus tonic restores 4 focus and costs 15");
+    Check(data.FindItem("iron_sword") == nullptr && data.FindItem("warden_forged_plate") == nullptr,
+          "the placeholder sword and the old plate name are gone");
     const SkillDef* cleave = data.FindSkill("cleave");
     Check(cleave != nullptr && cleave->Target == SkillTarget::AllEnemies && cleave->Power == 8 &&
               cleave->FocusCost == 4 && cleave->Scaling == "strength",
@@ -372,6 +405,27 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "items.json", "\"slot\": \"weapon\"", "\"slot\": \"hat\"");
         TestRejected(copy.Path, "items.json", "slot", "an unknown gear slot is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"slot\": \"offhand\"",
+                      "\"slot\": \"offhand\", \"twoHanded\": true");
+        TestRejected(copy.Path, "items.json", "twoHanded", "only a weapon may be two-handed");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"heal\": 30", "\"heal\": 0");
+        TestRejected(copy.Path, "items.json", "heal", "a consumable needs heal or focus");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "shop.json", "\"minor_potion\"", "\"missing_potion\"");
+        TestRejected(copy.Path, "shop.json", "does not exist", "shop stock must name a real item");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "shop.json", "\"bagSlots\": 12", "\"bagSlots\": 0");
+        TestRejected(copy.Path, "shop.json", "bagSlots", "the bag needs at least one slot");
     }
     {
         TempCopy copy;

@@ -58,7 +58,7 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ctest --test-dir build/debug --output-on-failure
 ```
 
-`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. None of them open a window.
+`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and Pell's shop. None of them open a window.
 
 ## Data
 
@@ -71,13 +71,14 @@ ctest --test-dir build/debug --output-on-failure
 | `statuses.json` | Bleed, Exposed, Enraged, and Stunned |
 | `classes.json` | Fighter, and the level-5 evolutions Berserker and Guardian |
 | `enemies.json` | The roster (level, stats, skills, experience, gold) and which one is the boss |
-| `items.json` | Gear (weapon, armor, accessory) and the stats it adds |
+| `items.json` | Gear (weapon, offhand, armor, accessory) and consumables |
+| `shop.json` | Old Pell's Provisions: the bag, stack size, sell rate, and Pell's stock |
 | `combat.json` | Health per vitality, minimum damage, the attack and defense divisors, and focus regen |
 | `progress.json` | Total XP to reach each level, uses per skill rank, and power added per rank |
 
 Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. The choice opens when the hero's level reaches an evolution's `evolveLevel` (5 in the sample), and the number keys follow the order of those evolutions in `classes.json`.
 
-`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` once. In roster order that is Wolf 8, Bandit 18, Tomb Moth 14 (level 4, 40 XP), and Bone Archer 22 (level 5, 62 XP), which opens the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
+`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` and `gold` once. Gold is spent at Old Pell's Provisions between fights. The hub itself is a later slice: `I` opens Pell's screen after a victory or a defeat. In roster order that is Wolf 8, Bandit 18, Tomb Moth 14 (level 4, 40 XP), and Bone Archer 22 (level 5, 62 XP), which opens the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
 
 A skill starts at rank 1. `usesPerRank` is either one integer (a flat step, `rank = 1 + uses / step`) or a list of the total uses required to reach rank 2, rank 3, and so on. The sample is `[3, 6, 10, 15]`, so the third use is rank 2 and the fifteenth is rank 5, capped by `maxSkillRank`. Each rank above 1 adds `powerPerRank` (2 in the sample) to that skill's damage, healing, and a riposte's flat reflect, including the blow that crosses the rank. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
 
@@ -87,7 +88,11 @@ A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. T
 
 `statuses.json` defines Bleed (3 health at the start of each of the afflicted unit's turns, for 3 turns, stacking to 2), Exposed (+25 percent damage taken, 2 turns), Enraged (+30 percent dealt and +15 percent taken; the sample keeps it up for a fight), and Stunned (skips the next action). The Bandit's Slash bleeds on every third use. Heavy Blow stuns a foe who is winding up and cancels that wind-up. The foe's panel shows the telegraph (`AIMED SHOT 1/2`, then `INCOMING`) and any statuses.
 
-The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, and the hero's career. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
+`items.json` is the gear and the drinks. A weapon may set `twoHanded`, which fills the offhand as well. Oak Shield is an offhand. Consumables are not worn: `heal` is flat health and `focus` is flat focus, spent as a turn in a fight. The sample is Rusty Sword (strength +1, 12 gold), Notched Greataxe (strength +6, defense -2, two-handed, 60 gold), Oak Shield (defense +2, 15 gold), Oathkeeper's Plate (defense +6, agility -1, 55 gold), Wolfhide Charm (agility +2, 35 gold), Minor Potion (heal 30, 10 gold), and Focus Tonic (focus +4, 15 gold). The sword, the axe, and the plate prices are the ones chosen for this slice. Selling pays half the buy price, rounded down (`sellNumerator` 1, `sellDenominator` 2).
+
+`shop.json` is Pell Harrow's shop, Old Pell's Provisions. `bagSlots` is 12 and `stackSize` is 5, so a sixth potion of the same kind opens another slot and sixty potions fill the bag. Worn gear is added to the class stats before passives. A two-handed weapon sends the offhand piece back to the bag, and a shield cannot be worn until that weapon comes off. The fight starts with an empty bag and no gold.
+
+The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, the hero's career, and the bag. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
 
 While the game is running it checks the data files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay and the error is shown. The revision in the corner goes up on every successful reload. The fight keeps its wounds and whose turn it is. XP and skill uses are kept too: editing the curve or `usesPerRank` updates the level and the ranks on the next successful reload, and class growth applies on the next fight. Edit Strike's `power` in `data/skills.json`, or `hpPerVitality` in `data/combat.json`, save, and the next blow uses the new numbers.
 
@@ -98,9 +103,16 @@ Run the game. The Wolf is faster, so it bites first. Then:
 | Key | Action |
 |---|---|
 | `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind (up to `6` after evolving) |
-| `5` `6` | After evolving: Berserker Rage and Cleave, or Guardian Shield Wall and Riposte |
+| `5` `6` | After evolving: Berserker Rage and Cleave, or Guardian Shield Wall and Riposte. Before that, the first consumables in the bag |
+| The next free number | Drink a consumable stack. It spends the turn. A stun keeps the bottle |
 | Space | Wait. Also gains 2 focus on top of the 1 gained at the start of the turn |
-| `R` | Fight this enemy again. Level, XP, and skill ranks stay |
+| `I` | Between fights, open or close Old Pell's Provisions. During a fight, Pell is not there |
+| Up Down | In the shop, move through the bag or the stock |
+| Left Right | In the shop, switch between the bag and the stock |
+| `E` | In the shop, equip the highlighted bag item, take off the highlighted worn piece, or buy the highlighted stock |
+| `X` | In the shop, sell one of the highlighted stack |
+| `U` | In the shop, take off the highlighted worn piece |
+| `R` | Fight this enemy again. Level, XP, gold, gear, and skill ranks stay |
 | `N` | The next enemy in `enemies.json` |
 | Escape | Quit |
 

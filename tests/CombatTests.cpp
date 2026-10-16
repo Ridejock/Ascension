@@ -555,6 +555,114 @@ void TestBossPlans()
           "a guardian who ripostes wind-ups and rubble wins");
 }
 
+void TestGearAndConsumables()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    const ItemDef* potion = data.FindItem("minor_potion");
+    const ItemDef* tonic = data.FindItem("focus_tonic");
+    Check(potion != nullptr && tonic != nullptr, "the sample drinks are loaded");
+    if (potion == nullptr || tonic == nullptr)
+        return;
+
+    StatBlock sword;
+    sword.Strength = 1;
+    Battle armed = StartSample(
+        data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
+        "wolf");
+    armed.SetGear(sword);
+    std::string error;
+    Check(armed.Start("fighter", 1, "wolf", error), "gear is on before the fight begins");
+    Check(armed.Player().Stats.Strength == 9, "the rusty sword adds 1 strength to the fighter");
+    const ActionResult hit = armed.UseSkill("strike");
+    Check(hit.Accepted && hit.Damage == 17, "strike with the sword is 17 against the wolf");
+
+    StatBlock axe;
+    axe.Strength = 6;
+    axe.Defense = -2;
+    Battle heavy = StartSample(
+        data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
+        "wolf");
+    heavy.SetGear(axe);
+    Check(heavy.Start("fighter", 1, "wolf", error), "the greataxe is worn");
+    Check(heavy.Player().Stats.Strength == 14 && heavy.Player().Stats.Defense == 4,
+          "the greataxe is +6 strength and -2 defense");
+    Check(heavy.UseSkill("strike").Damage == 22, "the greataxe strike is 22");
+
+    StatBlock plate;
+    plate.Agility = -1;
+    plate.Defense = 6;
+    Battle slow = StartSample(data, std::make_unique<AgilityRoundModel>(), "wolf");
+    slow.SetGear(plate);
+    Check(slow.Start("fighter", 1, "wolf", error), "the plate is worn");
+    Check(slow.Player().Stats.Defense == 12 && slow.Player().Stats.Agility == 4,
+          "Oathkeeper's Plate is +6 defense and -1 agility");
+
+    Battle drinker = StartSample(data,
+                                 std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{
+                                     CombatantSide::Player, CombatantSide::Enemy}),
+                                 "bandit");
+    drinker.SetPlayerHp(40);
+    const ActionResult healed = drinker.UseItem(*potion);
+    Check(healed.Accepted && healed.Healing == 30 && healed.SkillId == "minor_potion" &&
+              drinker.Player().Hp == 70,
+          "a minor potion heals 30 and spends the turn");
+    Check(drinker.Actor() == CombatantSide::Enemy, "drinking hands the turn to the foe");
+
+    Battle focused = StartSample(
+        data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
+        "bandit");
+    Check(focused.UseSkill("brace").Accepted && focused.UseSkill("brace").Accepted &&
+              focused.UseSkill("brace").Accepted && focused.UseSkill("brace").Accepted,
+          "four braces spend focus");
+    Check(focused.Player().Focus == 3, "four braces leave 3 focus");
+    const ActionResult sipped = focused.UseItem(*tonic);
+    Check(sipped.Accepted && sipped.SkillId == "focus_tonic" && focused.Player().Focus == 8 &&
+              sipped.Text.find("Focus +4") != std::string::npos,
+          "focus tonic restores 4 focus");
+
+    Battle full = StartSample(
+        data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
+        "bandit");
+    const ActionResult wasted = full.UseItem(*potion);
+    Check(wasted.Accepted && wasted.Healing == 0 && wasted.SkillId == "minor_potion" &&
+              wasted.Text.find("nothing changes") != std::string::npos,
+          "a potion at full health is still drunk");
+
+    Battle early = StartSample(
+        data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Enemy}),
+        "wolf");
+    const ActionResult refused = early.UseItem(*potion);
+    Check(!refused.Accepted && refused.SkillId.empty(), "a drink on the foe's turn is refused");
+
+    Battle stunned = StartSample(
+        data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
+        "bandit");
+    stunned.SetPlayerHp(40);
+    Check(stunned.Inflict(CombatantSide::Player, "stunned", error), "the fighter is stunned");
+    const ActionResult skipped = stunned.UseItem(*potion);
+    Check(skipped.Accepted && skipped.SkillId.empty() && stunned.Player().Hp == 40 &&
+              skipped.Text.find("stunned") != std::string::npos,
+          "a stun spends the turn and keeps the potion");
+
+    TempCopy copy;
+    Database reloaded(copy.Path);
+    Check(reloaded.Load(), "a copied roster loads");
+    Battle fresh = StartSample(
+        reloaded,
+        std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
+        "bandit");
+    fresh.SetPlayerHp(20);
+    ReplaceInFile(copy.Path / "items.json", "\"heal\": 30", "\"heal\": 50");
+    DataError reloadError;
+    Check(reloaded.CheckForChanges(&reloadError) == 0, "the potion edit waits");
+    Check(reloaded.CheckForChanges(&reloadError) == 1, "the potion edit reloads");
+    Check(fresh.ApplyData(error), "the fight keeps its wound across the reload");
+    const ItemDef* stronger = reloaded.FindItem("minor_potion");
+    Check(stronger != nullptr && fresh.UseItem(*stronger).Healing == 50 && fresh.Player().Hp == 70,
+          "a reloaded potion heals the new amount");
+}
+
 } // namespace
 
 int main()
@@ -572,6 +680,7 @@ int main()
     TestStatusReloads();
     TestWindup();
     TestPhaseShard();
+    TestGearAndConsumables();
     TestBossPlans();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;

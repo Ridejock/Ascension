@@ -19,8 +19,8 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json",   "skills.json", "statuses.json", "classes.json",
-    "enemies.json", "items.json",  "combat.json",   "progress.json",
+    "stats.json", "skills.json", "statuses.json", "classes.json",  "enemies.json",
+    "items.json", "shop.json",   "combat.json",   "progress.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -290,6 +290,7 @@ struct Parsed {
     std::vector<ClassDef> Classes;
     std::vector<EnemyDef> Enemies;
     std::vector<ItemDef> Items;
+    ShopDef Shop;
     CombatRules Rules;
     ProgressRules Progress;
 };
@@ -768,25 +769,57 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         if (FindId(parsed.Items, item.Id) != nullptr)
             return fail("there is another item with this id");
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "name", "description", "slot", "bonus", "value"}, unknown))
+        if (!AllowKeys(entry,
+                       {"id", "name", "description", "slot", "bonus", "value", "twoHanded", "heal",
+                        "focus"},
+                       unknown))
             return fail("unknown field " + Quote(unknown));
         std::string slot;
         if (!RequireString(entry, "slot", slot, error))
             return fail(error);
         if (slot == "weapon")
             item.Slot = GearSlot::Weapon;
+        else if (slot == "offhand")
+            item.Slot = GearSlot::Offhand;
         else if (slot == "armor")
             item.Slot = GearSlot::Armor;
         else if (slot == "accessory")
             item.Slot = GearSlot::Accessory;
+        else if (slot == "consumable")
+            item.Slot = GearSlot::Consumable;
         else
-            return fail("'slot' must be \"weapon\", \"armor\" or \"accessory\"");
-        const auto bonus = entry.find("bonus");
-        if (bonus == entry.end())
-            return fail("'bonus' is required");
-        std::string why;
-        if (!ReadStatBlock(*bonus, false, item.Bonus, why))
-            return fail("'bonus' " + why);
+            return fail("'slot' must be \"weapon\", \"offhand\", \"armor\", \"accessory\" or "
+                        "\"consumable\"");
+        if (item.Slot == GearSlot::Consumable) {
+            if (!Absent(entry, "bonus", "a consumable", error) ||
+                !Absent(entry, "twoHanded", "a consumable", error))
+                return fail(error);
+            if (!OptionalInt(entry, "heal", 0, 9999, item.Heal, error) ||
+                !OptionalInt(entry, "focus", 0, 99, item.Focus, error))
+                return fail(error);
+            if (item.Heal <= 0 && item.Focus <= 0)
+                return fail("a consumable needs 'heal' or 'focus'");
+        } else {
+            if (!Absent(entry, "heal", ToString(item.Slot), error) ||
+                !Absent(entry, "focus", ToString(item.Slot), error))
+                return fail(error);
+            if (item.Slot == GearSlot::Weapon) {
+                const auto hands = entry.find("twoHanded");
+                if (hands != entry.end()) {
+                    if (!hands->is_boolean())
+                        return fail("'twoHanded' must be true or false");
+                    item.TwoHanded = hands->get<bool>();
+                }
+            } else if (!Absent(entry, "twoHanded", ToString(item.Slot), error)) {
+                return fail(error);
+            }
+            const auto bonus = entry.find("bonus");
+            if (bonus == entry.end())
+                return fail("'bonus' is required");
+            std::string why;
+            if (!ReadStatBlock(*bonus, false, item.Bonus, why))
+                return fail("'bonus' " + why);
+        }
         if (!RequireInt(entry, "value", 0, 999999, item.Value, error))
             return fail(error);
         if (!RequireString(entry, "name", item.Name, error) ||
@@ -794,6 +827,46 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
             return fail(error);
         parsed.Items.push_back(std::move(item));
     }
+    return true;
+}
+
+bool LoadShop(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("shop");
+    if (body == root.end() || !body->is_object()) {
+        error = "'shop' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body,
+                   {"id", "name", "keeper", "bagSlots", "stackSize", "sellNumerator",
+                    "sellDenominator", "stock"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    ShopDef shop;
+    if (!RequireString(*body, "id", shop.Id, error))
+        return false;
+    if (!IsId(shop.Id)) {
+        error = "shop id must be letters, digits and _, starting with a letter";
+        return false;
+    }
+    if (!RequireString(*body, "name", shop.Name, error) ||
+        !RequireString(*body, "keeper", shop.Keeper, error))
+        return false;
+    if (!RequireInt(*body, "bagSlots", 1, 24, shop.BagSlots, error) ||
+        !RequireInt(*body, "stackSize", 1, 99, shop.StackSize, error) ||
+        !RequireInt(*body, "sellNumerator", 0, 999, shop.SellNumerator, error) ||
+        !RequireInt(*body, "sellDenominator", 1, 999, shop.SellDenominator, error))
+        return false;
+    if (!ReadIdList(*body, "stock", shop.Stock, error))
+        return false;
+    if (shop.Stock.empty()) {
+        error = "'stock' must list at least one item";
+        return false;
+    }
+    parsed.Shop = std::move(shop);
     return true;
 }
 
@@ -1052,6 +1125,12 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             return false;
         }
     }
+    for (const std::string& stocked : parsed.Shop.Stock) {
+        if (FindId(parsed.Items, stocked) == nullptr) {
+            error = "shop stock " + Quote(stocked) + " does not exist";
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1065,10 +1144,11 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats,   LoadSkills, LoadStatuses, LoadClasses,
-                              LoadEnemies, LoadItems,  LoadCombat,   LoadProgress};
-    const char* names[] = {"stats.json",   "skills.json", "statuses.json", "classes.json",
-                           "enemies.json", "items.json",  "combat.json",   "progress.json"};
+    const Loader loaders[] = {LoadStats, LoadSkills, LoadStatuses, LoadClasses, LoadEnemies,
+                              LoadItems, LoadShop,   LoadCombat,   LoadProgress};
+    const char* names[] = {"stats.json",   "skills.json",  "statuses.json",
+                           "classes.json", "enemies.json", "items.json",
+                           "shop.json",    "combat.json",  "progress.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -1083,8 +1163,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats",   "skills", "statuses", "classes",
-                                    "enemies", "items",  "combat",   "progress"};
+        const char* allowedTop[] = {"stats", "skills", "statuses", "classes", "enemies",
+                                    "items", "shop",   "combat",   "progress"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
@@ -1101,6 +1181,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             file = "enemies.json";
         else if (why.compare(0, 6, "skill ") == 0)
             file = "skills.json";
+        else if (why.compare(0, 5, "shop ") == 0)
+            file = "shop.json";
         error = Err(file, {}, why);
         return false;
     }
@@ -1175,6 +1257,7 @@ bool Database::Load(DataError* error)
     m_Classes = std::move(parsed.Classes);
     m_Enemies = std::move(parsed.Enemies);
     m_Items = std::move(parsed.Items);
+    m_Shop = std::move(parsed.Shop);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
     ApplyTimes(times);

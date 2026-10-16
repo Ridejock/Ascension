@@ -1,36 +1,61 @@
 {
   "items": [
     {
-      "id": "iron_sword",
-      "name": "Iron Sword",
-      "description": "A plain, dependable blade.",
+      "id": "rusty_sword",
+      "name": "Rusty Sword",
+      "description": "A nicked blade carried on the road to Stillbarrow.",
       "slot": "weapon",
-      "bonus": { "strength": 3 },
-      "value": 25
+      "bonus": { "strength": 1 },
+      "value": 12
+    },
+    {
+      "id": "notched_greataxe",
+      "name": "Notched Greataxe",
+      "description": "A two-handed axe from a barrow skirmish. It hits hard and leaves the wielder open.",
+      "slot": "weapon",
+      "twoHanded": true,
+      "bonus": { "strength": 6, "defense": -2 },
+      "value": 60
     },
     {
       "id": "oak_shield",
       "name": "Oak Shield",
       "description": "A light shield of banded oak.",
-      "slot": "armor",
+      "slot": "offhand",
       "bonus": { "defense": 2 },
       "value": 15
     },
     {
-      "id": "chain_shirt",
-      "name": "Chain Shirt",
-      "description": "Rings over a quilted gambeson. Heavy, and worth it.",
+      "id": "oathkeepers_plate",
+      "name": "Oathkeeper's Plate",
+      "description": "Plate kept for the oathkeepers of the Stillbarrow. It turns a blow and slows a step.",
       "slot": "armor",
-      "bonus": { "defense": 4, "vitality": 1 },
-      "value": 40
+      "bonus": { "defense": 6, "agility": -1 },
+      "value": 55
     },
     {
-      "id": "focus_charm",
-      "name": "Focus Charm",
-      "description": "A river stone on a cord. It steadies the breath.",
+      "id": "wolfhide_charm",
+      "name": "Wolfhide Charm",
+      "description": "A twist of wolfhide. The step comes easier.",
       "slot": "accessory",
-      "bonus": { "focus": 2 },
-      "value": 30
+      "bonus": { "agility": 2 },
+      "value": 35
+    },
+    {
+      "id": "minor_potion",
+      "name": "Minor Potion",
+      "description": "A bitter draught that knits a wound.",
+      "slot": "consumable",
+      "heal": 30,
+      "value": 10
+    },
+    {
+      "id": "focus_tonic",
+      "name": "Focus Tonic",
+      "description": "A sharp sip that steadies the mind.",
+      "slot": "consumable",
+      "focus": 4,
+      "value": 15
     }
   ]
 }

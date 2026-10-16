@@ -131,6 +131,57 @@ std::string PassiveLine(const Database& data, const SkillDef& passive)
     return line;
 }
 
+void AppendSigned(std::string& line, const char* label, i32 value)
+{
+    if (value == 0)
+        return;
+    if (!line.empty())
+        line += "  ";
+    line += label;
+    if (value > 0)
+        line += " +";
+    else
+        line += " ";
+    line += std::to_string(value);
+}
+
+std::string BonusText(const StatBlock& bonus)
+{
+    std::string line;
+    AppendSigned(line, "STR", bonus.Strength);
+    AppendSigned(line, "DEF", bonus.Defense);
+    AppendSigned(line, "AGI", bonus.Agility);
+    AppendSigned(line, "FOC", bonus.Focus);
+    AppendSigned(line, "VIT", bonus.Vitality);
+    return line;
+}
+
+std::string WornLine(const Database& data, const Inventory& bag)
+{
+    const GearSlot slots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
+                              GearSlot::Accessory};
+    const char* labels[] = {"WEAPON", "OFFHAND", "ARMOR", "ACCESSORY"};
+    std::string line;
+    for (i32 index = 0; index < 4; ++index) {
+        if (!line.empty())
+            line += "   ";
+        line += labels[index];
+        line += " ";
+        if (slots[index] == GearSlot::Offhand && bag.OffhandBlocked()) {
+            line += "BOTH HANDS";
+            continue;
+        }
+        const std::string& worn = bag.Equipped(slots[index]);
+        if (worn.empty()) {
+            line += "-";
+            continue;
+        }
+        const ItemDef* item = data.FindItem(worn);
+        line += item != nullptr ? item->Name : worn;
+    }
+    return line;
+}
+
 std::string StatusLine(const Database& data, const CombatantState& who)
 {
     std::string line;
@@ -183,16 +234,20 @@ void AscensionApp::PushRanks(std::string_view pendingSkill)
     m_Battle->SetPlayerRanks(m_Data.GetProgress().PowerPerRank, std::move(ranks));
 }
 
-void AscensionApp::AwardXp()
+void AscensionApp::AwardVictory()
 {
     if (m_XpAwarded || m_Battle == nullptr || !m_Hero.IsReady())
         return;
     m_XpAwarded = true;
     const EnemyDef* foe = m_Data.FindEnemy(m_Battle->Enemy().Id);
     const i32 amount = foe != nullptr ? foe->Experience : 0;
+    const i32 gold = foe != nullptr ? foe->Gold : 0;
     const XpGrant grant = m_Hero.GrantXp(amount);
+    m_Inventory.GrantGold(gold);
     if (amount > 0)
         Note(std::to_string(amount) + " XP.");
+    if (gold > 0)
+        Note(std::to_string(gold) + " gold.");
     if (grant.LevelAfter > grant.LevelBefore)
         Note("Level " + std::to_string(grant.LevelAfter) + ".");
     if (!grant.ChoiceOpened)
@@ -221,7 +276,7 @@ void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
         }
     }
     if (result.Result == BattleResult::Victory)
-        AwardXp();
+        AwardVictory();
 }
 
 void AscensionApp::ResolveFoe()
@@ -242,6 +297,7 @@ void AscensionApp::BeginFight()
     m_Log.clear();
     m_StartError.clear();
     m_XpAwarded = false;
+    m_Camp = false;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
     const auto enemies = m_Data.GetEnemies();
@@ -255,6 +311,7 @@ void AscensionApp::BeginFight()
     if (m_Battle == nullptr)
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
 
+    m_Battle->SetGear(m_Inventory.GearBonus());
     std::string error;
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(),
                          enemies[static_cast<usize>(m_EnemyIndex)].Id, error)) {
@@ -282,6 +339,10 @@ void AscensionApp::OnStart()
         m_StartError = error;
         return;
     }
+    if (!m_Inventory.Start(m_Data, error)) {
+        m_StartError = error;
+        return;
+    }
     BeginFight();
 }
 
@@ -304,6 +365,20 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         if (count > 0)
             m_EnemyIndex = (m_EnemyIndex + 1) % count;
         BeginFight();
+        return;
+    }
+    if (event.key.scancode == SDL_SCANCODE_I) {
+        if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
+            Note("Finish the fight. Pell waits between battles.");
+            return;
+        }
+        m_Camp = !m_Camp;
+        m_CampColumn = 0;
+        m_CampRow = 0;
+        return;
+    }
+    if (m_Camp) {
+        HandleCamp(event.key.scancode);
         return;
     }
     if (m_Battle == nullptr || !m_StartError.empty())
@@ -336,15 +411,35 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
 
     const auto skills = m_Battle->PlayerSkillIds();
-    if (digit < 0 || digit >= kMaxHotkeys || digit >= static_cast<int>(skills.size()))
+    if (digit < 0 || digit >= kMaxHotkeys)
         return;
-    const std::string& skillId = skills[static_cast<usize>(digit)];
-    PushRanks(skillId);
-    const ActionResult used = m_Battle->UseSkill(skillId);
-    if (!used.Accepted)
-        PushRanks();
-    Note(used);
-    FinishAction(used, true);
+    if (digit < static_cast<int>(skills.size())) {
+        const std::string& skillId = skills[static_cast<usize>(digit)];
+        PushRanks(skillId);
+        const ActionResult used = m_Battle->UseSkill(skillId);
+        if (!used.Accepted)
+            PushRanks();
+        Note(used);
+        FinishAction(used, true);
+        ResolveFoe();
+        return;
+    }
+    const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
+    const int drink = digit - static_cast<int>(skills.size());
+    if (drink < 0 || drink >= static_cast<int>(drinks.size()))
+        return;
+    const i32 bagIndex = drinks[static_cast<usize>(drink)];
+    const ItemDef* item = m_Data.FindItem(m_Inventory.BagAt(bagIndex).Id);
+    if (item == nullptr)
+        return;
+    const ActionResult drunk = m_Battle->UseItem(*item);
+    if (drunk.Accepted && drunk.SkillId == item->Id) {
+        std::string why;
+        if (!m_Inventory.Take(bagIndex, why))
+            Note(why);
+    }
+    Note(drunk);
+    FinishAction(drunk, false);
     ResolveFoe();
 }
 
@@ -359,9 +454,13 @@ void AscensionApp::OnUpdate(f32 dt)
     m_Data.CheckForChanges(&error);
     if (m_Data.GetRevision() == revision)
         return;
-    if (!m_Hero.IsReady()) {
+    if (!m_Hero.IsReady() || !m_Inventory.IsReady()) {
         std::string why;
-        if (!m_Hero.Start(m_Data, why)) {
+        if (!m_Hero.IsReady() && !m_Hero.Start(m_Data, why)) {
+            m_StartError = why;
+            return;
+        }
+        if (!m_Inventory.IsReady() && !m_Inventory.Start(m_Data, why)) {
             m_StartError = why;
             return;
         }
@@ -374,10 +473,15 @@ void AscensionApp::OnUpdate(f32 dt)
         Note(why);
         return;
     }
+    if (!m_Inventory.ApplyData(why)) {
+        Note(why);
+        return;
+    }
     if (m_Battle == nullptr || !m_StartError.empty()) {
         BeginFight();
         return;
     }
+    m_Battle->SetGear(m_Inventory.GearBonus());
     if (!m_Battle->ApplyData(why)) {
         Note(why);
         return;
@@ -418,6 +522,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         return;
     }
 
+    if (m_Camp) {
+        DrawCamp(renderer, width, height);
+        renderer.End();
+        return;
+    }
+
     const CombatantState& player = m_Battle->Player();
     const CombatantState& enemy = m_Battle->Enemy();
     const bool playerTurn =
@@ -435,6 +545,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         levelLine += "max";
     else
         levelLine += std::to_string(m_Hero.Xp()) + "/" + std::to_string(m_Hero.NextLevelXp());
+    levelLine += "   GOLD " + std::to_string(m_Inventory.Gold());
     Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(levelLine), kFrame, 2);
     y += Emerald::DebugTextLineHeight(2) + 4.0f;
     Emerald::DrawDebugText(renderer, {left.x + 140.0f, y},
@@ -457,9 +568,14 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(playerStatus), kError, 1);
     }
 
-    y = left.y + 220.0f;
     const bool fightOver = m_Battle->Result() != BattleResult::Ongoing;
     const bool choosing = fightOver && m_Hero.ChoicePending();
+    y = left.y + 188.0f;
+    if (!choosing) {
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(WornLine(m_Data, m_Inventory)),
+                               kDim, 1, leftSize.x - 56.0f);
+    }
+    y = left.y + 210.0f;
     int shownSkills = 0;
     if (choosing) {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "CHOOSE A PATH", kFrame, 2);
@@ -501,6 +617,21 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             line += " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   ";
             line += std::to_string(skill->FocusCost) + " focus";
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), color, 2);
+            y += Emerald::DebugTextLineHeight(2) + 4.0f;
+        }
+        const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
+        for (usize drink = 0; drink < drinks.size(); ++drink) {
+            const int key = shownSkills + static_cast<int>(drink) + 1;
+            if (key > kMaxHotkeys)
+                break;
+            const ItemStack& stack = m_Inventory.BagAt(drinks[drink]);
+            const ItemDef* item = m_Data.FindItem(stack.Id);
+            if (item == nullptr)
+                continue;
+            const Emerald::Vec4 drinkColor = playerTurn && !fightOver ? kInk : kDim;
+            std::string drinkLine =
+                std::to_string(key) + "  " + item->Name + " x" + std::to_string(stack.Count);
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(drinkLine), drinkColor, 2);
             y += Emerald::DebugTextLineHeight(2) + 4.0f;
         }
         if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId())) {
@@ -610,20 +741,241 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += std::to_string(static_cast<int>(i) + 1) + " ";
                 help += evolution != nullptr ? evolution->Name : choices[i];
             }
-            help += "    R FIGHT    N NEXT FOE    ESC QUIT";
+            help += "    I PELL    R FIGHT    N NEXT FOE    ESC QUIT";
         } else {
             if (shownSkills == 1)
                 help = "1 SKILL    ";
             else if (shownSkills > 1)
                 help = "1-" + std::to_string(shownSkills) + " SKILL    ";
-            help += "SPACE WAIT    R FIGHT    N NEXT FOE    ESC QUIT    REV " +
-                    std::to_string(m_Data.GetRevision());
+            const int drinkKeys = static_cast<int>(m_Inventory.ConsumableSlots().size());
+            const int drinkFirst = shownSkills + 1;
+            const int drinkLast = shownSkills + drinkKeys;
+            if (drinkKeys > 0 && drinkFirst <= kMaxHotkeys) {
+                const int shownLast = drinkLast < kMaxHotkeys ? drinkLast : kMaxHotkeys;
+                if (drinkFirst == shownLast)
+                    help += std::to_string(drinkFirst) + " ITEM    ";
+                else
+                    help +=
+                        std::to_string(drinkFirst) + "-" + std::to_string(shownLast) + " ITEM    ";
+            }
+            help += "SPACE WAIT    ";
+            if (fightOver)
+                help += "I PELL    ";
+            help +=
+                "R FIGHT    N NEXT FOE    ESC QUIT    REV " + std::to_string(m_Data.GetRevision());
         }
         Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(help), kDim, 1,
                                width - 96.0f);
     }
 
     renderer.End();
+}
+
+std::string StockLine(const ItemDef& item)
+{
+    std::string line = item.Name + "   " + std::to_string(item.Value) + " gold";
+    if (item.Slot == GearSlot::Consumable) {
+        if (item.Heal > 0)
+            line += "   heal " + std::to_string(item.Heal);
+        if (item.Focus > 0)
+            line += "   focus +" + std::to_string(item.Focus);
+        return line;
+    }
+    const std::string bonus = BonusText(item.Bonus);
+    if (!bonus.empty())
+        line += "   " + bonus;
+    if (item.TwoHanded)
+        line += "   two handed";
+    return line;
+}
+
+void AscensionApp::ClampCamp()
+{
+    if (m_CampColumn < 0)
+        m_CampColumn = 0;
+    if (m_CampColumn > 1)
+        m_CampColumn = 1;
+    i32 rows = static_cast<i32>(m_Data.GetShop().Stock.size());
+    if (m_CampColumn == 0)
+        rows = 4 + m_Inventory.BagSlots();
+    if (rows < 1)
+        m_CampRow = 0;
+    else if (m_CampRow >= rows)
+        m_CampRow = rows - 1;
+    else if (m_CampRow < 0)
+        m_CampRow = 0;
+}
+
+void AscensionApp::HandleCamp(SDL_Scancode scancode)
+{
+    ClampCamp();
+    const ShopDef& shop = m_Data.GetShop();
+    if (scancode == SDL_SCANCODE_UP) {
+        --m_CampRow;
+        ClampCamp();
+        return;
+    }
+    if (scancode == SDL_SCANCODE_DOWN) {
+        ++m_CampRow;
+        ClampCamp();
+        return;
+    }
+    if (scancode == SDL_SCANCODE_LEFT || scancode == SDL_SCANCODE_RIGHT) {
+        m_CampColumn = m_CampColumn == 0 ? 1 : 0;
+        ClampCamp();
+        return;
+    }
+
+    const bool confirm = scancode == SDL_SCANCODE_E || scancode == SDL_SCANCODE_RETURN;
+    std::string why;
+    if (m_CampColumn == 1 && confirm) {
+        if (m_CampRow < 0 || m_CampRow >= static_cast<i32>(shop.Stock.size()))
+            return;
+        const std::string& stocked = shop.Stock[static_cast<usize>(m_CampRow)];
+        const ItemDef* goods = m_Data.FindItem(stocked);
+        if (goods == nullptr) {
+            Note("That item is gone.");
+            return;
+        }
+        if (!m_Inventory.Buy(stocked, why)) {
+            Note(why);
+            return;
+        }
+        Note("Bought " + goods->Name + " for " + std::to_string(goods->Value) + " gold.");
+        return;
+    }
+
+    if (m_CampColumn == 0 && m_CampRow >= 0 && m_CampRow < 4 &&
+        (confirm || scancode == SDL_SCANCODE_U)) {
+        const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
+                                      GearSlot::Accessory};
+        const GearSlot slot = wornSlots[m_CampRow];
+        const std::string worn = m_Inventory.Equipped(slot);
+        if (!m_Inventory.Unequip(slot, why)) {
+            Note(why);
+            return;
+        }
+        const ItemDef* piece = m_Data.FindItem(worn);
+        Note("Put " + std::string(piece != nullptr ? piece->Name : worn) + " in the bag.");
+        return;
+    }
+
+    if (m_CampColumn != 0 || m_CampRow < 4)
+        return;
+    const i32 bagIndex = m_CampRow - 4;
+    const ItemStack stack = m_Inventory.BagAt(bagIndex);
+    const ItemDef* held = stack.Empty() ? nullptr : m_Data.FindItem(stack.Id);
+    if (scancode == SDL_SCANCODE_X) {
+        if (!m_Inventory.Sell(bagIndex, why)) {
+            Note(why);
+            return;
+        }
+        const std::string sold = held != nullptr ? held->Name : stack.Id;
+        const i32 paid = held != nullptr ? SellPrice(shop, held->Value) : 0;
+        Note("Sold " + sold + " for " + std::to_string(paid) + " gold.");
+        return;
+    }
+    if (!confirm)
+        return;
+    if (!m_Inventory.Equip(bagIndex, why)) {
+        Note(why);
+        return;
+    }
+    const std::string wornName = held != nullptr ? held->Name : stack.Id;
+    Note("Equipped " + wornName + ".");
+}
+
+void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    const Emerald::Vec2 left{28.0f, 24.0f};
+    const Emerald::Vec2 leftSize{600.0f, height - 188.0f};
+    const Emerald::Vec2 right{648.0f, 24.0f};
+    const Emerald::Vec2 rightSize{width - 676.0f, height - 188.0f};
+    DrawPanel(renderer, left, leftSize);
+    DrawPanel(renderer, right, rightSize);
+    DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
+
+    ClampCamp();
+    const ShopDef& shop = m_Data.GetShop();
+    const bool bagSide = m_CampColumn == 0;
+    f32 y = left.y + 16.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(shop.Name), kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 2.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 24.0f, y},
+                           Upper(shop.Keeper + "    gold " + std::to_string(m_Inventory.Gold())),
+                           kInk, 2);
+    y += Emerald::DebugTextLineHeight(2) + 8.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, "WORN AND BAG", bagSide ? kFrame : kDim,
+                           2);
+    y += Emerald::DebugTextLineHeight(2) + 4.0f;
+
+    const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
+                                  GearSlot::Accessory};
+    const char* wornLabels[] = {"WEAPON", "OFFHAND", "ARMOR", "ACCESSORY"};
+    for (i32 row = 0; row < 4; ++row) {
+        const bool marked = bagSide && m_CampRow == row;
+        std::string rowText = marked ? "> " : "  ";
+        rowText += wornLabels[row];
+        rowText += "  ";
+        if (wornSlots[row] == GearSlot::Offhand && m_Inventory.OffhandBlocked()) {
+            rowText += "BOTH HANDS";
+        } else {
+            const std::string& worn = m_Inventory.Equipped(wornSlots[row]);
+            if (worn.empty())
+                rowText += "EMPTY";
+            else {
+                const ItemDef* piece = m_Data.FindItem(worn);
+                rowText += piece != nullptr ? piece->Name : worn;
+            }
+        }
+        Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(rowText),
+                               marked ? kFrame : kInk, 1, leftSize.x - 48.0f);
+        y += Emerald::DebugTextLineHeight(1) + 2.0f;
+    }
+    y += 6.0f;
+    for (i32 slot = 0; slot < m_Inventory.BagSlots(); ++slot) {
+        const bool marked = bagSide && m_CampRow == slot + 4;
+        const ItemStack& stack = m_Inventory.BagAt(slot);
+        std::string rowText = marked ? "> " : "  ";
+        if (stack.Empty()) {
+            rowText += "EMPTY";
+        } else {
+            const ItemDef* held = m_Data.FindItem(stack.Id);
+            rowText += held != nullptr ? held->Name : stack.Id;
+            rowText += " x" + std::to_string(stack.Count);
+            if (held != nullptr)
+                rowText += "   sell " + std::to_string(SellPrice(shop, held->Value));
+        }
+        Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(rowText),
+                               marked ? kFrame : kDim, 1, leftSize.x - 48.0f);
+        y += Emerald::DebugTextLineHeight(1) + 1.0f;
+    }
+
+    y = right.y + 16.0f;
+    Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, "STOCK", bagSide ? kDim : kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 8.0f;
+    for (i32 row = 0; row < static_cast<i32>(shop.Stock.size()); ++row) {
+        const bool marked = !bagSide && m_CampRow == row;
+        const ItemDef* goods = m_Data.FindItem(shop.Stock[static_cast<usize>(row)]);
+        std::string rowText = marked ? "> " : "  ";
+        if (goods == nullptr)
+            rowText += shop.Stock[static_cast<usize>(row)];
+        else
+            rowText += StockLine(*goods);
+        Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, Upper(rowText),
+                               marked ? kFrame : kInk, 1, rightSize.x - 48.0f);
+        y += Emerald::DebugTextLineHeight(1) + 6.0f;
+    }
+
+    Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, "OLD PELL'S PROVISIONS", kFrame, 2);
+    f32 logY = height - 96.0f;
+    for (const std::string& note : m_Log) {
+        Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(note), kDim, 1, width - 96.0f);
+        logY += Emerald::DebugTextLineHeight(1) + 1.0f;
+    }
+    const char* help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
+                       "X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT    ESC QUIT";
+    Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, help, kDim, 1, width - 96.0f);
 }
 
 } // namespace Ascension
