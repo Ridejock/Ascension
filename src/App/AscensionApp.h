@@ -12,8 +12,9 @@
 namespace Ascension {
 
 // One Fighter against one enemy. Wins grant XP and gold. Between fights, Old Pell's Provisions
-// buys and sells. At the evolution level the player picks Berserker or Guardian. Skill ranks
-// are counted here and shown on the skills. Consumables in the bag are extra turn actions.
+// buys and sells. At an evolution level the next fight waits until the player picks a path,
+// and that screen is the only place a build reset clears skill ranks. Consumables in the bag
+// are extra turn actions. C opens every stack; number keys still cover the ones that fit.
 class AscensionApp : public Emerald::Application {
 public:
     explicit AscensionApp(const Emerald::ApplicationSpec& spec);
@@ -32,6 +33,8 @@ private:
     void Note(std::string line);
     void Note(const ActionResult& result);
     void FinishAction(const ActionResult& result, bool playerActed);
+    void DrinkAt(i32 bagIndex);
+    void HandlePicker(SDL_Scancode scancode);
     void ClampCamp();
     void HandleCamp(SDL_Scancode scancode);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
@@ -48,6 +51,8 @@ private:
     bool m_Camp = false;
     i32 m_CampColumn = 0;
     i32 m_CampRow = 0;
+    bool m_Picking = false;
+    i32 m_PickRow = 0;
 };
 
 } // namespace Ascension

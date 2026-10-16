@@ -59,7 +59,21 @@ bool Inventory::ApplyData(std::string& error)
             stack.Count = 0;
         }
     }
+
     error.clear();
+    if (OffhandBlocked() && !m_Offhand.empty()) {
+        const std::string piece = m_Offhand;
+        std::vector<ItemStack> next = m_Bag;
+        bool dropped = false;
+        if (!GiveOrDropLast(next, piece, dropped)) {
+            error = "The bag had no room. The offhand piece was set down.";
+        } else {
+            m_Bag = std::move(next);
+            if (dropped)
+                error = "The bag was full. A stack was set down so the offhand could come off.";
+        }
+        m_Offhand.clear();
+    }
     return true;
 }
 
@@ -96,8 +110,11 @@ StatBlock Inventory::GearBonus() const
     StatBlock bonus;
     if (m_Data == nullptr)
         return bonus;
+    const bool blocked = OffhandBlocked();
     const std::string* worn[] = {&m_Weapon, &m_Offhand, &m_Armor, &m_Accessory};
     for (const std::string* id : worn) {
+        if (blocked && id == &m_Offhand)
+            continue;
         if (id->empty())
             continue;
         const ItemDef* item = m_Data->FindItem(*id);
@@ -165,6 +182,25 @@ bool Inventory::TryGive(std::vector<ItemStack>& bag, std::string_view id) const
         }
     }
     return false;
+}
+
+bool Inventory::GiveOrDropLast(std::vector<ItemStack>& bag, std::string_view id,
+                               bool& dropped) const
+{
+    if (TryGive(bag, id))
+        return true;
+    i32 last = -1;
+    for (i32 slot = static_cast<i32>(bag.size()) - 1; slot >= 0; --slot) {
+        if (!bag[static_cast<usize>(slot)].Empty()) {
+            last = slot;
+            break;
+        }
+    }
+    if (last < 0)
+        return false;
+    bag[static_cast<usize>(last)] = ItemStack{};
+    dropped = true;
+    return TryGive(bag, id);
 }
 
 bool Inventory::Buy(std::string_view itemId, std::string& error)
@@ -308,17 +344,16 @@ bool Inventory::Unequip(GearSlot slot, std::string& error)
         error = "nothing is worn there";
         return false;
     }
-    if (slot == GearSlot::Offhand && OffhandBlocked()) {
-        error = "a two-handed weapon fills that hand";
-        return false;
-    }
     const std::string worn = Equipped(slot);
     if (worn.empty()) {
         error = "nothing is worn there";
         return false;
     }
     std::vector<ItemStack> next = m_Bag;
-    if (!TryGive(next, worn)) {
+    bool dropped = false;
+    const bool stored =
+        slot == GearSlot::Offhand ? GiveOrDropLast(next, worn, dropped) : TryGive(next, worn);
+    if (!stored) {
         error = "the bag is full";
         return false;
     }
@@ -331,7 +366,10 @@ bool Inventory::Unequip(GearSlot slot, std::string& error)
         m_Armor.clear();
     else
         m_Accessory.clear();
-    error.clear();
+    if (dropped)
+        error = "The bag was full. A stack was set down so the offhand could come off.";
+    else
+        error.clear();
     return true;
 }
 

@@ -18,6 +18,8 @@ namespace {
 constexpr f32 kPollSeconds = 0.25f;
 constexpr usize kLogLines = 6;
 constexpr int kMaxHotkeys = 8;
+// Keys are fixed in this file. There is no binding table in the data.
+constexpr SDL_Scancode kItemKey = SDL_SCANCODE_C;
 
 constexpr Emerald::Vec4 kInk{0.93f, 0.91f, 0.84f, 1.0f};
 constexpr Emerald::Vec4 kDim{0.62f, 0.66f, 0.60f, 1.0f};
@@ -294,10 +296,18 @@ void AscensionApp::ResolveFoe()
 
 void AscensionApp::BeginFight()
 {
+    if (const char* block = m_Hero.NextFightBlock()) {
+        m_Camp = false;
+        m_Picking = false;
+        if (m_Log.empty() || m_Log.back() != block)
+            Note(block);
+        return;
+    }
     m_Log.clear();
     m_StartError.clear();
     m_XpAwarded = false;
     m_Camp = false;
+    m_Picking = false;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
     const auto enemies = m_Data.GetEnemies();
@@ -375,6 +385,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         m_Camp = !m_Camp;
         m_CampColumn = 0;
         m_CampRow = 0;
+        m_Picking = false;
         return;
     }
     if (m_Camp) {
@@ -384,14 +395,33 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     if (m_Battle == nullptr || !m_StartError.empty())
         return;
 
+    if (m_Picking) {
+        if (m_Battle->Result() != BattleResult::Ongoing ||
+            m_Battle->Actor() != CombatantSide::Player)
+            m_Picking = false;
+        else {
+            HandlePicker(event.key.scancode);
+            return;
+        }
+    }
+
     const int digit = static_cast<int>(event.key.scancode) - static_cast<int>(SDL_SCANCODE_1);
     if (m_Battle->Result() != BattleResult::Ongoing) {
         if (!m_Hero.ChoicePending() || digit < 0 || digit >= kMaxHotkeys)
             return;
         const std::vector<std::string> choices = m_Hero.ChoiceIds();
+        std::string why;
+        if (digit == static_cast<int>(choices.size())) {
+            if (!m_Hero.ResetBuild(why)) {
+                Note(why);
+                return;
+            }
+            Note("Build reset. Skill ranks cleared.");
+            PushRanks();
+            return;
+        }
         if (digit >= static_cast<int>(choices.size()))
             return;
-        std::string why;
         if (!m_Hero.Choose(choices[static_cast<usize>(digit)], why)) {
             Note(why);
             return;
@@ -399,6 +429,20 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
         Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
         PushRanks();
+        return;
+    }
+
+    if (event.key.scancode == kItemKey) {
+        if (m_Battle->Actor() != CombatantSide::Player) {
+            Note("Wait for your turn.");
+            return;
+        }
+        if (m_Inventory.ConsumableSlots().empty()) {
+            Note("The bag has no drinks.");
+            return;
+        }
+        m_Picking = true;
+        m_PickRow = 0;
         return;
     }
 
@@ -428,19 +472,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     const int drink = digit - static_cast<int>(skills.size());
     if (drink < 0 || drink >= static_cast<int>(drinks.size()))
         return;
-    const i32 bagIndex = drinks[static_cast<usize>(drink)];
-    const ItemDef* item = m_Data.FindItem(m_Inventory.BagAt(bagIndex).Id);
-    if (item == nullptr)
-        return;
-    const ActionResult drunk = m_Battle->UseItem(*item);
-    if (drunk.Accepted && drunk.SkillId == item->Id) {
-        std::string why;
-        if (!m_Inventory.Take(bagIndex, why))
-            Note(why);
-    }
-    Note(drunk);
-    FinishAction(drunk, false);
-    ResolveFoe();
+    DrinkAt(drinks[static_cast<usize>(drink)]);
 }
 
 void AscensionApp::OnUpdate(f32 dt)
@@ -477,6 +509,8 @@ void AscensionApp::OnUpdate(f32 dt)
         Note(why);
         return;
     }
+    if (!why.empty())
+        Note(why);
     if (m_Battle == nullptr || !m_StartError.empty()) {
         BeginFight();
         return;
@@ -579,7 +613,9 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     int shownSkills = 0;
     if (choosing) {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "CHOOSE A PATH", kFrame, 2);
-        y += Emerald::DebugTextLineHeight(2) + 8.0f;
+        y += Emerald::DebugTextLineHeight(2) + 2.0f;
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "THE NEXT FIGHT WAITS.", kInk, 1);
+        y += Emerald::DebugTextLineHeight(1) + 8.0f;
         const std::vector<std::string> choices = m_Hero.ChoiceIds();
         for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
             const ClassDef* evolution = m_Data.FindClass(choices[i]);
@@ -595,6 +631,44 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
                                    Upper(AddsLine(m_Data, *evolution)), kInk, 1);
             y += Emerald::DebugTextLineHeight(1) + 8.0f;
+        }
+        if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
+            const std::string resetName =
+                std::to_string(static_cast<int>(choices.size()) + 1) + "  RESET BUILD";
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, resetName, kInk, 2);
+            y += Emerald::DebugTextLineHeight(2) + 2.0f;
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                   "CLEARS SKILL RANKS. THE PATH STAYS OPEN.", kDim, 1,
+                                   leftSize.x - 56.0f);
+        }
+    } else if (m_Picking) {
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "DRINKS", kFrame, 2);
+        y += Emerald::DebugTextLineHeight(2) + 4.0f;
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                               "E DRINKS THE MARKED ROW. 1-8 DRINK THAT ROW.", kDim, 1,
+                               leftSize.x - 56.0f);
+        y += Emerald::DebugTextLineHeight(1) + 6.0f;
+        const std::vector<i32> picked = m_Inventory.ConsumableSlots();
+        for (usize drink = 0; drink < picked.size(); ++drink) {
+            const bool marked = static_cast<i32>(drink) == m_PickRow;
+            const ItemStack& stack = m_Inventory.BagAt(picked[drink]);
+            const ItemDef* item = m_Data.FindItem(stack.Id);
+            std::string rowText = marked ? "> " : "  ";
+            if (drink < static_cast<usize>(kMaxHotkeys))
+                rowText += std::to_string(static_cast<int>(drink) + 1) + "  ";
+            if (item == nullptr) {
+                rowText += stack.Id;
+            } else {
+                rowText += item->Name;
+                rowText += " x" + std::to_string(stack.Count);
+                if (item->Heal > 0)
+                    rowText += "   heal " + std::to_string(item->Heal);
+                if (item->Focus > 0)
+                    rowText += "   focus +" + std::to_string(item->Focus);
+            }
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(rowText),
+                                   marked ? kFrame : kInk, 1, leftSize.x - 56.0f);
+            y += Emerald::DebugTextLineHeight(1) + 2.0f;
         }
     } else {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
@@ -620,6 +694,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             y += Emerald::DebugTextLineHeight(2) + 4.0f;
         }
         const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
+        int shownDrinks = 0;
         for (usize drink = 0; drink < drinks.size(); ++drink) {
             const int key = shownSkills + static_cast<int>(drink) + 1;
             if (key > kMaxHotkeys)
@@ -628,11 +703,16 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             const ItemDef* item = m_Data.FindItem(stack.Id);
             if (item == nullptr)
                 continue;
+            ++shownDrinks;
             const Emerald::Vec4 drinkColor = playerTurn && !fightOver ? kInk : kDim;
             std::string drinkLine =
                 std::to_string(key) + "  " + item->Name + " x" + std::to_string(stack.Count);
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(drinkLine), drinkColor, 2);
             y += Emerald::DebugTextLineHeight(2) + 4.0f;
+        }
+        if (shownDrinks < static_cast<int>(drinks.size())) {
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "C  EVERY DRINK", kFrame, 1);
+            y += Emerald::DebugTextLineHeight(1) + 2.0f;
         }
         if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId())) {
             for (const SkillDef* passive : m_Data.Passives(*heroClass)) {
@@ -711,6 +791,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     Emerald::Vec4 bannerColor = kFrame;
     if (choosing) {
         banner = "CHOOSE A PATH";
+    } else if (m_Picking) {
+        banner = "CHOOSE AN ITEM";
     } else if (m_Battle->Result() == BattleResult::Victory) {
         banner = "VICTORY";
     } else if (m_Battle->Result() == BattleResult::Defeat) {
@@ -732,7 +814,9 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                kError, 1, width - 96.0f);
     } else {
         std::string help;
-        if (choosing) {
+        if (m_Picking && !choosing) {
+            help = "UP DOWN MOVE    1-8 DRINK    E DRINK    C CLOSE";
+        } else if (choosing) {
             const std::vector<std::string> choices = m_Hero.ChoiceIds();
             for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
                 const ClassDef* evolution = m_Data.FindClass(choices[i]);
@@ -741,7 +825,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += std::to_string(static_cast<int>(i) + 1) + " ";
                 help += evolution != nullptr ? evolution->Name : choices[i];
             }
-            help += "    I PELL    R FIGHT    N NEXT FOE    ESC QUIT";
+            if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
+                help += "    ";
+                help += std::to_string(static_cast<int>(choices.size()) + 1);
+                help += " RESET BUILD";
+            }
+            help += "    I PELL    ESC QUIT";
         } else {
             if (shownSkills == 1)
                 help = "1 SKILL    ";
@@ -758,6 +847,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                     help +=
                         std::to_string(drinkFirst) + "-" + std::to_string(shownLast) + " ITEM    ";
             }
+            if (!fightOver)
+                help += "C ITEMS    ";
             help += "SPACE WAIT    ";
             if (fightOver)
                 help += "I PELL    ";
@@ -787,6 +878,66 @@ std::string StockLine(const ItemDef& item)
     if (item.TwoHanded)
         line += "   two handed";
     return line;
+}
+
+void AscensionApp::DrinkAt(i32 bagIndex)
+{
+    if (m_Battle == nullptr)
+        return;
+    const ItemStack& stack = m_Inventory.BagAt(bagIndex);
+    const ItemDef* item = m_Data.FindItem(stack.Id);
+    if (item == nullptr)
+        return;
+    const ActionResult drunk = m_Battle->UseItem(*item);
+    if (drunk.Accepted && drunk.SkillId == item->Id) {
+        std::string why;
+        if (!m_Inventory.Take(bagIndex, why))
+            Note(why);
+    }
+    Note(drunk);
+    FinishAction(drunk, false);
+    ResolveFoe();
+    if (drunk.Accepted)
+        m_Picking = false;
+}
+
+void AscensionApp::HandlePicker(SDL_Scancode scancode)
+{
+    const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
+    if (drinks.empty()) {
+        m_Picking = false;
+        Note("The bag has no drinks.");
+        return;
+    }
+    if (m_PickRow < 0)
+        m_PickRow = 0;
+    if (m_PickRow >= static_cast<i32>(drinks.size()))
+        m_PickRow = static_cast<i32>(drinks.size()) - 1;
+
+    if (scancode == kItemKey) {
+        m_Picking = false;
+        return;
+    }
+    if (scancode == SDL_SCANCODE_UP) {
+        if (m_PickRow > 0)
+            --m_PickRow;
+        return;
+    }
+    if (scancode == SDL_SCANCODE_DOWN) {
+        if (m_PickRow + 1 < static_cast<i32>(drinks.size()))
+            ++m_PickRow;
+        return;
+    }
+
+    const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
+    i32 pick = -1;
+    if (digit >= 0 && digit < kMaxHotkeys && digit < static_cast<int>(drinks.size()))
+        pick = digit;
+    if (scancode == SDL_SCANCODE_E || scancode == SDL_SCANCODE_RETURN)
+        pick = m_PickRow;
+    if (pick < 0)
+        return;
+    DrinkAt(drinks[static_cast<usize>(pick)]);
 }
 
 void AscensionApp::ClampCamp()
@@ -857,6 +1008,8 @@ void AscensionApp::HandleCamp(SDL_Scancode scancode)
         }
         const ItemDef* piece = m_Data.FindItem(worn);
         Note("Put " + std::string(piece != nullptr ? piece->Name : worn) + " in the bag.");
+        if (!why.empty())
+            Note(why);
         return;
     }
 
@@ -975,6 +1128,10 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     }
     const char* help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
                        "X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT    ESC QUIT";
+    if (m_Hero.ChoicePending()) {
+        help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
+               "X SELL    U UNEQUIP    I CLOSE    CHOOSE A PATH BEFORE THE NEXT FIGHT    ESC QUIT";
+    }
     Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, help, kDim, 1, width - 96.0f);
 }
 

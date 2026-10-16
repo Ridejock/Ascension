@@ -303,6 +303,50 @@ void TestHotReload()
     CheckHas(why, "berserker", "the failure names the missing class");
 }
 
+void TestChoiceBlocksTheNextFight()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    Hero hero = StartHero(data);
+    hero.NoteUse("strike");
+    hero.NoteUse("strike");
+    hero.NoteUse("strike");
+    Check(hero.UsesOf("strike") == 3 && hero.RankOf("strike") == 2, "three uses are rank 2");
+
+    std::string why;
+    Check(!hero.ResetBuild(why), "a reset is refused before a path is offered");
+    CheckHas(why, "only when a path is offered", "the refusal says a path has to be offered");
+    Check(hero.UsesOf("strike") == 3 && hero.NextFightBlock() == nullptr,
+          "the refused reset keeps the uses, and level 1 can still fight");
+    Check(hero.ApplyData(why) && hero.UsesOf("strike") == 3, "a data reload does not clear ranks");
+
+    Check(hero.GrantXp(60).LevelAfter == 5 && hero.ChoicePending() && hero.ClassId() == "fighter",
+          "level 5 opens the choice and stays a fighter");
+    const char* block = hero.NextFightBlock();
+    Check(block != nullptr && std::string(block).find("next fight") != std::string::npos,
+          "the next fight waits until a path is chosen");
+    Check(hero.ResetBuild(why) && why.empty(), "the open choice can reset the build");
+    Check(hero.UsesOf("strike") == 0 && hero.RankOf("strike") == 1 && hero.Xp() == 60 &&
+              hero.Level() == 5 && hero.ClassId() == "fighter" && hero.ChoicePending(),
+          "the reset clears ranks and leaves the level, the class, and the choice");
+
+    Check(hero.GrantXp(30).LevelAfter == 6 && hero.ClassId() == "fighter" && hero.ChoicePending() &&
+              hero.NextFightBlock() != nullptr,
+          "level 6 without a path is still blocked");
+    hero.NoteUse("strike");
+    Check(hero.ResetBuild(why) && hero.UsesOf("strike") == 0 && hero.ChoicePending(),
+          "the choice still open at level 6 can reset again");
+
+    Check(hero.Choose("guardian", why), "guardian is chosen from the open choice");
+    hero.NoteUse("strike");
+    Check(!hero.ResetBuild(why), "after the path, a reset is refused");
+    CheckHas(why, "only when a path is offered",
+             "the refusal is the same once the choice is closed");
+    Check(hero.UsesOf("strike") == 1 && hero.NextFightBlock() == nullptr &&
+              hero.ClassId() == "guardian",
+          "the use after the choice stays, and the next fight is allowed");
+}
+
 } // namespace
 
 int main()
@@ -312,6 +356,7 @@ int main()
     TestRankPower();
     TestRankLandsOnTheBlow();
     TestHotReload();
+    TestChoiceBlocksTheNextFight();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

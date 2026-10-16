@@ -152,6 +152,8 @@ void TestEquipAndHands()
           "the sword and the shield are back in the bag");
     Check(!bag.Equip(FindStack(bag, "oak_shield"), why), "the shield cannot be worn with the axe");
     CheckHas(why, "two-handed", "the failure names the two-handed weapon");
+    Check(!bag.Unequip(GearSlot::Offhand, why), "an empty offhand has nothing to take off");
+    CheckHas(why, "nothing is worn", "taking the offhand off is not blocked by the axe");
 
     Check(bag.Equip(FindStack(bag, "oathkeepers_plate"), why), "the plate equips");
     Check(bag.Equip(FindStack(bag, "wolfhide_charm"), why), "the charm equips");
@@ -181,6 +183,8 @@ void TestFullBag()
             filled = false;
     }
     Check(filled && CountOf(bag, "minor_potion") == 60, "sixty potions fill twelve stacks of five");
+    Check(static_cast<i32>(bag.ConsumableSlots().size()) == 12,
+          "every consumable stack is listed, past the eight number keys");
     Check(!bag.Buy("rusty_sword", why), "a full bag refuses another item");
     CheckHas(why, "the bag is full", "the failure says the bag is full");
     Check(bag.Gold() == 1000 - 600, "the refused sword did not spend gold");
@@ -219,6 +223,79 @@ void TestHotReload()
           "a reload of the worn sword updates its bonus");
 }
 
+void WearSwordAndShield(Inventory& bag)
+{
+    std::string why;
+    bag.GrantGold(80);
+    Check(bag.Buy("rusty_sword", why) && bag.Buy("oak_shield", why),
+          "the sword and the shield are bought");
+    Check(bag.Equip(FindStack(bag, "rusty_sword"), why) &&
+              bag.Equip(FindStack(bag, "oak_shield"), why),
+          "the sword and the shield are worn");
+    Check(bag.Equipped(GearSlot::Offhand) == "oak_shield" && bag.GearBonus().Defense == 2,
+          "the shield adds 2 defense beside the sword");
+}
+
+void TestTwoHandedReload()
+{
+    TempCopy copy;
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "copied sample loads");
+
+    Inventory open;
+    Inventory manual;
+    Inventory packed;
+    std::string why;
+    Check(open.Start(data, why) && manual.Start(data, why) && packed.Start(data, why),
+          "three bags start from the copy");
+    WearSwordAndShield(open);
+    WearSwordAndShield(manual);
+    WearSwordAndShield(packed);
+    Check(open.Buy("minor_potion", why) && CountOf(open, "minor_potion") == 1,
+          "the open bag keeps one potion beside the worn gear");
+    packed.GrantGold(600);
+    bool filled = true;
+    for (i32 bought = 0; bought < 60; ++bought) {
+        if (!packed.Buy("minor_potion", why))
+            filled = false;
+    }
+    Check(filled && CountOf(packed, "minor_potion") == 60, "the packed bag has no empty slot");
+
+    ReplaceInFile(copy.Path / "items.json", "\"id\": \"rusty_sword\"",
+                  "\"id\": \"rusty_sword\", \"twoHanded\": true");
+    Reload(data);
+    const ItemDef* sword = data.FindItem("rusty_sword");
+    Check(sword != nullptr && sword->TwoHanded, "the reloaded sword is two-handed");
+
+    Check(open.Equipped(GearSlot::Offhand) == "oak_shield" && open.GearBonus().Defense == 0,
+          "the shield's defense stops as soon as the sword is two-handed");
+    Check(open.ApplyData(why) && why.empty(), "a spare slot takes the shield with no note");
+    Check(open.Equipped(GearSlot::Offhand).empty() &&
+              open.Equipped(GearSlot::Weapon) == "rusty_sword" &&
+              FindStack(open, "oak_shield") >= 0 && CountOf(open, "minor_potion") == 1,
+          "the shield moves into the bag and the potion stays");
+    Check(open.OffhandBlocked() && open.GearBonus().Defense == 0, "the offhand stays blocked");
+    Check(!open.Equip(FindStack(open, "oak_shield"), why), "the shield still cannot be worn");
+    CheckHas(why, "two-handed", "wearing the shield is still refused");
+
+    Check(manual.Unequip(GearSlot::Offhand, why),
+          "the offhand comes off while the sword is two-handed");
+    Check(why.find("two-handed") == std::string::npos, "that unequip is not refused as two-handed");
+    Check(manual.Equipped(GearSlot::Offhand).empty() && FindStack(manual, "oak_shield") >= 0,
+          "the shield is back in the bag");
+    Check(!manual.Unequip(GearSlot::Offhand, why),
+          "the empty offhand has nothing left to take off");
+    CheckHas(why, "nothing is worn", "the empty offhand says nothing is worn");
+
+    Check(packed.GearBonus().Defense == 0, "a full bag still loses the shield's defense");
+    Check(packed.ApplyData(why), "apply stows the shield out of a full bag");
+    CheckHas(why, "bag was full", "the note says a stack was set down");
+    Check(packed.Equipped(GearSlot::Offhand).empty() && FindStack(packed, "oak_shield") >= 0 &&
+              CountOf(packed, "minor_potion") == 55 && packed.GearBonus().Defense == 0,
+          "one stack of five is set down and the shield takes that slot");
+}
+
 } // namespace
 
 int main()
@@ -227,6 +304,7 @@ int main()
     TestEquipAndHands();
     TestFullBag();
     TestHotReload();
+    TestTwoHandedReload();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
