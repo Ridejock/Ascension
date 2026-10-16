@@ -888,19 +888,19 @@ bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
             error = "'usesPerRank' must list from 1 to 98 thresholds";
             return false;
         }
-        i32 previous = 0;
+        i32 priorThreshold = 0;
         for (const Json& entry : *uses) {
             i32 threshold = 0;
             if (!ReadInt(entry, 1, 999, threshold, error)) {
                 error = "'usesPerRank' " + error;
                 return false;
             }
-            if (threshold <= previous) {
+            if (threshold <= priorThreshold) {
                 error = "'usesPerRank' must be strictly increasing";
                 return false;
             }
             rules.UsesPerRank.push_back(threshold);
-            previous = threshold;
+            priorThreshold = threshold;
         }
     } else {
         error = "'usesPerRank' must be an integer or a list of integers";
