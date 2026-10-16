@@ -1,6 +1,6 @@
 # Ascension
 
-A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox: one level-1 Fighter against one enemy. The window draws that fight with rectangles and Emerald's built-in debug font.
+A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox. A Fighter earns XP, ranks skills by using them, and at level 5 chooses Berserker or Guardian. The window draws that fight with rectangles and Emerald's built-in debug font.
 
 Emerald is fetched by CMake and pinned to commit `f45d5a65ab03fe533f2d0f37282602991da67165` (see `CMakeLists.txt`). To use a local checkout instead:
 
@@ -58,7 +58,7 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ctest --test-dir build/debug --output-on-failure
 ```
 
-`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. Neither test opens a window.
+`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. None of them open a window.
 
 ## Data
 
@@ -72,14 +72,19 @@ ctest --test-dir build/debug --output-on-failure
 | `enemies.json` | Enemies (level, stats, skills, experience, gold) |
 | `items.json` | Gear (weapon, armor, accessory) and the stats it adds |
 | `combat.json` | Health per vitality, minimum damage, and the attack and defense divisors |
+| `progress.json` | Total XP to reach each level, uses per skill rank, and power added per rank |
 
-Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. Class change is not in the fight yet.
+Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. The choice opens when the hero's level reaches an evolution's `evolveLevel` (5 in the sample), and the number keys follow the order of those evolutions in `classes.json`.
+
+`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` once. The Wolf is 8, the Bandit is 18, and the Cairn Guard is 40, so those three wins in order (8 + 18 + 40 = 66) reach level 5 and open the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
+
+A skill starts at rank 1. Every `usesPerRank` uses (2 in the sample) raise it by one, up to `maxSkillRank`. Each rank above 1 adds `powerPerRank` to that skill's damage and healing. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
 
 A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. Those divisors are 1 in the sample, so the stat is added and subtracted whole. Brace's `power` is the percent of the next hit that is ignored. Max health is vitality times `hpPerVitality`. Focus is the focus stat, and it does not come back until the fight restarts. Higher agility acts first each round; a tie lets the Fighter go first. The order comes from a turn model (`AgilityRoundModel`), so a later active-time model can replace it without rewriting damage.
 
-The public headers (`include/Ascension/Data/` and `include/Ascension/Combat/`) are plain structs and the battle. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
+The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, and the hero's career. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
 
-While the game is running it checks the data files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay and the error is shown. The revision in the corner goes up on every successful reload. The fight keeps its wounds and whose turn it is. Edit Strike's `power` in `data/skills.json`, or `hpPerVitality` in `data/combat.json`, save, and the next blow uses the new numbers.
+While the game is running it checks the data files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay and the error is shown. The revision in the corner goes up on every successful reload. The fight keeps its wounds and whose turn it is. XP and skill uses are kept too: editing the curve or `usesPerRank` updates the level and the ranks on the next successful reload, and class growth applies on the next fight. Edit Strike's `power` in `data/skills.json`, or `hpPerVitality` in `data/combat.json`, save, and the next blow uses the new numbers.
 
 ## Combat
 
@@ -87,13 +92,15 @@ Run the game. The Wolf is faster, so it bites first. Then:
 
 | Key | Action |
 |---|---|
-| `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind |
+| `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind (up to `6` after evolving) |
 | Space | Wait, and let the enemy act |
-| `R` | Restart this fight |
+| `R` | Fight this enemy again. Level, XP, and skill ranks stay |
 | `N` | The next enemy in `enemies.json` (Wolf, Bandit, Cairn Guard) |
 | Escape | Quit |
 
-Waiting against the Wolf loses. Strike three times and it dies. `N` restarts on the next foe.
+After a win that reaches level 5 the skill list is replaced by the choice. `1` is Berserker (strength and the Bloodlust passive). `2` is Guardian (defense and the Bulwark passive). The new skills show immediately. `R` starts the next fight as that class.
+
+Waiting against the Wolf loses. Strike three times and it dies (8 XP, level 2). `N` restarts on the next foe.
 
 ## Package
 

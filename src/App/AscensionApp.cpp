@@ -16,8 +16,8 @@ namespace Ascension {
 namespace {
 
 constexpr f32 kPollSeconds = 0.25f;
-constexpr i32 kSandboxLevel = 1;
 constexpr usize kLogLines = 6;
+constexpr int kMaxHotkeys = 8;
 
 constexpr Emerald::Vec4 kInk{0.93f, 0.91f, 0.84f, 1.0f};
 constexpr Emerald::Vec4 kDim{0.62f, 0.66f, 0.60f, 1.0f};
@@ -84,6 +84,41 @@ std::string PoolText(std::string_view label, i32 current, i32 maximum)
     return std::string(label) + " " + std::to_string(current) + "/" + std::to_string(maximum);
 }
 
+std::string AddsLine(const Database& data, const ClassDef& evolution)
+{
+    std::string line = "Adds";
+    for (const std::string& id : evolution.Skills) {
+        const SkillDef* skill = data.FindSkill(id);
+        line += " ";
+        line += skill != nullptr ? skill->Name : id;
+    }
+    if (!evolution.Passives.empty()) {
+        line += " (";
+        bool first = true;
+        for (const std::string& id : evolution.Passives) {
+            if (!first)
+                line += " ";
+            first = false;
+            const SkillDef* skill = data.FindSkill(id);
+            line += skill != nullptr ? skill->Name : id;
+        }
+        line += ")";
+    }
+    return line;
+}
+
+std::string PassiveLine(const Database& data, const SkillDef& passive)
+{
+    std::string stat = passive.Stat;
+    if (const StatDef* named = data.FindStat(passive.Stat))
+        stat = named->Name;
+    std::string line = "Passive " + passive.Name + " " + stat + " ";
+    if (passive.Amount > 0)
+        line += "+";
+    line += std::to_string(passive.Amount);
+    return line;
+}
+
 } // namespace
 
 AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec)
@@ -105,21 +140,80 @@ void AscensionApp::Note(const ActionResult& result)
     Note(result.Text);
 }
 
+void AscensionApp::PushRanks()
+{
+    if (m_Battle == nullptr || !m_Hero.IsReady())
+        return;
+    std::vector<SkillRank> ranks;
+    for (const std::string& id : m_Hero.SkillIds()) {
+        SkillRank row;
+        row.Id = id;
+        row.Rank = m_Hero.RankOf(id);
+        ranks.push_back(std::move(row));
+    }
+    m_Battle->SetPlayerRanks(m_Data.GetProgress().PowerPerRank, std::move(ranks));
+}
+
+void AscensionApp::AwardXp()
+{
+    if (m_XpAwarded || m_Battle == nullptr || !m_Hero.IsReady())
+        return;
+    m_XpAwarded = true;
+    const EnemyDef* foe = m_Data.FindEnemy(m_Battle->Enemy().Id);
+    const i32 amount = foe != nullptr ? foe->Experience : 0;
+    const XpGrant grant = m_Hero.GrantXp(amount);
+    if (amount > 0)
+        Note(std::to_string(amount) + " XP.");
+    if (grant.LevelAfter > grant.LevelBefore)
+        Note("Level " + std::to_string(grant.LevelAfter) + ".");
+    if (!grant.ChoiceOpened)
+        return;
+    std::string line = "Choose a path.";
+    const std::vector<std::string> choices = m_Hero.ChoiceIds();
+    for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+        const ClassDef* evolution = m_Data.FindClass(choices[i]);
+        line += " " + std::to_string(static_cast<int>(i) + 1) + " ";
+        line += evolution != nullptr ? evolution->Name : choices[i];
+        line += ".";
+    }
+    Note(line);
+}
+
+void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
+{
+    if (playerActed && result.Accepted && !result.SkillId.empty()) {
+        const i32 before = m_Hero.RankOf(result.SkillId);
+        const i32 after = m_Hero.NoteUse(result.SkillId);
+        PushRanks();
+        if (after > before) {
+            const SkillDef* skill = m_Data.FindSkill(result.SkillId);
+            const std::string name = skill != nullptr ? skill->Name : result.SkillId;
+            Note(name + " reaches rank " + std::to_string(after) + ".");
+        }
+    }
+    if (result.Result == BattleResult::Victory)
+        AwardXp();
+}
+
 void AscensionApp::ResolveFoe()
 {
     if (m_Battle == nullptr)
         return;
     for (i32 step = 0; step < 4 && m_Battle->Result() == BattleResult::Ongoing &&
                        m_Battle->Actor() == CombatantSide::Enemy;
-         ++step)
-        Note(m_Battle->EnemyAct());
+         ++step) {
+        const ActionResult act = m_Battle->EnemyAct();
+        Note(act);
+        FinishAction(act, false);
+    }
 }
 
 void AscensionApp::BeginFight()
 {
     m_Log.clear();
     m_StartError.clear();
-    if (!m_Data.IsLoaded())
+    m_XpAwarded = false;
+    if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
     const auto enemies = m_Data.GetEnemies();
     if (enemies.empty()) {
@@ -133,11 +227,12 @@ void AscensionApp::BeginFight()
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
 
     std::string error;
-    if (!m_Battle->Start("fighter", kSandboxLevel, enemies[static_cast<usize>(m_EnemyIndex)].Id,
-                         error)) {
+    if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(),
+                         enemies[static_cast<usize>(m_EnemyIndex)].Id, error)) {
         m_StartError = error;
         return;
     }
+    PushRanks();
     if (m_Battle->Result() != BattleResult::Ongoing) {
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
         return;
@@ -151,7 +246,13 @@ void AscensionApp::BeginFight()
 
 void AscensionApp::OnStart()
 {
-    m_Data.Load();
+    if (!m_Data.Load())
+        return;
+    std::string error;
+    if (!m_Hero.Start(m_Data, error)) {
+        m_StartError = error;
+        return;
+    }
     BeginFight();
 }
 
@@ -176,21 +277,41 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         BeginFight();
         return;
     }
-    if (m_Battle == nullptr || !m_StartError.empty() ||
-        m_Battle->Result() != BattleResult::Ongoing)
+    if (m_Battle == nullptr || !m_StartError.empty())
         return;
 
+    const int digit = static_cast<int>(event.key.scancode) - static_cast<int>(SDL_SCANCODE_1);
+    if (m_Battle->Result() != BattleResult::Ongoing) {
+        if (!m_Hero.ChoicePending() || digit < 0 || digit >= kMaxHotkeys)
+            return;
+        const std::vector<std::string> choices = m_Hero.ChoiceIds();
+        if (digit >= static_cast<int>(choices.size()))
+            return;
+        std::string why;
+        if (!m_Hero.Choose(choices[static_cast<usize>(digit)], why)) {
+            Note(why);
+            return;
+        }
+        const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
+        Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
+        PushRanks();
+        return;
+    }
+
     if (event.key.scancode == SDL_SCANCODE_SPACE) {
-        Note(m_Battle->Wait());
+        const ActionResult waited = m_Battle->Wait();
+        Note(waited);
+        FinishAction(waited, true);
         ResolveFoe();
         return;
     }
 
-    const int digit = static_cast<int>(event.key.scancode) - static_cast<int>(SDL_SCANCODE_1);
     const auto skills = m_Battle->PlayerSkillIds();
-    if (digit < 0 || digit >= static_cast<int>(skills.size()) || digit > 3)
+    if (digit < 0 || digit >= kMaxHotkeys || digit >= static_cast<int>(skills.size()))
         return;
-    Note(m_Battle->UseSkill(skills[static_cast<usize>(digit)]));
+    const ActionResult used = m_Battle->UseSkill(skills[static_cast<usize>(digit)]);
+    Note(used);
+    FinishAction(used, true);
     ResolveFoe();
 }
 
@@ -205,15 +326,32 @@ void AscensionApp::OnUpdate(f32 dt)
     m_Data.CheckForChanges(&error);
     if (m_Data.GetRevision() == revision)
         return;
+    if (!m_Hero.IsReady()) {
+        std::string error;
+        if (!m_Hero.Start(m_Data, error)) {
+            m_StartError = error;
+            return;
+        }
+        BeginFight();
+        return;
+    }
+    const i32 levelBefore = m_Hero.Level();
+    std::string why;
+    if (!m_Hero.ApplyData(why)) {
+        Note(why);
+        return;
+    }
     if (m_Battle == nullptr || !m_StartError.empty()) {
         BeginFight();
         return;
     }
-    std::string why;
     if (!m_Battle->ApplyData(why)) {
         Note(why);
         return;
     }
+    PushRanks();
+    if (m_Hero.Level() != levelBefore)
+        Note("Level " + std::to_string(m_Hero.Level()) + ".");
     Note("Data reloaded.");
 }
 
@@ -254,8 +392,18 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     DrawFigure(renderer, {left.x + 28.0f, left.y + 28.0f}, 16.0f, kFigure);
     f32 y = left.y + 24.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(player.Name), kInk, 3);
+    std::string title = player.Name;
+    if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
+        title = heroClass->Name;
+    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(title), kInk, 3);
     y += Emerald::DebugTextLineHeight(3) + 8.0f;
+    std::string levelLine = "Level " + std::to_string(m_Hero.Level()) + "   XP ";
+    if (m_Hero.AtMaxLevel())
+        levelLine += "max";
+    else
+        levelLine += std::to_string(m_Hero.Xp()) + "/" + std::to_string(m_Hero.NextLevelXp());
+    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(levelLine), kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 4.0f;
     Emerald::DrawDebugText(renderer, {left.x + 140.0f, y},
                            Upper(PoolText("HP", player.Hp, player.MaxHp)), kInk, 2);
     y += Emerald::DebugTextLineHeight(2) + 4.0f;
@@ -272,18 +420,58 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     DrawBar(renderer, {left.x + 140.0f, y}, 280.0f, playerFocus, kFocus);
 
     y = left.y + 200.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
-    y += Emerald::DebugTextLineHeight(2) + 8.0f;
-    const auto skillIds = m_Battle->PlayerSkillIds();
-    for (usize i = 0; i < skillIds.size() && i < 4; ++i) {
-        const SkillDef* skill = m_Data.FindSkill(skillIds[i]);
-        if (skill == nullptr)
-            continue;
-        const bool ready = playerTurn && player.Focus >= skill->FocusCost;
-        std::string line = std::to_string(static_cast<int>(i) + 1) + "  " + skill->Name;
-        line += "   " + std::to_string(skill->FocusCost) + " FOCUS";
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), ready ? kInk : kDim, 2);
-        y += Emerald::DebugTextLineHeight(2) + 4.0f;
+    const bool fightOver = m_Battle->Result() != BattleResult::Ongoing;
+    const bool choosing = fightOver && m_Hero.ChoicePending();
+    int shownSkills = 0;
+    if (choosing) {
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "CHOOSE A PATH", kFrame, 2);
+        y += Emerald::DebugTextLineHeight(2) + 8.0f;
+        const std::vector<std::string> choices = m_Hero.ChoiceIds();
+        for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+            const ClassDef* evolution = m_Data.FindClass(choices[i]);
+            if (evolution == nullptr)
+                continue;
+            const std::string name =
+                std::to_string(static_cast<int>(i) + 1) + "  " + evolution->Name;
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
+            y += Emerald::DebugTextLineHeight(2) + 2.0f;
+            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(evolution->Description),
+                                       kDim, 1, leftSize.x - 56.0f);
+            y += 2.0f;
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                   Upper(AddsLine(m_Data, *evolution)), kInk, 1);
+            y += Emerald::DebugTextLineHeight(1) + 8.0f;
+        }
+    } else {
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
+        y += Emerald::DebugTextLineHeight(2) + 8.0f;
+        std::vector<std::string> skillIds;
+        if (fightOver)
+            skillIds = m_Hero.SkillIds();
+        else {
+            for (const std::string& id : m_Battle->PlayerSkillIds())
+                skillIds.push_back(id);
+        }
+        for (usize i = 0; i < skillIds.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+            const SkillDef* skill = m_Data.FindSkill(skillIds[i]);
+            if (skill == nullptr)
+                continue;
+            ++shownSkills;
+            const bool ready = playerTurn && player.Focus >= skill->FocusCost;
+            const Emerald::Vec4 color = fightOver || ready ? kInk : kDim;
+            std::string line = std::to_string(static_cast<int>(i) + 1) + "  " + skill->Name;
+            line += " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   ";
+            line += std::to_string(skill->FocusCost) + " focus";
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), color, 2);
+            y += Emerald::DebugTextLineHeight(2) + 4.0f;
+        }
+        if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId())) {
+            for (const SkillDef* passive : m_Data.Passives(*heroClass)) {
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                       Upper(PassiveLine(m_Data, *passive)), kFrame, 1);
+                y += Emerald::DebugTextLineHeight(1) + 2.0f;
+            }
+        }
     }
 
     DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
@@ -314,7 +502,9 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     std::string banner = "YOUR TURN";
     Emerald::Vec4 bannerColor = kFrame;
-    if (m_Battle->Result() == BattleResult::Victory) {
+    if (choosing) {
+        banner = "CHOOSE A PATH";
+    } else if (m_Battle->Result() == BattleResult::Victory) {
         banner = "VICTORY";
     } else if (m_Battle->Result() == BattleResult::Defeat) {
         banner = "DEFEAT";
@@ -334,10 +524,27 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(m_Data.GetLastError()),
                                kError, 1, width - 96.0f);
     } else {
-        const std::string help =
-            "1-4 SKILL    SPACE WAIT    R RESTART    N NEXT FOE    ESC QUIT    REV " +
-            std::to_string(m_Data.GetRevision());
-        Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, help, kDim, 1, width - 96.0f);
+        std::string help;
+        if (choosing) {
+            const std::vector<std::string> choices = m_Hero.ChoiceIds();
+            for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* evolution = m_Data.FindClass(choices[i]);
+                if (!help.empty())
+                    help += "    ";
+                help += std::to_string(static_cast<int>(i) + 1) + " ";
+                help += evolution != nullptr ? evolution->Name : choices[i];
+            }
+            help += "    R FIGHT    N NEXT FOE    ESC QUIT";
+        } else {
+            if (shownSkills == 1)
+                help = "1 SKILL    ";
+            else if (shownSkills > 1)
+                help = "1-" + std::to_string(shownSkills) + " SKILL    ";
+            help += "SPACE WAIT    R FIGHT    N NEXT FOE    ESC QUIT    REV " +
+                    std::to_string(m_Data.GetRevision());
+        }
+        Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(help), kDim, 1,
+                               width - 96.0f);
     }
 
     renderer.End();

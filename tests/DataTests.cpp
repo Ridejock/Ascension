@@ -87,6 +87,12 @@ void TestSample()
           "combat.json supplies the damage rules");
     Check(data.GetEnemies().size() == 3, "three enemies");
     Check(data.GetItems().size() == 4, "four items");
+    const ProgressRules& progress = data.GetProgress();
+    Check(progress.XpToReach.size() == 10 && progress.XpToReach[0] == 0 &&
+              progress.XpToReach[1] == 8,
+          "progress.json has ten steps and level 2 at 8 XP");
+    Check(progress.UsesPerRank == 2 && progress.MaxSkillRank == 5 && progress.PowerPerRank == 1,
+          "ranks climb every two uses and add one power");
 
     const ClassDef* fighter = MustClass(data, "fighter");
     const ClassDef* berserker = MustClass(data, "berserker");
@@ -328,6 +334,21 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "enemies.json", "\"bite\"", "\"bloodlust\"");
         TestRejected(copy.Path, "enemies.json", "passive", "enemies list active skills");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "progress.json", "\"usesPerRank\": 2", "\"usesPerRank\": 0");
+        TestRejected(copy.Path, "progress.json", "usesPerRank", "uses per rank must be at least 1");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "progress.json", "20, 40", "20, 20");
+        TestRejected(copy.Path, "progress.json", "greater than", "the XP curve must keep rising");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "progress.json", "[0, 8", "[1, 8");
+        TestRejected(copy.Path, "progress.json", "level 1", "level 1 XP must be 0");
     }
 }
 

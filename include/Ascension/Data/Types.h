@@ -83,6 +83,63 @@ struct CombatRules {
     i32 DefenseDenominator = 1;
 };
 
+// The integers from progress.json. XpToReach[n] is the total XP required to be level n+1, and
+// the first entry is 0. Rank starts at 1 and goes up by one every UsesPerRank uses of that
+// skill, stopping at MaxSkillRank. Each rank above 1 adds PowerPerRank to that skill's power
+// (damage and healing, not a guard's percent).
+struct ProgressRules {
+    std::vector<i32> XpToReach;
+    i32 UsesPerRank = 1;
+    i32 MaxSkillRank = 1;
+    i32 PowerPerRank = 0;
+};
+
+// 1 when the table is empty. XP below the first step stays at 1, and XP past the last step
+// stays at the last level.
+[[nodiscard]] inline i32 LevelForXp(const ProgressRules& rules, i32 xp)
+{
+    i32 level = 1;
+    if (xp < 0)
+        xp = 0;
+    for (usize i = 1; i < rules.XpToReach.size(); ++i) {
+        if (xp < rules.XpToReach[i])
+            break;
+        level = static_cast<i32>(i) + 1;
+    }
+    return level;
+}
+
+// Total XP required to reach `level + 1`. At max level this is the last step, which the hero
+// has already passed.
+[[nodiscard]] inline i32 NextLevelXp(const ProgressRules& rules, i32 level)
+{
+    if (rules.XpToReach.empty())
+        return 0;
+    if (level < 1)
+        level = 1;
+    if (static_cast<usize>(level) >= rules.XpToReach.size())
+        return rules.XpToReach.back();
+    return rules.XpToReach[static_cast<usize>(level)];
+}
+
+[[nodiscard]] inline bool AtMaxLevel(const ProgressRules& rules, i32 level)
+{
+    return rules.XpToReach.empty() || level >= static_cast<i32>(rules.XpToReach.size());
+}
+
+// Rank 1 at 0 uses. UsesPerRank uses move it up by one, capped at MaxSkillRank.
+[[nodiscard]] inline i32 RankForUses(const ProgressRules& rules, i32 uses)
+{
+    if (uses < 0)
+        uses = 0;
+    const i32 step = rules.UsesPerRank < 1 ? 1 : rules.UsesPerRank;
+    i32 rank = 1 + uses / step;
+    const i32 cap = rules.MaxSkillRank < 1 ? 1 : rules.MaxSkillRank;
+    if (rank > cap)
+        rank = cap;
+    return rank;
+}
+
 // A class. A base class (EvolvesFrom empty) has level-1 Stats and per-level Growth. An evolution
 // names the base it comes from and the level it is offered at; Bonus is added on top of the
 // parent's stats at that level, and Growth applies to levels after that. Skills and Passives are
