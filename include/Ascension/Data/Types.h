@@ -50,14 +50,16 @@ enum class SkillKind : u8 { Active, Passive };
 // Who an active skill lands on. Passives leave this at Enemy; it is not used.
 enum class SkillTarget : u8 { Self, Enemy, AllEnemies };
 
-// What an active skill does. The numbers (power, scaling, focus) come from the skill; the
-// damage formula that combines them with defense comes from CombatRules.
-enum class SkillEffect : u8 { Damage, Guard, Heal, Empower, Taunt };
+// What an active skill does. The numbers come from the skill; the damage formula that combines
+// them with defense comes from CombatRules. Riposte guards the next hit and reflects part of
+// what that guard stopped. Harden adds Power defense for Duration turns.
+enum class SkillEffect : u8 { Damage, Guard, Heal, Empower, Riposte, Harden };
 
-// What a passive does. Stat adds Amount to Stat. Bloodied adds Power percent of the attack
-// term at empty health, and nothing at full health. Ward shaves Power percent off every
-// incoming blow. Battle reads these; it does not special-case a passive id.
-enum class PassiveEffect : u8 { Stat, Bloodied, Ward };
+// What a passive does. Stat adds Amount to Stat. Bloodied adds Amount to Stat for each
+// StepPercent of missing health, capped at Max. Bulwark adds Amount to Stat and grants
+// FocusGain focus whenever a guard or block reduces an incoming hit. Battle reads these; it
+// does not special-case a passive id.
+enum class PassiveEffect : u8 { Stat, Bloodied, Bulwark };
 
 struct SkillDef {
     std::string Id;
@@ -67,23 +69,47 @@ struct SkillDef {
     SkillEffect Effect = SkillEffect::Damage;
     SkillTarget Target = SkillTarget::Enemy;
     PassiveEffect Passive = PassiveEffect::Stat;
-    i32 Power = 0;       // damage/heal added to the scaling stat; guard and taunt are a percent
-                         // (0-100); empower is the percent added to the next blow; bloodied is
-                         // the percent added to the attack term at empty health; ward is the
-                         // percent shaved off every incoming blow
-    i32 FocusCost = 0;   // active
-    i32 Refund = 0;      // taunt: focus paid back when the next hit actually lands
-    std::string Scaling; // active: a stat id the power scales with, or empty
-    std::string Stat;    // stat passive: the stat it changes
-    i32 Amount = 0;      // stat passive: added to that stat
+    i32 Power = 0;          // damage and heal added to the scaling stat; a guard percent (0-100);
+                            // riposte's flat contribution to the reflected blow; harden's defense
+    i32 FocusCost = 0;      // active
+    i32 Guard = 0;          // riposte: percent of the next hit that is stopped (0-100)
+    i32 Reflect = 0;        // riposte: percent of the stopped damage sent back (0-100)
+    i32 Windup = 0;         // damage: telegraph turns before the hit. 0 hits now
+    i32 Duration = 0;       // harden: turns the defense bonus lasts
+    i32 StatusEvery = 0;    // with Status: apply on every Nth use. 0 or 1 applies every use
+    std::string Status;     // status id applied when the skill is used
+    std::string StunWindup; // status id applied when the target is winding up an attack
+    std::string Scaling;    // active: a stat id the power scales with, or empty
+    std::string Stat;       // passive: the stat it changes
+    i32 Amount = 0;         // stat passive, and each bloodied or bulwark step
+    i32 StepPercent = 0;    // bloodied: missing-health percent per step
+    i32 Max = 0;            // bloodied: the bonus stops here
+    i32 FocusGain = 0;      // bulwark: focus gained when a guard reduces a hit
+};
+
+// A named condition from statuses.json. Zero fields are unused. Stacks up to MaxStacks, and
+// TurnsLeft starts at Turns. DamagePerTurn is dealt at the start of the afflicted unit's turn,
+// once per stack. DamageTakenPercent and DamageDealtPercent add (25 and 25 is 50). SkipAction
+// spends the unit's action.
+struct StatusDef {
+    std::string Id;
+    std::string Name;
+    std::string Description;
+    i32 DamagePerTurn = 0;
+    i32 Turns = 1;
+    i32 MaxStacks = 1;
+    i32 DamageTakenPercent = 0;
+    i32 DamageDealtPercent = 0;
+    bool SkipAction = false;
 };
 
 // The integers from combat.json. Damage, before a guard, is
 //   max(MinDamage, power + scalingStat * AttackNumerator / AttackDenominator
 //                      - defense * DefenseNumerator / DefenseDenominator)
-// and an empower percent and a bloodied percent are applied to the attack term first. Heal
-// uses the same attack term with no defense. Max health is vitality times HpPerVitality.
-// Denominators are at least 1.
+// and an empower percent is applied to the attack term first. Heal uses the same attack term
+// with no defense. Max health is vitality times HpPerVitality. The hero's focus pool is
+// FocusBase plus their focus stat; it rises by FocusPerTurn at the start of their turn and by
+// another FocusOnWait when they wait. Denominators are at least 1.
 struct CombatRules {
     i32 HpPerVitality = 1;
     i32 MinDamage = 0;
@@ -91,15 +117,19 @@ struct CombatRules {
     i32 AttackDenominator = 1;
     i32 DefenseNumerator = 1;
     i32 DefenseDenominator = 1;
+    i32 FocusBase = 0;
+    i32 FocusPerTurn = 0;
+    i32 FocusOnWait = 0;
 };
 
 // The integers from progress.json. XpToReach[n] is the total XP required to be level n+1, and
-// the first entry is 0. Rank starts at 1 and goes up by one every UsesPerRank uses of that
-// skill, stopping at MaxSkillRank. Each rank above 1 adds PowerPerRank to that skill's power
-// (damage and healing, not a guard's percent).
+// the first entry is 0. Rank starts at 1 and stops at MaxSkillRank. UsesPerRank is either one
+// integer (a flat step: rank = 1 + uses / step) or a longer strictly increasing list of the
+// total uses required to reach rank 2, rank 3, and so on. Each rank above 1 adds PowerPerRank
+// to that skill's power (damage, healing, and a riposte's flat reflect, not a guard's percent).
 struct ProgressRules {
     std::vector<i32> XpToReach;
-    i32 UsesPerRank = 1;
+    std::vector<i32> UsesPerRank;
     i32 MaxSkillRank = 1;
     i32 PowerPerRank = 0;
 };
@@ -137,13 +167,25 @@ struct ProgressRules {
     return rules.XpToReach.empty() || level >= static_cast<i32>(rules.XpToReach.size());
 }
 
-// Rank 1 at 0 uses. UsesPerRank uses move it up by one, capped at MaxSkillRank.
+// Rank 1 at 0 uses, capped at MaxSkillRank. One UsesPerRank entry (or none) is a flat step.
+// A longer list is the cumulative uses required for rank 2, then rank 3, and so on.
 [[nodiscard]] inline i32 RankForUses(const ProgressRules& rules, i32 uses)
 {
     if (uses < 0)
         uses = 0;
-    const i32 step = rules.UsesPerRank < 1 ? 1 : rules.UsesPerRank;
-    i32 rank = 1 + uses / step;
+    i32 rank = 1;
+    if (rules.UsesPerRank.size() <= 1) {
+        i32 step = 1;
+        if (!rules.UsesPerRank.empty() && rules.UsesPerRank[0] > 0)
+            step = rules.UsesPerRank[0];
+        rank = 1 + uses / step;
+    } else {
+        for (const i32 threshold : rules.UsesPerRank) {
+            if (uses < threshold)
+                break;
+            ++rank;
+        }
+    }
     const i32 cap = rules.MaxSkillRank < 1 ? 1 : rules.MaxSkillRank;
     if (rank > cap)
         rank = cap;
@@ -178,7 +220,12 @@ struct EnemyDef {
     std::vector<std::string> Skills; // active skill ids
     i32 Experience = 0;
     i32 Gold = 0;
-    bool Boss = false; // the roster has one boss, last in the sample
+    bool Boss = false;                // the roster has one boss, last in the sample
+    std::vector<std::string> Pattern; // repeating skill ids; empty picks the strongest hit
+    i32 PhaseAtPercent = 0;           // 0 means one phase. Otherwise phase 2 begins at this health
+    std::string PhaseStatus;          // applied once when phase 2 begins
+    i32 ShardDamage = 0;              // phase-2 hit that stands in for a second enemy
+    i32 ShardEvery = 0;               // enemy actions in phase 2 between shard telegraphs
 };
 
 enum class GearSlot : u8 { Weapon, Armor, Accessory };
@@ -272,8 +319,10 @@ inline const char* ToString(SkillEffect effect)
         return "heal";
     if (effect == SkillEffect::Empower)
         return "empower";
-    if (effect == SkillEffect::Taunt)
-        return "taunt";
+    if (effect == SkillEffect::Riposte)
+        return "riposte";
+    if (effect == SkillEffect::Harden)
+        return "harden";
     return "damage";
 }
 
@@ -281,8 +330,8 @@ inline const char* ToString(PassiveEffect effect)
 {
     if (effect == PassiveEffect::Bloodied)
         return "bloodied";
-    if (effect == PassiveEffect::Ward)
-        return "ward";
+    if (effect == PassiveEffect::Bulwark)
+        return "bulwark";
     return "stat";
 }
 

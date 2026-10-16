@@ -120,9 +120,13 @@ void TestCurveAndChoice()
     Check(bandit.LevelBefore == 2 && bandit.LevelAfter == 3 && hero.Xp() == 26 &&
               !hero.ChoicePending(),
           "the bandit's 18 XP reaches level 3");
-    const XpGrant cairn = hero.GrantXp(40);
-    Check(cairn.LevelBefore == 3 && cairn.LevelAfter == 5 && cairn.ChoiceOpened && hero.Xp() == 66,
-          "the cairn guard skips level 4 and opens the choice");
+    const XpGrant moth = hero.GrantXp(14);
+    Check(moth.LevelBefore == 3 && moth.LevelAfter == 4 && hero.Xp() == 40 && !hero.ChoicePending(),
+          "the tomb moth's 14 XP reaches level 4");
+    const XpGrant archer = hero.GrantXp(22);
+    Check(archer.LevelBefore == 4 && archer.LevelAfter == 5 && archer.ChoiceOpened &&
+              hero.Xp() == 62,
+          "the bone archer's 22 XP opens the level-5 choice");
     const std::vector<std::string> choices = hero.ChoiceIds();
     Check(choices.size() == 2 && choices[0] == "berserker" && choices[1] == "guardian",
           "the number keys follow classes.json");
@@ -149,10 +153,19 @@ void TestRanksAndEvolution()
     Database data(kSample);
     Check(data.Load(), "sample data loads");
     Hero hero = StartHero(data);
+    Check(RankForUses(data.GetProgress(), 2) == 1 && RankForUses(data.GetProgress(), 3) == 2 &&
+              RankForUses(data.GetProgress(), 6) == 3 && RankForUses(data.GetProgress(), 10) == 4 &&
+              RankForUses(data.GetProgress(), 15) == 5 && RankForUses(data.GetProgress(), 40) == 5,
+          "the array is the total uses for rank 2, 3, 4 and 5");
+    ProgressRules flat = data.GetProgress();
+    flat.UsesPerRank = {2};
+    Check(RankForUses(flat, 2) == 2 && RankForUses(flat, 4) == 3,
+          "a single usesPerRank integer is still a flat step");
     Check(hero.NoteUse("strike") == 1 && hero.RankOf("strike") == 1,
           "the first use stays at rank 1");
-    Check(hero.NoteUse("strike") == 2 && hero.UsesOf("strike") == 2,
-          "the second use reaches rank 2");
+    Check(hero.NoteUse("strike") == 1 && hero.UsesOf("strike") == 2, "two uses are still rank 1");
+    Check(hero.NoteUse("strike") == 2 && hero.UsesOf("strike") == 3,
+          "the third use reaches rank 2");
     Check(hero.NoteUse("missing") == 1 && hero.UsesOf("missing") == 0,
           "an unknown skill is not practiced");
 
@@ -163,7 +176,7 @@ void TestRanksAndEvolution()
     Check(hero.Choose("berserker", why) && why.empty(), "berserker is the first path");
     Check(!hero.ChoicePending() && hero.ClassId() == "berserker", "the choice closes after a pick");
     Check(!hero.Choose("guardian", why), "a second pick is refused");
-    Check(hero.UsesOf("strike") == 2 && hero.RankOf("strike") == 2 && hero.RankOf("rage") == 1,
+    Check(hero.UsesOf("strike") == 3 && hero.RankOf("strike") == 2 && hero.RankOf("rage") == 1,
           "practiced uses stay, and the new skills start at rank 1");
     const std::vector<std::string> skills = hero.SkillIds();
     Check(skills.size() == 6 && Contains(skills, "strike") && Contains(skills, "rage") &&
@@ -173,7 +186,7 @@ void TestRanksAndEvolution()
     Battle rage(data, std::make_unique<AgilityRoundModel>());
     Check(rage.Start(hero.ClassId(), hero.Level(), "wolf", why), "a berserker fight starts");
     Check(rage.Player().Stats.Strength == 20 && rage.Player().MaxHp == 144 &&
-              rage.Player().WardPercent == 0,
+              rage.Player().BulwarkFocus == 0,
           "berserker health is vitality times 4, and bloodlust is not flat strength");
 
     Hero guard = StartHero(data);
@@ -181,9 +194,9 @@ void TestRanksAndEvolution()
     Check(guard.Choose("guardian", why), "guardian is the second path");
     Battle wall(data, std::make_unique<AgilityRoundModel>());
     Check(wall.Start(guard.ClassId(), guard.Level(), "wolf", why), "a guardian fight starts");
-    Check(wall.Player().Stats.Defense == 15 && wall.Player().MaxHp == 148 &&
-              wall.Player().WardPercent == 20,
-          "bulwark is a 20 percent ward, and health follows the guardian's vitality");
+    Check(wall.Player().Stats.Defense == 18 && wall.Player().MaxHp == 148 &&
+              wall.Player().BulwarkFocus == 1,
+          "bulwark adds 3 defense, and health follows the guardian's vitality");
 }
 
 void TestRankPower()
@@ -193,6 +206,7 @@ void TestRankPower()
     Hero hero = StartHero(data);
     hero.NoteUse("strike");
     hero.NoteUse("strike");
+    hero.NoteUse("strike");
 
     Battle battle(data, std::make_unique<AgilityRoundModel>());
     std::string error;
@@ -200,16 +214,16 @@ void TestRankPower()
     battle.SetPlayerRanks(data.GetProgress().PowerPerRank, RanksOf(hero));
     Check(battle.EnemyAct().Accepted, "the wolf still acts first");
     const ActionResult ranked = battle.UseSkill("strike");
-    Check(ranked.Damage == 17 && ranked.SkillId == "strike", "rank 2 adds one power to strike");
+    Check(ranked.Damage == 18 && ranked.SkillId == "strike", "rank 2 adds two power to strike");
 
     Battle harder(data, std::make_unique<AgilityRoundModel>());
     Check(harder.Start("fighter", 1, "wolf", error), "the rank-3 fight starts");
     SkillRank row;
     row.Id = "strike";
     row.Rank = 3;
-    harder.SetPlayerRanks(1, {row});
+    harder.SetPlayerRanks(2, {row});
     harder.EnemyAct();
-    Check(harder.UseSkill("strike").Damage == 18, "rank 3 adds two power to strike");
+    Check(harder.UseSkill("strike").Damage == 20, "rank 3 adds four power to strike");
 
     Battle plain(data, std::make_unique<AgilityRoundModel>());
     Check(plain.Start("fighter", 1, "wolf", error), "a fight with no rank bonus starts");
@@ -236,8 +250,9 @@ void TestRankLandsOnTheBlow()
     Check(fresh.RankAfterUse("strike") == 1, "the first use does not reach rank 2");
 
     Hero hero = StartHero(data);
-    Check(hero.NoteUse("strike") == 1 && hero.RankOf("strike") == 1, "one use is still rank 1");
-    Check(hero.RankAfterUse("strike") == 2, "the next use is the one that reaches rank 2");
+    Check(hero.NoteUse("strike") == 1 && hero.NoteUse("strike") == 1 && hero.RankOf("strike") == 1,
+          "two uses are still rank 1");
+    Check(hero.RankAfterUse("strike") == 2, "the third use is the one that reaches rank 2");
 
     Battle battle(data, std::make_unique<AgilityRoundModel>());
     std::string error;
@@ -249,7 +264,7 @@ void TestRankLandsOnTheBlow()
     }
     battle.SetPlayerRanks(data.GetProgress().PowerPerRank, std::move(ranks));
     Check(battle.EnemyAct().Accepted, "the wolf acts first");
-    Check(battle.UseSkill("strike").Damage == 17,
+    Check(battle.UseSkill("strike").Damage == 18,
           "the use that reaches rank 2 deals rank-2 damage");
     Check(hero.RankOf("strike") == 1, "the stored rank waits until the use is counted");
     Check(hero.NoteUse("strike") == 2, "counting the blow stores rank 2");
@@ -264,7 +279,8 @@ void TestHotReload()
     hero.GrantXp(8);
     hero.NoteUse("strike");
     hero.NoteUse("strike");
-    Check(hero.Level() == 2 && hero.RankOf("strike") == 2, "8 XP is level 2 at rank 2");
+    Check(hero.Level() == 2 && hero.RankOf("strike") == 1,
+          "8 XP is level 2 and two uses stay rank 1");
 
     ReplaceInFile(copy.Path / "progress.json", "0, 8, 20", "0, 12, 20");
     Reload(data);
@@ -272,7 +288,7 @@ void TestHotReload()
     Check(hero.ApplyData(why) && hero.Xp() == 8 && hero.Level() == 1,
           "a steeper curve drops the level and keeps the XP");
 
-    ReplaceInFile(copy.Path / "progress.json", "\"usesPerRank\": 2", "\"usesPerRank\": 1");
+    ReplaceInFile(copy.Path / "progress.json", "[3, 6, 10, 15]", "1");
     Reload(data);
     Check(hero.ApplyData(why) && hero.UsesOf("strike") == 2 && hero.RankOf("strike") == 3,
           "one use per rank turns two uses into rank 3");

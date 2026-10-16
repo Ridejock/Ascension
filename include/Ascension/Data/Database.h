@@ -17,8 +17,9 @@ struct DataError {
     std::string Message;
 };
 
-// The JSON files in a data directory (stats, skills, classes, enemies, items, combat, progress),
-// checked against each other. Load once, then call CheckForChanges from the frame loop: a file that
+// The JSON files in a data directory (stats, skills, statuses, classes, enemies, items, combat,
+// progress), checked against each other. Load once, then call CheckForChanges from the frame loop:
+// a file that
 // changed, and then stayed unchanged for one more check, is read again. A failed read keeps the
 // previous definitions and sets GetLastError().
 //
@@ -48,6 +49,7 @@ public:
 
     [[nodiscard]] std::span<const StatDef> GetStats() const { return m_Stats; }
     [[nodiscard]] std::span<const SkillDef> GetSkills() const { return m_Skills; }
+    [[nodiscard]] std::span<const StatusDef> GetStatuses() const { return m_Statuses; }
     [[nodiscard]] std::span<const ClassDef> GetClasses() const { return m_Classes; }
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
@@ -56,6 +58,7 @@ public:
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
+    [[nodiscard]] const StatusDef* FindStatus(std::string_view id) const;
     [[nodiscard]] const ClassDef* FindClass(std::string_view id) const;
     [[nodiscard]] const EnemyDef* FindEnemy(std::string_view id) const;
     [[nodiscard]] const ItemDef* FindItem(std::string_view id) const;
@@ -89,6 +92,7 @@ private:
     std::vector<FileWatch> m_Watches;
     std::vector<StatDef> m_Stats;
     std::vector<SkillDef> m_Skills;
+    std::vector<StatusDef> m_Statuses;
     std::vector<ClassDef> m_Classes;
     std::vector<EnemyDef> m_Enemies;
     std::vector<ItemDef> m_Items;

@@ -14,10 +14,19 @@ enum class CombatantSide : u8 { Player, Enemy };
 
 enum class BattleResult : u8 { Ongoing, Victory, Defeat };
 
-// One side of a fight. Stat passives are already in Stats. WardPercent stays for the whole
-// fight. Guard and empower each last for one incoming or outgoing blow. WeakenPercent is the
-// reduction on this side's next damaging blow. RefundOnHit is focus gained when a blow actually
-// deals damage to this side.
+// One applied status. TurnsLeft counts down at the start of this unit's turn, after the
+// per-turn damage and after a skip is noticed.
+struct StatusInstance {
+    std::string Id;
+    i32 Stacks = 1;
+    i32 TurnsLeft = 0;
+};
+
+// One side of a fight. Stat passives are already in Stats. Guard, riposte, and empower each
+// last for one incoming or outgoing blow. BonusDefense is a harden that ticks down on this
+// unit's turn. BulwarkFocus is paid when a guard reduces a hit. WindupSkill is set while an
+// attack is being telegraphed; WindupLeft is the telegraph actions still owed after the one
+// on screen.
 struct CombatantState {
     std::string Id;
     std::string Name;
@@ -28,9 +37,21 @@ struct CombatantState {
     i32 MaxFocus = 0;
     i32 GuardPercent = 0;
     i32 EmpowerPercent = 0;
-    i32 WardPercent = 0;
-    i32 WeakenPercent = 0;
-    i32 RefundOnHit = 0;
+    i32 ReflectPercent = 0;
+    i32 ReflectFlat = 0;
+    i32 BonusDefense = 0;
+    i32 BonusDefenseTurns = 0;
+    i32 BulwarkFocus = 0;
+    std::vector<StatusInstance> Statuses;
+    std::string WindupSkill;
+    i32 WindupLeft = 0;
+    i32 WindupTotal = 0;
+    i32 PatternStep = 0;
+    i32 Phase = 1;
+    i32 PhaseTurns = 0;
+    bool ShardDue = false;
+    std::vector<std::string> SkillUseIds;
+    std::vector<i32> SkillUseCounts;
 
     [[nodiscard]] bool Alive() const { return Hp > 0; }
 };
@@ -44,29 +65,48 @@ struct ActionResult {
     BattleResult Result = BattleResult::Ongoing;
 };
 
-// One practiced skill. Rank 1 is untrained. Battle adds (Rank - 1) * powerPerRank to damage
-// and healing for the player only; a guard's percent is left alone.
+// One practiced skill. Rank 1 is untrained. Battle adds (Rank - 1) * powerPerRank to damage,
+// healing, and a riposte's flat reflect for the player only. A guard's percent is left alone.
 struct SkillRank {
     std::string Id;
     i32 Rank = 1;
 };
 
-// The attack term after empower, minus defense, then raised to MinDamage. Guard is applied
-// afterwards by GuardedDamage, which may reduce the hit to zero.
+// The attack term after empower, minus defense, then raised to MinDamage. Guard, dealt and
+// taken percents, and a riposte are applied afterwards.
 struct StrikeQuery {
     i32 Power = 0;
     i32 ScalingStat = 0;
     i32 Defense = 0;
     i32 EmpowerPercent = 0;
-    i32 BloodiedPercent = 0;
 };
 
-// Power percent at empty health, and 0 at full health. Linear in the health that is gone.
-[[nodiscard]] i32 BloodiedPercent(i32 power, i32 hp, i32 maxHp);
+// +amount strength (or whatever the passive names) per stepPercent of missing health, capped
+// at maxBonus. 0 at full health.
+[[nodiscard]] i32 BloodlustBonus(i32 amount, i32 stepPercent, i32 maxBonus, i32 hp, i32 maxHp);
+
+// value * percent / 100. A percent of 100 leaves value alone. Negative value becomes 0.
+[[nodiscard]] i32 ScalePercent(i32 value, i32 percent);
 
 [[nodiscard]] i32 StrikeDamage(const StrikeQuery& hit, const CombatRules& rules);
 [[nodiscard]] i32 HealAmount(i32 power, i32 scalingStat, const CombatRules& rules);
 [[nodiscard]] i32 GuardedDamage(i32 damage, i32 guardPercent);
+
+// blocked * reflectPercent / 100 + flat. The flat is the riposte's power plus its scaling stat.
+[[nodiscard]] i32 ReflectedDamage(i32 blocked, i32 reflectPercent, i32 flat);
+
+// Reapply refreshes the duration and adds a stack up to MaxStacks.
+void ApplyStatus(CombatantState& who, const StatusDef& status);
+
+struct StatusTick {
+    i32 Bleed = 0;
+    bool Skip = false;
+};
+
+// Deals bleed from the stacks that are up, notes a skip, then counts every status down.
+[[nodiscard]] StatusTick TickStatuses(CombatantState& who, std::span<const StatusDef> catalog);
+[[nodiscard]] i32 StatusDealtPercent(const CombatantState& who, std::span<const StatusDef> catalog);
+[[nodiscard]] i32 StatusTakenPercent(const CombatantState& who, std::span<const StatusDef> catalog);
 
 // Who acts next. Battle never sorts agility itself: a later active-time or cooldown model
 // replaces this and the damage math stays put.
@@ -99,6 +139,8 @@ private:
 
 // One player class against one enemy. Skill ids are kept, not pointers, so a hot reload can
 // replace the database underneath. Pass TurnModel in; AgilityRoundModel is the sandbox default.
+// Multi-enemy fights (a real rubble-shard add) are a later slice: phase 2's shard is one extra
+// hit on this enemy's turn.
 class Battle {
 public:
     Battle(const Database& data, std::unique_ptr<TurnModel> turns);
@@ -124,19 +166,40 @@ public:
     // reads health can be checked at a known total.
     void SetPlayerHp(i32 hp);
 
+    // Clamps to 0..MaxHp. 0 ends the fight. Crossing the enemy's phase threshold starts phase 2.
+    void SetEnemyHp(i32 hp);
+
+    // Applies a status from statuses.json. Tests use this for Exposed, which no sample skill
+    // inflicts yet.
+    bool Inflict(CombatantSide side, std::string_view statusId, std::string& error);
+
     ActionResult UseSkill(std::string_view skillId);
     ActionResult Wait();
     ActionResult EnemyAct();
 
 private:
+    struct TurnOpen {
+        bool Continue = false;
+        ActionResult Result;
+    };
+
     bool Build(std::string& error, bool keepWounds);
     ActionResult Reject(std::string text) const;
-    ActionResult Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill);
-    const SkillDef* ChooseEnemySkill() const;
     void FinishIfDead();
+    void AdvanceTurn();
+    void PrefixOpening(ActionResult& result);
+    TurnOpen PrepareTurn(CombatantState& user);
+    ActionResult Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill);
+    ActionResult ResolveShard();
+    const SkillDef* TakeEnemySkill();
     void ApplyPassives(CombatantState& player) const;
+    void ArmShard(std::string& note);
+    void EnterPhase(std::string& note);
     [[nodiscard]] i32 PlayerPower(const SkillDef& skill) const;
-    [[nodiscard]] i32 BloodiedFor(const CombatantState& user) const;
+    [[nodiscard]] i32 BloodlustFor(const CombatantState& user, std::string_view statId) const;
+    [[nodiscard]] i32 DefenseOf(const CombatantState& who) const;
+    i32 NoteSkillUse(CombatantState& who, const std::string& skillId);
+    void GrantFocus(CombatantState& who, i32 amount) const;
 
     const Database* m_Data = nullptr;
     std::unique_ptr<TurnModel> m_Turns;
@@ -152,6 +215,8 @@ private:
     i32 m_PowerPerRank = 0;
     BattleResult m_Result = BattleResult::Ongoing;
     bool m_Started = false;
+    bool m_UpkeepDone = false;
+    std::string m_Opening;
 };
 
 } // namespace Ascension
