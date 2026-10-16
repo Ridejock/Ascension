@@ -19,7 +19,7 @@
     {
       "id": "bandit",
       "name": "Bandit",
-      "description": "A road thief with a nicked blade and no patience.",
+      "description": "A road thief with a nicked blade. Every few cuts, the wound stays open.",
       "level": 3,
       "stats": {
         "vitality": 16,
@@ -33,20 +33,75 @@
       "gold": 12
     },
     {
-      "id": "cairn_guard",
-      "name": "Cairn Guard",
-      "description": "Stone that learned to swing. It does not get tired.",
+      "id": "tomb_moth",
+      "name": "Tomb Moth",
+      "description": "A pale moth from the Stillbarrow tombs. The dust on its wings sticks.",
+      "level": 4,
+      "stats": {
+        "vitality": 12,
+        "strength": 6,
+        "defense": 2,
+        "agility": 9,
+        "focus": 0
+      },
+      "skills": ["flutter"],
+      "experience": 14,
+      "gold": 4
+    },
+    {
+      "id": "bone_archer",
+      "name": "Bone Archer",
+      "description": "A barrow archer who draws on the dead. The shot is obvious before it lands.",
+      "level": 5,
+      "stats": {
+        "vitality": 16,
+        "strength": 8,
+        "defense": 3,
+        "agility": 4,
+        "focus": 0
+      },
+      "skills": ["aimed_shot"],
+      "experience": 22,
+      "gold": 8
+    },
+    {
+      "id": "barrow_sentry",
+      "name": "Barrow Sentry",
+      "description": "Stone set to watch the Stillbarrow door. It hardens when the barrow is pressed.",
       "level": 6,
       "stats": {
-        "vitality": 40,
-        "strength": 12,
-        "defense": 10,
-        "agility": 2,
-        "focus": 4
+        "vitality": 32,
+        "strength": 10,
+        "defense": 8,
+        "agility": 3,
+        "focus": 0
       },
-      "skills": ["slam"],
+      "skills": ["harden", "thrust"],
+      "pattern": ["harden", "thrust", "thrust"],
       "experience": 40,
-      "gold": 25
+      "gold": 20
+    },
+    {
+      "id": "oathkeeper_varn",
+      "name": "Oathkeeper Varn",
+      "description": "Oathkeeper Varn keeps the Stillbarrow. Below half health the barrow throws rubble. A second foe for those shards comes later.",
+      "level": 8,
+      "boss": true,
+      "stats": {
+        "vitality": 60,
+        "strength": 14,
+        "defense": 12,
+        "agility": 3,
+        "focus": 0
+      },
+      "skills": ["maul_swing", "crushing_slam", "stone_skin"],
+      "pattern": ["maul_swing", "crushing_slam", "stone_skin"],
+      "phaseAtPercent": 50,
+      "phaseStatus": "enraged",
+      "shardDamage": 10,
+      "shardEvery": 3,
+      "experience": 80,
+      "gold": 40
     }
   ]
 }

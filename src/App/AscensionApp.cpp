@@ -107,15 +107,41 @@ std::string AddsLine(const Database& data, const ClassDef& evolution)
     return line;
 }
 
+std::string StatLabel(const Database& data, const std::string& id)
+{
+    if (const StatDef* named = data.FindStat(id))
+        return named->Name;
+    return id;
+}
+
 std::string PassiveLine(const Database& data, const SkillDef& passive)
 {
-    std::string stat = passive.Stat;
-    if (const StatDef* named = data.FindStat(passive.Stat))
-        stat = named->Name;
+    const std::string stat = StatLabel(data, passive.Stat);
+    if (passive.Passive == PassiveEffect::Bloodied)
+        return "Passive " + passive.Name + " +" + std::to_string(passive.Amount) + " " + stat +
+               " per " + std::to_string(passive.StepPercent) + " up to +" +
+               std::to_string(passive.Max);
+    if (passive.Passive == PassiveEffect::Bulwark)
+        return "Passive " + passive.Name + " " + stat + " +" + std::to_string(passive.Amount) +
+               "  focus +" + std::to_string(passive.FocusGain) + " on block";
     std::string line = "Passive " + passive.Name + " " + stat + " ";
     if (passive.Amount > 0)
         line += "+";
     line += std::to_string(passive.Amount);
+    return line;
+}
+
+std::string StatusLine(const Database& data, const CombatantState& who)
+{
+    std::string line;
+    for (const StatusInstance& status : who.Statuses) {
+        if (!line.empty())
+            line += "  ";
+        const StatusDef* def = data.FindStatus(status.Id);
+        line += def != nullptr ? def->Name : status.Id;
+        if (status.Stacks > 1)
+            line += " " + std::to_string(status.Stacks);
+    }
     return line;
 }
 
@@ -140,7 +166,7 @@ void AscensionApp::Note(const ActionResult& result)
     Note(result.Text);
 }
 
-void AscensionApp::PushRanks()
+void AscensionApp::PushRanks(std::string_view pendingSkill)
 {
     if (m_Battle == nullptr || !m_Hero.IsReady())
         return;
@@ -148,7 +174,10 @@ void AscensionApp::PushRanks()
     for (const std::string& id : m_Hero.SkillIds()) {
         SkillRank row;
         row.Id = id;
-        row.Rank = m_Hero.RankOf(id);
+        if (!pendingSkill.empty() && id == pendingSkill)
+            row.Rank = m_Hero.RankAfterUse(id);
+        else
+            row.Rank = m_Hero.RankOf(id);
         ranks.push_back(std::move(row));
     }
     m_Battle->SetPlayerRanks(m_Data.GetProgress().PowerPerRank, std::move(ranks));
@@ -309,7 +338,11 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     const auto skills = m_Battle->PlayerSkillIds();
     if (digit < 0 || digit >= kMaxHotkeys || digit >= static_cast<int>(skills.size()))
         return;
-    const ActionResult used = m_Battle->UseSkill(skills[static_cast<usize>(digit)]);
+    const std::string& skillId = skills[static_cast<usize>(digit)];
+    PushRanks(skillId);
+    const ActionResult used = m_Battle->UseSkill(skillId);
+    if (!used.Accepted)
+        PushRanks();
     Note(used);
     FinishAction(used, true);
     ResolveFoe();
@@ -418,8 +451,13 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                 ? static_cast<f32>(player.Focus) / static_cast<f32>(player.MaxFocus)
                                 : 0.0f;
     DrawBar(renderer, {left.x + 140.0f, y}, 280.0f, playerFocus, kFocus);
+    const std::string playerStatus = StatusLine(m_Data, player);
+    if (!playerStatus.empty()) {
+        y += 18.0f;
+        Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(playerStatus), kError, 1);
+    }
 
-    y = left.y + 200.0f;
+    y = left.y + 220.0f;
     const bool fightOver = m_Battle->Result() != BattleResult::Ongoing;
     const bool choosing = fightOver && m_Hero.ChoicePending();
     int shownSkills = 0;
@@ -476,16 +514,54 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
     y = right.y + 24.0f;
-    Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(enemy.Name), kInk, 3);
-    y += Emerald::DebugTextLineHeight(3) + 8.0f;
+    const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
+    const i32 foeCount = static_cast<i32>(m_Data.GetEnemies().size());
+    std::string foeTitle = enemy.Name;
+    if (foeCount > 0)
+        foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(foeCount);
+    Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(foeTitle), kInk, 3);
+    y += Emerald::DebugTextLineHeight(3) + 4.0f;
+    if (foe != nullptr && foe->Boss) {
+        std::string bossLine = "BOSS";
+        if (enemy.Phase >= 2)
+            bossLine += "  PHASE " + std::to_string(enemy.Phase);
+        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, bossLine, kError, 2);
+        y += Emerald::DebugTextLineHeight(2) + 4.0f;
+    } else {
+        y += 4.0f;
+    }
     Emerald::DrawDebugText(renderer, {right.x + 140.0f, y},
                            Upper(PoolText("HP", enemy.Hp, enemy.MaxHp)), kInk, 2);
     y += Emerald::DebugTextLineHeight(2) + 4.0f;
     const f32 enemyHp =
         enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
     DrawBar(renderer, {right.x + 140.0f, y}, 280.0f, enemyHp, kHp);
-    y += 28.0f;
-    const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
+    y += 22.0f;
+    if (!enemy.WindupSkill.empty()) {
+        const SkillDef* winding = m_Data.FindSkill(enemy.WindupSkill);
+        const std::string windName = winding != nullptr ? winding->Name : enemy.WindupSkill;
+        i32 shown = enemy.WindupTotal - enemy.WindupLeft;
+        if (shown < 1)
+            shown = 1;
+        if (enemy.WindupTotal > 0 && shown > enemy.WindupTotal)
+            shown = enemy.WindupTotal;
+        std::string windLine =
+            windName + " " + std::to_string(shown) + "/" + std::to_string(enemy.WindupTotal);
+        if (enemy.WindupLeft <= 0)
+            windLine += " incoming";
+        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(windLine), kError, 2);
+        y += Emerald::DebugTextLineHeight(2) + 4.0f;
+    }
+    if (enemy.ShardDue) {
+        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, "RUBBLE", kError, 2);
+        y += Emerald::DebugTextLineHeight(2) + 4.0f;
+    }
+    const std::string foeStatus = StatusLine(m_Data, enemy);
+    if (!foeStatus.empty()) {
+        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foeStatus), kError, 1);
+        y += Emerald::DebugTextLineHeight(1) + 4.0f;
+    }
+    y += 8.0f;
     if (foe != nullptr) {
         y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foe->Description), kDim, 2,
                                    rightSize.x - 56.0f);

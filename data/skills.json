@@ -24,13 +24,14 @@
     {
       "id": "heavy_blow",
       "name": "Heavy Blow",
-      "description": "A committed swing. It costs focus and hits harder than a strike.",
+      "description": "A committed swing. It stuns a foe who is winding up.",
       "kind": "active",
       "effect": "damage",
       "target": "enemy",
       "power": 18,
       "focusCost": 2,
-      "scaling": "strength"
+      "scaling": "strength",
+      "stunWindup": "stunned"
     },
     {
       "id": "second_wind",
@@ -66,10 +67,13 @@
     {
       "id": "bloodlust",
       "name": "Bloodlust",
-      "description": "The lower your health, the harder you hit.",
+      "description": "Gain 1 strength for every 10 percent of health that is missing, up to 6.",
       "kind": "passive",
+      "effect": "bloodied",
       "stat": "strength",
-      "amount": 2
+      "amount": 1,
+      "stepPercent": 10,
+      "max": 6
     },
     {
       "id": "shield_wall",
@@ -82,22 +86,27 @@
       "focusCost": 3
     },
     {
-      "id": "taunt",
-      "name": "Taunt",
-      "description": "Force an enemy to strike at you.",
+      "id": "riposte",
+      "name": "Riposte",
+      "description": "Guard half of the next hit and send half of what it stops back, plus a blow that scales with defense.",
       "kind": "active",
-      "effect": "taunt",
-      "target": "enemy",
-      "power": 0,
-      "focusCost": 2
+      "effect": "riposte",
+      "target": "self",
+      "power": 10,
+      "focusCost": 2,
+      "scaling": "defense",
+      "guard": 50,
+      "reflect": 50
     },
     {
       "id": "bulwark",
       "name": "Bulwark",
-      "description": "Hold the line. Incoming blows land lighter.",
+      "description": "Defense +3. A guard that actually stops damage also returns 1 focus.",
       "kind": "passive",
+      "effect": "bulwark",
       "stat": "defense",
-      "amount": 3
+      "amount": 3,
+      "focus": 1
     },
     {
       "id": "bite",
@@ -113,24 +122,94 @@
     {
       "id": "slash",
       "name": "Slash",
-      "description": "A dirty cut with a short blade.",
+      "description": "A dirty cut. Every third slash leaves a bleed.",
       "kind": "active",
       "effect": "damage",
       "target": "enemy",
       "power": 8,
       "focusCost": 0,
-      "scaling": "strength"
+      "scaling": "strength",
+      "status": "bleed",
+      "statusEvery": 3
     },
     {
-      "id": "slam",
-      "name": "Slam",
-      "description": "A heavy, slow impact.",
+      "id": "flutter",
+      "name": "Flutter",
+      "description": "A brush of dusty wings.",
       "kind": "active",
       "effect": "damage",
       "target": "enemy",
-      "power": 14,
-      "focusCost": 2,
+      "power": 6,
+      "focusCost": 0,
       "scaling": "strength"
+    },
+    {
+      "id": "aimed_shot",
+      "name": "Aimed Shot",
+      "description": "A long draw. The shot is telegraphed for two turns, then flies.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 20,
+      "focusCost": 0,
+      "scaling": "strength",
+      "windup": 2
+    },
+    {
+      "id": "harden",
+      "name": "Harden",
+      "description": "The stone sets. Defense rises for a few turns.",
+      "kind": "active",
+      "effect": "harden",
+      "target": "self",
+      "power": 4,
+      "focusCost": 0,
+      "duration": 3
+    },
+    {
+      "id": "thrust",
+      "name": "Thrust",
+      "description": "A short stab from a barrow spear.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 10,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "maul_swing",
+      "name": "Maul Swing",
+      "description": "A heavy swing of the oath-iron.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 12,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "crushing_slam",
+      "name": "Crushing Slam",
+      "description": "Varn lifts a barrow stone. The slam is telegraphed, then lands.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 24,
+      "focusCost": 0,
+      "scaling": "strength",
+      "windup": 1
+    },
+    {
+      "id": "stone_skin",
+      "name": "Stone Skin",
+      "description": "The barrow closes over Varn. Defense rises for a short while.",
+      "kind": "active",
+      "effect": "harden",
+      "target": "self",
+      "power": 6,
+      "focusCost": 0,
+      "duration": 2
     }
   ]
 }

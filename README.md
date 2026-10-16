@@ -68,19 +68,24 @@ ctest --test-dir build/debug --output-on-failure
 |---|---|
 | `stats.json` | The five combat stats: vitality, strength, defense, agility, focus |
 | `skills.json` | Active skills and passives |
+| `statuses.json` | Bleed, Exposed, Enraged, and Stunned |
 | `classes.json` | Fighter, and the level-5 evolutions Berserker and Guardian |
-| `enemies.json` | Enemies (level, stats, skills, experience, gold) |
+| `enemies.json` | The roster (level, stats, skills, experience, gold) and which one is the boss |
 | `items.json` | Gear (weapon, armor, accessory) and the stats it adds |
-| `combat.json` | Health per vitality, minimum damage, and the attack and defense divisors |
+| `combat.json` | Health per vitality, minimum damage, the attack and defense divisors, and focus regen |
 | `progress.json` | Total XP to reach each level, uses per skill rank, and power added per rank |
 
 Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. The choice opens when the hero's level reaches an evolution's `evolveLevel` (5 in the sample), and the number keys follow the order of those evolutions in `classes.json`.
 
-`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` once. The Wolf is 8, the Bandit is 18, and the Cairn Guard is 40, so those three wins in order (8 + 18 + 40 = 66) reach level 5 and open the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
+`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` once. In roster order that is Wolf 8, Bandit 18, Tomb Moth 14 (level 4, 40 XP), and Bone Archer 22 (level 5, 62 XP), which opens the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
 
-A skill starts at rank 1. Every `usesPerRank` uses (2 in the sample) raise it by one, up to `maxSkillRank`. Each rank above 1 adds `powerPerRank` to that skill's damage and healing. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
+A skill starts at rank 1. `usesPerRank` is either one integer (a flat step, `rank = 1 + uses / step`) or a list of the total uses required to reach rank 2, rank 3, and so on. The sample is `[3, 6, 10, 15]`, so the third use is rank 2 and the fifteenth is rank 5, capped by `maxSkillRank`. Each rank above 1 adds `powerPerRank` (2 in the sample) to that skill's damage, healing, and a riposte's flat reflect, including the blow that crosses the rank. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
 
-A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. Those divisors are 1 in the sample, so the stat is added and subtracted whole. Brace's `power` is the percent of the next hit that is ignored. Max health is vitality times `hpPerVitality`. Focus is the focus stat, and it does not come back until the fight restarts. Higher agility acts first each round; a tie lets the Fighter go first. The order comes from a turn model (`AgilityRoundModel`), so a later active-time model can replace it without rewriting damage.
+Bloodlust adds 1 strength for every 10 percent of health missing, up to 6. It does not change the strength shown as a stat; it is added when a blow scales with strength. Bulwark adds 3 defense, and grants 1 focus when a guard or block actually reduces a hit. Defense by itself does not. Riposte (Guardian, key `6`) costs 2 focus, guards 50 percent of the next hit, and returns 50 percent of the damage that guard stopped plus `power + defense`. None of those look up a skill id in the battle code.
+
+A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. Those divisors are 1 in the sample, so the stat is added and subtracted whole. Status percents apply after that formula: damage dealt, then the guard, then damage taken. Brace's `power` is the percent of the next hit that is ignored. Max health is vitality times `hpPerVitality`. The hero's focus pool is `focusBase` (4) plus their focus stat. It rises by `focusPerTurn` (1) at the start of their turn, and waiting adds `focusOnWait` (2) on top of that. Enemies do not regenerate focus. Higher agility acts first each round; a tie lets the Fighter go first. The order comes from a turn model (`AgilityRoundModel`), so a later active-time model can replace it without rewriting damage.
+
+`statuses.json` defines Bleed (3 health at the start of each of the afflicted unit's turns, for 3 turns, stacking to 2), Exposed (+25 percent damage taken, 2 turns), Enraged (+30 percent dealt and +15 percent taken; the sample keeps it up for a fight), and Stunned (skips the next action). The Bandit's Slash bleeds on every third use. Heavy Blow stuns a foe who is winding up and cancels that wind-up. The foe's panel shows the telegraph (`AIMED SHOT 1/2`, then `INCOMING`) and any statuses.
 
 The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, and the hero's career. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
 
@@ -93,12 +98,17 @@ Run the game. The Wolf is faster, so it bites first. Then:
 | Key | Action |
 |---|---|
 | `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind (up to `6` after evolving) |
-| Space | Wait, and let the enemy act |
+| `5` `6` | After evolving: Berserker Rage and Cleave, or Guardian Shield Wall and Riposte |
+| Space | Wait. Also gains 2 focus on top of the 1 gained at the start of the turn |
 | `R` | Fight this enemy again. Level, XP, and skill ranks stay |
-| `N` | The next enemy in `enemies.json` (Wolf, Bandit, Cairn Guard) |
+| `N` | The next enemy in `enemies.json` |
 | Escape | Quit |
 
-After a win that reaches level 5 the skill list is replaced by the choice. `1` is Berserker (strength and the Bloodlust passive). `2` is Guardian (defense and the Bulwark passive). The new skills show immediately. `R` starts the next fight as that class.
+The roster, in order, is Wolf, Bandit, Tomb Moth, Bone Archer, Barrow Sentry, and the boss, Oathkeeper Varn. The corner of the foe's name shows the place in that list, and Varn is marked BOSS. Fights are still one enemy at a time. Varn's rubble is a timed hit for 10 in phase 2 (telegraphed as RUBBLE), standing in for a later multi-enemy shard fight.
+
+After a win that reaches level 5 the skill list is replaced by the choice. `1` is Berserker. `2` is Guardian. The new skills show immediately. `R` or `N` starts the next fight as that class. Wolf, Bandit, Tomb Moth, and Bone Archer are 8 + 18 + 14 + 22 XP, which is level 5. The Barrow Sentry is the next fight (its 40 XP reaches level 6). Varn is the level-6 boss.
+
+Varn's pattern is Maul Swing, then Crushing Slam (telegraphed, then it lands), then Stone Skin. Phase 2 starts at half health: Varn becomes Enraged, and every few turns the barrow throws rubble. Heavy Blow (`3`) stuns a wind-up and cancels it, which is the Berserker's answer. Riposte (`6`) or Shield Wall (`5`) is the Guardian's answer to a telegraph or to RUBBLE. The Bone Archer's Aimed Shot is the same kind of telegraph, two turns long, so it can be practiced before the boss.
 
 Waiting against the Wolf loses. Strike three times and it dies (8 XP, level 2). `N` restarts on the next foe.
 

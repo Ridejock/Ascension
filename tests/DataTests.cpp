@@ -81,18 +81,23 @@ void TestSample()
     Check(error.Message.empty(), "a successful load has no error");
     Check(data.GetRevision() == 1, "the first load is revision 1");
     Check(data.GetStats().size() == 5, "five stats");
-    Check(data.GetSkills().size() == 13, "thirteen skills");
+    Check(data.GetSkills().size() == 19, "nineteen skills");
     Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
-              data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1,
-          "combat.json supplies the damage rules");
-    Check(data.GetEnemies().size() == 3, "three enemies");
+              data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1 &&
+              data.GetRules().FocusBase == 4 && data.GetRules().FocusPerTurn == 1 &&
+              data.GetRules().FocusOnWait == 2,
+          "combat.json supplies the damage rules and focus regen");
+    Check(data.GetEnemies().size() == 6, "six enemies, counting the boss");
     Check(data.GetItems().size() == 4, "four items");
     const ProgressRules& progress = data.GetProgress();
     Check(progress.XpToReach.size() == 10 && progress.XpToReach[0] == 0 &&
               progress.XpToReach[1] == 8,
           "progress.json has ten steps and level 2 at 8 XP");
-    Check(progress.UsesPerRank == 2 && progress.MaxSkillRank == 5 && progress.PowerPerRank == 1,
-          "ranks climb every two uses and add one power");
+    Check(progress.UsesPerRank.size() == 4 && progress.UsesPerRank[0] == 3 &&
+              progress.UsesPerRank[1] == 6 && progress.UsesPerRank[2] == 10 &&
+              progress.UsesPerRank[3] == 15 && progress.MaxSkillRank == 5 &&
+              progress.PowerPerRank == 2,
+          "ranks use the escalating thresholds and add two power");
 
     const ClassDef* fighter = MustClass(data, "fighter");
     const ClassDef* berserker = MustClass(data, "berserker");
@@ -137,11 +142,22 @@ void TestSample()
     const auto berserkerPassives = data.Passives(*berserker);
     Check(berserkerPassives.size() == 1 && berserkerPassives[0]->Id == "bloodlust" &&
               berserkerPassives[0]->Kind == SkillKind::Passive &&
-              berserkerPassives[0]->Stat == "strength" && berserkerPassives[0]->Amount == 2,
-          "berserker's passive is bloodlust");
+              berserkerPassives[0]->Passive == PassiveEffect::Bloodied &&
+              berserkerPassives[0]->Stat == "strength" && berserkerPassives[0]->Amount == 1 &&
+              berserkerPassives[0]->StepPercent == 10 && berserkerPassives[0]->Max == 6,
+          "bloodlust is +1 strength per 10 percent missing, up to 6");
     const auto guardianPassives = data.Passives(*guardian);
-    Check(guardianPassives.size() == 1 && guardianPassives[0]->Id == "bulwark",
-          "guardian's passive is bulwark");
+    Check(guardianPassives.size() == 1 && guardianPassives[0]->Id == "bulwark" &&
+              guardianPassives[0]->Passive == PassiveEffect::Bulwark &&
+              guardianPassives[0]->Stat == "defense" && guardianPassives[0]->Amount == 3 &&
+              guardianPassives[0]->FocusGain == 1,
+          "bulwark is +3 defense and 1 focus when a guard stops a hit");
+    const SkillDef* riposte = data.FindSkill("riposte");
+    Check(riposte != nullptr && riposte->Effect == SkillEffect::Riposte && riposte->Power == 10 &&
+              riposte->FocusCost == 2 && riposte->Guard == 50 && riposte->Reflect == 50 &&
+              riposte->Scaling == "defense",
+          "riposte guards half the next hit and reflects half of what it stopped");
+    Check(data.FindSkill("taunt") == nullptr, "taunt is gone");
 
     const StatBlock level1 = data.StatsAt(*fighter, 1);
     Check(level1.Vitality == 18 && level1.Strength == 8, "level 1 is the base stats");
@@ -163,8 +179,48 @@ void TestSample()
 
     const EnemyDef* wolf = data.FindEnemy("wolf");
     Check(wolf != nullptr && wolf->Level == 1 && wolf->Skills.size() == 1 &&
-              wolf->Skills[0] == "bite",
+              wolf->Skills[0] == "bite" && !wolf->Boss,
           "wolf is a level-1 enemy with bite");
+    const auto enemies = data.GetEnemies();
+    Check(enemies.size() == 6 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit" &&
+              enemies[2].Id == "tomb_moth" && enemies[3].Id == "bone_archer" &&
+              enemies[4].Id == "barrow_sentry" && enemies[5].Id == "oathkeeper_varn",
+          "the roster ends at Oathkeeper Varn");
+    Check(enemies[2].Level == 4 && enemies[2].Experience == 14 && enemies[2].Gold == 4,
+          "the tomb moth pays 14 XP and 4 gold");
+    Check(enemies[3].Level == 5 && enemies[3].Experience == 22 && enemies[3].Gold == 8 &&
+              enemies[3].Skills.size() == 1 && enemies[3].Skills[0] == "aimed_shot",
+          "the bone archer pays 22 XP and 8 gold");
+    const SkillDef* aimed = data.FindSkill("aimed_shot");
+    Check(aimed != nullptr && aimed->Power == 20 && aimed->Windup == 2,
+          "aimed shot is power 20 after a 2-turn wind-up");
+    Check(enemies[5].Experience == 80 && enemies[5].Boss && enemies[5].Level == 8 &&
+              enemies[5].Stats.Vitality == 60 && enemies[5].Stats.Strength == 14 &&
+              enemies[5].Stats.Defense == 12 && enemies[5].Skills.size() == 3 &&
+              enemies[5].PhaseAtPercent == 50 && enemies[5].ShardDamage == 10,
+          "Oathkeeper Varn is the only boss");
+    Check(data.FindEnemy("mire_lurker") == nullptr && data.FindEnemy("oathbreaker") == nullptr &&
+              data.FindEnemy("cairn_guard") == nullptr && data.FindEnemy("cairn_warden") == nullptr,
+          "mire lurker, oathbreaker and the cairn names are gone");
+    for (const EnemyDef& enemy : enemies) {
+        Check(enemy.Description.find("cairn") == std::string::npos &&
+                  enemy.Description.find("Cairn") == std::string::npos,
+              "descriptions say barrow, not cairn");
+    }
+    Check(data.GetStatuses().size() == 4, "four statuses");
+    const StatusDef* bleed = data.FindStatus("bleed");
+    const StatusDef* exposed = data.FindStatus("exposed");
+    const StatusDef* enraged = data.FindStatus("enraged");
+    const StatusDef* stunned = data.FindStatus("stunned");
+    Check(bleed != nullptr && bleed->DamagePerTurn == 3 && bleed->Turns == 3 &&
+              bleed->MaxStacks == 2,
+          "bleed is 3 a turn for 3 turns and stacks to 2");
+    Check(exposed != nullptr && exposed->DamageTakenPercent == 25, "exposed adds 25 percent taken");
+    Check(enraged != nullptr && enraged->DamageDealtPercent == 30 &&
+              enraged->DamageTakenPercent == 15,
+          "enraged adds 30 percent dealt and 15 percent taken");
+    Check(stunned != nullptr && stunned->SkipAction && stunned->Turns == 1,
+          "stunned skips the next action");
     const ItemDef* sword = data.FindItem("iron_sword");
     Check(sword != nullptr && sword->Slot == GearSlot::Weapon && sword->Bonus.Strength == 3,
           "iron sword is a weapon with +3 strength");
@@ -337,7 +393,7 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "progress.json", "\"usesPerRank\": 2", "\"usesPerRank\": 0");
+        ReplaceInFile(copy.Path / "progress.json", "[3, 6, 10, 15]", "0");
         TestRejected(copy.Path, "progress.json", "usesPerRank", "uses per rank must be at least 1");
     }
     {
@@ -349,6 +405,34 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "progress.json", "[0, 8", "[1, 8");
         TestRejected(copy.Path, "progress.json", "level 1", "level 1 XP must be 0");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"id\": \"wolf\"",
+                      "\"id\": \"wolf\", \"boss\": true");
+        TestRejected(copy.Path, "enemies.json", "exactly one boss", "a second boss is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"boss\": true", "\"boss\": false");
+        TestRejected(copy.Path, "enemies.json", "exactly one boss", "a roster needs a boss");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "\"guard\": 50", "\"guard\": 101");
+        TestRejected(copy.Path, "skills.json", "guard", "a riposte guard cannot exceed 100");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "progress.json", "[3, 6, 10, 15]", "[3, 6, 6, 15]");
+        TestRejected(copy.Path, "progress.json", "strictly increasing",
+                     "rank thresholds have to climb");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "\"stunWindup\": \"stunned\"",
+                      "\"stunWindup\": \"missing\"");
+        TestRejected(copy.Path, "skills.json", "does not exist", "a skill status must exist");
     }
 }
 

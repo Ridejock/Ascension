@@ -19,8 +19,8 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json", "skills.json", "classes.json",  "enemies.json",
-    "items.json", "combat.json", "progress.json",
+    "stats.json",   "skills.json", "statuses.json", "classes.json",
+    "enemies.json", "items.json",  "combat.json",   "progress.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -174,6 +174,46 @@ bool RequireInt(const Json& object, const char* key, i32 min, i32 max, i32& out,
     return true;
 }
 
+// Missing key leaves `out` unchanged and succeeds. A present value must be an integer in range.
+bool OptionalInt(const Json& object, const char* key, i32 min, i32 max, i32& out,
+                 std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!ReadInt(*it, min, max, out, error)) {
+        error = std::string("'") + key + "' " + error;
+        return false;
+    }
+    return true;
+}
+
+// Missing key leaves `out` empty. A present value must be an id.
+bool OptionalId(const Json& object, const char* key, std::string& out, std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!it->is_string()) {
+        error = std::string("'") + key + "' must be text";
+        return false;
+    }
+    out = it->get<std::string>();
+    if (!IsId(out)) {
+        error = std::string("'") + key + "' must be an id";
+        return false;
+    }
+    return true;
+}
+
+bool Absent(const Json& object, const char* key, const std::string& where, std::string& error)
+{
+    if (!object.contains(key))
+        return true;
+    error = where + " does not use '" + key + "'";
+    return false;
+}
+
 // A stat object. `requireAll` means every kStatIds key must be present (a class's level-1 stats).
 // Otherwise a missing key is zero (a bonus). Unknown keys and non-integers always fail.
 bool ReadStatBlock(const Json& object, bool requireAll, StatBlock& out, std::string& error)
@@ -208,7 +248,7 @@ bool ReadStatBlock(const Json& object, bool requireAll, StatBlock& out, std::str
 }
 
 bool ReadIdList(const Json& object, const char* key, std::vector<std::string>& out,
-                std::string& error)
+                std::string& error, bool allowDuplicates = false)
 {
     const auto it = object.find(key);
     if (it == object.end()) {
@@ -230,10 +270,12 @@ bool ReadIdList(const Json& object, const char* key, std::vector<std::string>& o
             error = Quote(id) + " is not an id (letters, digits and _, starting with a letter)";
             return false;
         }
-        for (const std::string& existing : out) {
-            if (existing == id) {
-                error = Quote(id) + " is listed twice";
-                return false;
+        if (!allowDuplicates) {
+            for (const std::string& existing : out) {
+                if (existing == id) {
+                    error = Quote(id) + " is listed twice";
+                    return false;
+                }
             }
         }
         out.push_back(id);
@@ -244,6 +286,7 @@ bool ReadIdList(const Json& object, const char* key, std::vector<std::string>& o
 struct Parsed {
     std::vector<StatDef> Stats;
     std::vector<SkillDef> Skills;
+    std::vector<StatusDef> Statuses;
     std::vector<ClassDef> Classes;
     std::vector<EnemyDef> Enemies;
     std::vector<ItemDef> Items;
@@ -261,8 +304,10 @@ bool ParseEffect(std::string_view text, SkillEffect& out)
         out = SkillEffect::Heal;
     else if (text == "empower")
         out = SkillEffect::Empower;
-    else if (text == "taunt")
-        out = SkillEffect::Taunt;
+    else if (text == "riposte")
+        out = SkillEffect::Riposte;
+    else if (text == "harden")
+        out = SkillEffect::Harden;
     else
         return false;
     return true;
@@ -372,15 +417,16 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
         if (skill.Kind == SkillKind::Active) {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "kind", "effect", "target", "power",
-                            "focusCost", "scaling"},
+                            "focusCost", "scaling", "guard", "reflect", "windup", "duration",
+                            "status", "statusEvery", "stunWindup"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string effect;
             if (!RequireString(entry, "effect", effect, error))
                 return fail(error);
             if (!ParseEffect(effect, skill.Effect))
-                return fail("'effect' must be \"damage\", \"guard\", \"heal\", \"empower\" or "
-                            "\"taunt\"");
+                return fail("'effect' must be \"damage\", \"guard\", \"heal\", \"empower\", "
+                            "\"riposte\" or \"harden\"");
             std::string target;
             if (!RequireString(entry, "target", target, error))
                 return fail(error);
@@ -392,21 +438,67 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 skill.Target = SkillTarget::AllEnemies;
             else
                 return fail("'target' must be \"self\", \"enemy\" or \"allEnemies\"");
-            const bool selfEffect = skill.Effect == SkillEffect::Guard ||
-                                    skill.Effect == SkillEffect::Heal ||
-                                    skill.Effect == SkillEffect::Empower;
+            const bool selfEffect =
+                skill.Effect == SkillEffect::Guard || skill.Effect == SkillEffect::Heal ||
+                skill.Effect == SkillEffect::Empower || skill.Effect == SkillEffect::Riposte ||
+                skill.Effect == SkillEffect::Harden;
             if (selfEffect && skill.Target != SkillTarget::Self)
                 return fail(std::string("'target' for ") + ToString(skill.Effect) +
                             " must be \"self\"");
             if (!selfEffect && skill.Target == SkillTarget::Self)
                 return fail(std::string("'target' for ") + ToString(skill.Effect) +
                             " must be \"enemy\" or \"allEnemies\"");
-            if (!RequireInt(entry, "power", 0, 9999, skill.Power, error))
+            if (!RequireInt(entry, "power", 0, 9999, skill.Power, error) ||
+                !RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
                 return fail(error);
             if (skill.Effect == SkillEffect::Guard && skill.Power > 100)
                 return fail("'power' for a guard is a percent from 0 to 100");
-            if (!RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
-                return fail(error);
+            if (skill.Effect == SkillEffect::Riposte) {
+                if (!RequireInt(entry, "guard", 0, 100, skill.Guard, error) ||
+                    !RequireInt(entry, "reflect", 0, 100, skill.Reflect, error))
+                    return fail(error);
+                if (!Absent(entry, "windup", "a riposte", error) ||
+                    !Absent(entry, "duration", "a riposte", error) ||
+                    !Absent(entry, "status", "a riposte", error) ||
+                    !Absent(entry, "statusEvery", "a riposte", error) ||
+                    !Absent(entry, "stunWindup", "a riposte", error))
+                    return fail(error);
+            } else if (skill.Effect == SkillEffect::Harden) {
+                if (!RequireInt(entry, "duration", 1, 99, skill.Duration, error))
+                    return fail(error);
+                if (!Absent(entry, "guard", "harden", error) ||
+                    !Absent(entry, "reflect", "harden", error) ||
+                    !Absent(entry, "scaling", "harden", error) ||
+                    !Absent(entry, "windup", "harden", error) ||
+                    !Absent(entry, "status", "harden", error) ||
+                    !Absent(entry, "statusEvery", "harden", error) ||
+                    !Absent(entry, "stunWindup", "harden", error))
+                    return fail(error);
+            } else if (skill.Effect == SkillEffect::Damage) {
+                if (!OptionalInt(entry, "windup", 1, 9, skill.Windup, error) ||
+                    !OptionalId(entry, "status", skill.Status, error) ||
+                    !OptionalId(entry, "stunWindup", skill.StunWindup, error))
+                    return fail(error);
+                if (entry.contains("statusEvery")) {
+                    if (skill.Status.empty())
+                        return fail("'statusEvery' needs a 'status'");
+                    if (!RequireInt(entry, "statusEvery", 1, 99, skill.StatusEvery, error))
+                        return fail(error);
+                }
+                if (!Absent(entry, "guard", "a damage skill", error) ||
+                    !Absent(entry, "reflect", "a damage skill", error) ||
+                    !Absent(entry, "duration", "a damage skill", error))
+                    return fail(error);
+            } else {
+                if (!Absent(entry, "guard", ToString(skill.Effect), error) ||
+                    !Absent(entry, "reflect", ToString(skill.Effect), error) ||
+                    !Absent(entry, "windup", ToString(skill.Effect), error) ||
+                    !Absent(entry, "duration", ToString(skill.Effect), error) ||
+                    !Absent(entry, "status", ToString(skill.Effect), error) ||
+                    !Absent(entry, "statusEvery", ToString(skill.Effect), error) ||
+                    !Absent(entry, "stunWindup", ToString(skill.Effect), error))
+                    return fail(error);
+            }
             const auto scaling = entry.find("scaling");
             if (scaling != entry.end()) {
                 if (!scaling->is_string())
@@ -416,14 +508,51 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                     return fail("scaling stat " + Quote(skill.Scaling) + " does not exist");
             }
         } else {
-            if (!AllowKeys(entry, {"id", "name", "description", "kind", "stat", "amount"}, unknown))
+            if (!AllowKeys(entry,
+                           {"id", "name", "description", "kind", "effect", "stat", "amount",
+                            "stepPercent", "max", "focus"},
+                           unknown))
                 return fail("unknown field " + Quote(unknown));
-            if (!RequireString(entry, "stat", skill.Stat, error))
+            std::string effect;
+            if (!RequireString(entry, "effect", effect, error))
                 return fail(error);
-            if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
-                return fail("stat " + Quote(skill.Stat) + " does not exist");
-            if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error))
-                return fail(error);
+            if (effect == "stat") {
+                skill.Passive = PassiveEffect::Stat;
+                if (entry.contains("stepPercent") || entry.contains("max") ||
+                    entry.contains("focus"))
+                    return fail("a stat passive uses stat and amount");
+                if (!RequireString(entry, "stat", skill.Stat, error))
+                    return fail(error);
+                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
+                    return fail("stat " + Quote(skill.Stat) + " does not exist");
+                if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error))
+                    return fail(error);
+            } else if (effect == "bloodied") {
+                skill.Passive = PassiveEffect::Bloodied;
+                if (entry.contains("focus"))
+                    return fail("bloodied uses stat, amount, stepPercent and max");
+                if (!RequireString(entry, "stat", skill.Stat, error))
+                    return fail(error);
+                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
+                    return fail("stat " + Quote(skill.Stat) + " does not exist");
+                if (!RequireInt(entry, "amount", 0, 99, skill.Amount, error) ||
+                    !RequireInt(entry, "stepPercent", 1, 100, skill.StepPercent, error) ||
+                    !RequireInt(entry, "max", 0, 99, skill.Max, error))
+                    return fail(error);
+            } else if (effect == "bulwark") {
+                skill.Passive = PassiveEffect::Bulwark;
+                if (entry.contains("stepPercent") || entry.contains("max"))
+                    return fail("bulwark uses stat, amount and focus");
+                if (!RequireString(entry, "stat", skill.Stat, error))
+                    return fail(error);
+                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
+                    return fail("stat " + Quote(skill.Stat) + " does not exist");
+                if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error) ||
+                    !RequireInt(entry, "focus", 0, 99, skill.FocusGain, error))
+                    return fail(error);
+            } else {
+                return fail("'effect' must be \"stat\", \"bloodied\" or \"bulwark\"");
+            }
         }
         if (!RequireString(entry, "name", skill.Name, error) ||
             !RequireString(entry, "description", skill.Description, error))
@@ -552,10 +681,11 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (FindId(parsed.Enemies, enemy.Id) != nullptr)
             return fail("there is another enemy with this id");
         std::string unknown;
-        if (!AllowKeys(
-                entry,
-                {"id", "name", "description", "level", "stats", "skills", "experience", "gold"},
-                unknown))
+        if (!AllowKeys(entry,
+                       {"id", "name", "description", "level", "stats", "skills", "experience",
+                        "gold", "boss", "pattern", "phaseAtPercent", "phaseStatus", "shardDamage",
+                        "shardEvery"},
+                       unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
             return fail(error);
@@ -574,10 +704,41 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (!RequireInt(entry, "experience", 0, 999999, enemy.Experience, error) ||
             !RequireInt(entry, "gold", 0, 999999, enemy.Gold, error))
             return fail(error);
+        const auto boss = entry.find("boss");
+        if (boss != entry.end()) {
+            if (!boss->is_boolean())
+                return fail("'boss' must be true or false");
+            enemy.Boss = boss->get<bool>();
+        }
+        if (entry.contains("pattern")) {
+            std::string patternError;
+            if (!ReadIdList(entry, "pattern", enemy.Pattern, patternError, true))
+                return fail(patternError);
+        }
+        if (!OptionalInt(entry, "phaseAtPercent", 1, 99, enemy.PhaseAtPercent, error) ||
+            !OptionalId(entry, "phaseStatus", enemy.PhaseStatus, error) ||
+            !OptionalInt(entry, "shardDamage", 0, 9999, enemy.ShardDamage, error) ||
+            !OptionalInt(entry, "shardEvery", 1, 99, enemy.ShardEvery, error))
+            return fail(error);
+        if (!enemy.PhaseStatus.empty() && enemy.PhaseAtPercent <= 0)
+            return fail("'phaseStatus' needs 'phaseAtPercent'");
+        if (enemy.ShardDamage > 0 && enemy.ShardEvery <= 0)
+            return fail("'shardDamage' needs 'shardEvery'");
+        if (enemy.ShardEvery > 0 && enemy.PhaseAtPercent <= 0)
+            return fail("'shardEvery' needs 'phaseAtPercent'");
         if (!RequireString(entry, "name", enemy.Name, error) ||
             !RequireString(entry, "description", enemy.Description, error))
             return fail(error);
         parsed.Enemies.push_back(std::move(enemy));
+    }
+    i32 bosses = 0;
+    for (const EnemyDef& enemy : parsed.Enemies) {
+        if (enemy.Boss)
+            ++bosses;
+    }
+    if (bosses != 1) {
+        error = "the roster needs exactly one boss";
+        return false;
     }
     return true;
 }
@@ -646,7 +807,8 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
     std::string unknown;
     if (!AllowKeys(*body,
                    {"hpPerVitality", "minDamage", "attackNumerator", "attackDenominator",
-                    "defenseNumerator", "defenseDenominator"},
+                    "defenseNumerator", "defenseDenominator", "focusBase", "focusPerTurn",
+                    "focusOnWait"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -657,7 +819,10 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
         !RequireInt(*body, "attackNumerator", 0, 999, rules.AttackNumerator, error) ||
         !RequireInt(*body, "attackDenominator", 1, 999, rules.AttackDenominator, error) ||
         !RequireInt(*body, "defenseNumerator", 0, 999, rules.DefenseNumerator, error) ||
-        !RequireInt(*body, "defenseDenominator", 1, 999, rules.DefenseDenominator, error))
+        !RequireInt(*body, "defenseDenominator", 1, 999, rules.DefenseDenominator, error) ||
+        !RequireInt(*body, "focusBase", 0, 99, rules.FocusBase, error) ||
+        !RequireInt(*body, "focusPerTurn", 0, 99, rules.FocusPerTurn, error) ||
+        !RequireInt(*body, "focusOnWait", 0, 99, rules.FocusOnWait, error))
         return false;
     parsed.Rules = rules;
     return true;
@@ -706,11 +871,98 @@ bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
         previous = xp;
         ++index;
     }
-    if (!RequireInt(*body, "usesPerRank", 1, 999, rules.UsesPerRank, error) ||
-        !RequireInt(*body, "maxSkillRank", 1, 99, rules.MaxSkillRank, error) ||
+    const auto uses = body->find("usesPerRank");
+    if (uses == body->end()) {
+        error = "'usesPerRank' is required";
+        return false;
+    }
+    if (uses->is_number_integer()) {
+        i32 step = 0;
+        if (!ReadInt(*uses, 1, 999, step, error)) {
+            error = "'usesPerRank' " + error;
+            return false;
+        }
+        rules.UsesPerRank.push_back(step);
+    } else if (uses->is_array()) {
+        if (uses->empty() || uses->size() > 98) {
+            error = "'usesPerRank' must list from 1 to 98 thresholds";
+            return false;
+        }
+        i32 priorThreshold = 0;
+        for (const Json& entry : *uses) {
+            i32 threshold = 0;
+            if (!ReadInt(entry, 1, 999, threshold, error)) {
+                error = "'usesPerRank' " + error;
+                return false;
+            }
+            if (threshold <= priorThreshold) {
+                error = "'usesPerRank' must be strictly increasing";
+                return false;
+            }
+            rules.UsesPerRank.push_back(threshold);
+            priorThreshold = threshold;
+        }
+    } else {
+        error = "'usesPerRank' must be an integer or a list of integers";
+        return false;
+    }
+    if (!RequireInt(*body, "maxSkillRank", 1, 99, rules.MaxSkillRank, error) ||
         !RequireInt(*body, "powerPerRank", 0, 999, rules.PowerPerRank, error))
         return false;
     parsed.Progress = std::move(rules);
+    return true;
+}
+
+bool LoadStatuses(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("statuses");
+    if (list == root.end() || !list->is_array()) {
+        error = "'statuses' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "status entries must be objects";
+            return false;
+        }
+        StatusDef status;
+        if (!RequireString(entry, "id", status.Id, error))
+            return false;
+        const std::string where = "status " + Quote(status.Id);
+        auto fail = [&](std::string message) {
+            error = where + ": " + std::move(message);
+            return false;
+        };
+        if (!IsId(status.Id))
+            return fail("id must be letters, digits and _, starting with a letter");
+        if (FindId(parsed.Statuses, status.Id) != nullptr)
+            return fail("there is another status with this id");
+        std::string unknown;
+        if (!AllowKeys(entry,
+                       {"id", "name", "description", "damagePerTurn", "turns", "maxStacks",
+                        "damageTakenPercent", "damageDealtPercent", "skipAction"},
+                       unknown))
+            return fail("unknown field " + Quote(unknown));
+        if (!OptionalInt(entry, "damagePerTurn", 0, 999, status.DamagePerTurn, error) ||
+            !RequireInt(entry, "turns", 1, 999, status.Turns, error) ||
+            !RequireInt(entry, "maxStacks", 1, 9, status.MaxStacks, error) ||
+            !OptionalInt(entry, "damageTakenPercent", 0, 500, status.DamageTakenPercent, error) ||
+            !OptionalInt(entry, "damageDealtPercent", 0, 500, status.DamageDealtPercent, error))
+            return fail(error);
+        const auto skip = entry.find("skipAction");
+        if (skip != entry.end()) {
+            if (!skip->is_boolean())
+                return fail("'skipAction' must be true or false");
+            status.SkipAction = skip->get<bool>();
+        }
+        if (status.DamagePerTurn <= 0 && status.DamageTakenPercent <= 0 &&
+            status.DamageDealtPercent <= 0 && !status.SkipAction)
+            return fail("needs damage, a percent, or skipAction");
+        if (!RequireString(entry, "name", status.Name, error) ||
+            !RequireString(entry, "description", status.Description, error))
+            return fail(error);
+        parsed.Statuses.push_back(std::move(status));
+    }
     return true;
 }
 
@@ -769,9 +1021,36 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             }
         }
     }
-    for (const EnemyDef& enemy : parsed.Enemies) {
-        if (!SkillRefs(parsed, enemy.Skills, SkillKind::Active, "enemy " + Quote(enemy.Id), error))
+    for (const SkillDef& skill : parsed.Skills) {
+        const std::string where = "skill " + Quote(skill.Id);
+        if (!skill.Status.empty() && FindId(parsed.Statuses, skill.Status) == nullptr) {
+            error = where + ": status " + Quote(skill.Status) + " does not exist";
             return false;
+        }
+        if (!skill.StunWindup.empty() && FindId(parsed.Statuses, skill.StunWindup) == nullptr) {
+            error = where + ": status " + Quote(skill.StunWindup) + " does not exist";
+            return false;
+        }
+    }
+    for (const EnemyDef& enemy : parsed.Enemies) {
+        const std::string where = "enemy " + Quote(enemy.Id);
+        if (!SkillRefs(parsed, enemy.Skills, SkillKind::Active, where, error))
+            return false;
+        for (const std::string& id : enemy.Pattern) {
+            bool listed = false;
+            for (const std::string& known : enemy.Skills) {
+                if (known == id)
+                    listed = true;
+            }
+            if (!listed) {
+                error = where + ": pattern skill " + Quote(id) + " is not in skills";
+                return false;
+            }
+        }
+        if (!enemy.PhaseStatus.empty() && FindId(parsed.Statuses, enemy.PhaseStatus) == nullptr) {
+            error = where + ": status " + Quote(enemy.PhaseStatus) + " does not exist";
+            return false;
+        }
     }
     return true;
 }
@@ -786,10 +1065,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats, LoadSkills, LoadClasses, LoadEnemies,
-                              LoadItems, LoadCombat, LoadProgress};
-    const char* names[] = {"stats.json", "skills.json", "classes.json", "enemies.json",
-                           "items.json", "combat.json", "progress.json"};
+    const Loader loaders[] = {LoadStats,   LoadSkills, LoadStatuses, LoadClasses,
+                              LoadEnemies, LoadItems,  LoadCombat,   LoadProgress};
+    const char* names[] = {"stats.json",   "skills.json", "statuses.json", "classes.json",
+                           "enemies.json", "items.json",  "combat.json",   "progress.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -804,8 +1083,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats", "skills", "classes", "enemies",
-                                    "items", "combat", "progress"};
+        const char* allowedTop[] = {"stats",   "skills", "statuses", "classes",
+                                    "enemies", "items",  "combat",   "progress"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
@@ -817,7 +1096,11 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     }
     std::string why;
     if (!CrossCheck(parsed, why)) {
-        const char* file = why.compare(0, 6, "enemy ") == 0 ? "enemies.json" : "classes.json";
+        const char* file = "classes.json";
+        if (why.compare(0, 6, "enemy ") == 0)
+            file = "enemies.json";
+        else if (why.compare(0, 6, "skill ") == 0)
+            file = "skills.json";
         error = Err(file, {}, why);
         return false;
     }
@@ -888,6 +1171,7 @@ bool Database::Load(DataError* error)
 
     m_Stats = std::move(parsed.Stats);
     m_Skills = std::move(parsed.Skills);
+    m_Statuses = std::move(parsed.Statuses);
     m_Classes = std::move(parsed.Classes);
     m_Enemies = std::move(parsed.Enemies);
     m_Items = std::move(parsed.Items);
@@ -935,6 +1219,11 @@ const StatDef* Database::FindStat(std::string_view id) const
 const SkillDef* Database::FindSkill(std::string_view id) const
 {
     return FindId(m_Skills, id);
+}
+
+const StatusDef* Database::FindStatus(std::string_view id) const
+{
+    return FindId(m_Statuses, id);
 }
 
 const ClassDef* Database::FindClass(std::string_view id) const

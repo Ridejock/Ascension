@@ -5,6 +5,9 @@
     "attackNumerator": 1,
     "attackDenominator": 1,
     "defenseNumerator": 1,
-    "defenseDenominator": 1
+    "defenseDenominator": 1,
+    "focusBase": 4,
+    "focusPerTurn": 1,
+    "focusOnWait": 2
   }
 }

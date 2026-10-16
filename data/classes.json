@@ -57,7 +57,7 @@
         "agility": 1,
         "focus": 1
       },
-      "skills": ["shield_wall", "taunt"],
+      "skills": ["shield_wall", "riposte"],
       "passives": ["bulwark"]
     }
   ]
