@@ -1,0 +1,13 @@
+Ascension @PROJECT_VERSION@
+LitRPG vertical slice (data preview)
+
+Run the Ascension executable in this folder. It reads data/*.json from beside
+itself and draws the Fighter's stats with placeholder rectangles and text.
+
+Edit those JSON files while the program is running. After the file has finished
+saving, the screen picks up the new stats (it waits until the write settles, so
+a half-saved file is left alone). A file that no longer loads keeps the previous
+data on screen and shows the error.
+
+This build is the project skeleton: definitions for stats, skills, classes,
+enemies and gear. Combat is not in yet.

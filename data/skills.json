@@ -1,0 +1,106 @@
+{
+  "skills": [
+    {
+      "id": "strike",
+      "name": "Strike",
+      "description": "A straightforward blow.",
+      "kind": "active",
+      "target": "enemy",
+      "power": 10,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "brace",
+      "name": "Brace",
+      "description": "Set your guard and weather the next hit.",
+      "kind": "active",
+      "target": "self",
+      "power": 0,
+      "focusCost": 2
+    },
+    {
+      "id": "rage",
+      "name": "Rage",
+      "description": "Spend focus to hit harder for a short while.",
+      "kind": "active",
+      "target": "self",
+      "power": 0,
+      "focusCost": 3
+    },
+    {
+      "id": "cleave",
+      "name": "Cleave",
+      "description": "A wide swing that hits every enemy.",
+      "kind": "active",
+      "target": "allEnemies",
+      "power": 8,
+      "focusCost": 4,
+      "scaling": "strength"
+    },
+    {
+      "id": "bloodlust",
+      "name": "Bloodlust",
+      "description": "The lower your health, the harder you hit.",
+      "kind": "passive",
+      "stat": "strength",
+      "amount": 2
+    },
+    {
+      "id": "shield_wall",
+      "name": "Shield Wall",
+      "description": "Interpose your shield and blunt the blow.",
+      "kind": "active",
+      "target": "self",
+      "power": 0,
+      "focusCost": 3
+    },
+    {
+      "id": "taunt",
+      "name": "Taunt",
+      "description": "Force an enemy to strike at you.",
+      "kind": "active",
+      "target": "enemy",
+      "power": 0,
+      "focusCost": 2
+    },
+    {
+      "id": "bulwark",
+      "name": "Bulwark",
+      "description": "Hold the line. Incoming blows land lighter.",
+      "kind": "passive",
+      "stat": "defense",
+      "amount": 3
+    },
+    {
+      "id": "bite",
+      "name": "Bite",
+      "description": "A quick snap.",
+      "kind": "active",
+      "target": "enemy",
+      "power": 6,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "slash",
+      "name": "Slash",
+      "description": "A dirty cut with a short blade.",
+      "kind": "active",
+      "target": "enemy",
+      "power": 8,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "slam",
+      "name": "Slam",
+      "description": "A heavy, slow impact.",
+      "kind": "active",
+      "target": "enemy",
+      "power": 14,
+      "focusCost": 2,
+      "scaling": "strength"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "stats": [
+    {
+      "id": "vitality",
+      "name": "Vitality",
+      "description": "How much punishment you can take before you fall."
+    },
+    {
+      "id": "strength",
+      "name": "Strength",
+      "description": "Physical power behind a blow."
+    },
+    {
+      "id": "defense",
+      "name": "Defense",
+      "description": "How well you hold a line when something hits back."
+    },
+    {
+      "id": "agility",
+      "name": "Agility",
+      "description": "Who acts first, and who steps out of the way."
+    },
+    {
+      "id": "focus",
+      "name": "Focus",
+      "description": "Fuel for skills. It comes back between fights."
+    }
+  ]
+}

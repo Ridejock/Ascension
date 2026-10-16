@@ -1,0 +1,52 @@
+{
+  "enemies": [
+    {
+      "id": "wolf",
+      "name": "Wolf",
+      "description": "Hungry, fast, and rarely alone.",
+      "level": 1,
+      "stats": {
+        "vitality": 10,
+        "strength": 5,
+        "defense": 2,
+        "agility": 7,
+        "focus": 0
+      },
+      "skills": ["bite"],
+      "experience": 8,
+      "gold": 3
+    },
+    {
+      "id": "bandit",
+      "name": "Bandit",
+      "description": "A road thief with a nicked blade and no patience.",
+      "level": 3,
+      "stats": {
+        "vitality": 16,
+        "strength": 7,
+        "defense": 4,
+        "agility": 6,
+        "focus": 2
+      },
+      "skills": ["slash"],
+      "experience": 18,
+      "gold": 12
+    },
+    {
+      "id": "cairn_guard",
+      "name": "Cairn Guard",
+      "description": "Stone that learned to swing. It does not get tired.",
+      "level": 6,
+      "stats": {
+        "vitality": 40,
+        "strength": 12,
+        "defense": 10,
+        "agility": 2,
+        "focus": 4
+      },
+      "skills": ["slam"],
+      "experience": 40,
+      "gold": 25
+    }
+  ]
+}
