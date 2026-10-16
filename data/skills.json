@@ -5,6 +5,7 @@
       "name": "Strike",
       "description": "A straightforward blow.",
       "kind": "active",
+      "effect": "damage",
       "target": "enemy",
       "power": 10,
       "focusCost": 0,
@@ -15,8 +16,30 @@
       "name": "Brace",
       "description": "Set your guard and weather the next hit.",
       "kind": "active",
+      "effect": "guard",
       "target": "self",
-      "power": 0,
+      "power": 50,
+      "focusCost": 2
+    },
+    {
+      "id": "heavy_blow",
+      "name": "Heavy Blow",
+      "description": "A committed swing. It costs focus and hits harder than a strike.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 18,
+      "focusCost": 2,
+      "scaling": "strength"
+    },
+    {
+      "id": "second_wind",
+      "name": "Second Wind",
+      "description": "Catch your breath and knit a wound.",
+      "kind": "active",
+      "effect": "heal",
+      "target": "self",
+      "power": 8,
       "focusCost": 2
     },
     {
@@ -24,8 +47,9 @@
       "name": "Rage",
       "description": "Spend focus to hit harder for a short while.",
       "kind": "active",
+      "effect": "empower",
       "target": "self",
-      "power": 0,
+      "power": 50,
       "focusCost": 3
     },
     {
@@ -33,6 +57,7 @@
       "name": "Cleave",
       "description": "A wide swing that hits every enemy.",
       "kind": "active",
+      "effect": "damage",
       "target": "allEnemies",
       "power": 8,
       "focusCost": 4,
@@ -51,8 +76,9 @@
       "name": "Shield Wall",
       "description": "Interpose your shield and blunt the blow.",
       "kind": "active",
+      "effect": "guard",
       "target": "self",
-      "power": 0,
+      "power": 75,
       "focusCost": 3
     },
     {
@@ -60,6 +86,7 @@
       "name": "Taunt",
       "description": "Force an enemy to strike at you.",
       "kind": "active",
+      "effect": "taunt",
       "target": "enemy",
       "power": 0,
       "focusCost": 2
@@ -77,6 +104,7 @@
       "name": "Bite",
       "description": "A quick snap.",
       "kind": "active",
+      "effect": "damage",
       "target": "enemy",
       "power": 6,
       "focusCost": 0,
@@ -87,6 +115,7 @@
       "name": "Slash",
       "description": "A dirty cut with a short blade.",
       "kind": "active",
+      "effect": "damage",
       "target": "enemy",
       "power": 8,
       "focusCost": 0,
@@ -97,6 +126,7 @@
       "name": "Slam",
       "description": "A heavy, slow impact.",
       "kind": "active",
+      "effect": "damage",
       "target": "enemy",
       "power": 14,
       "focusCost": 2,

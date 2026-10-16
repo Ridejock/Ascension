@@ -19,7 +19,7 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json", "skills.json", "classes.json", "enemies.json", "items.json",
+    "stats.json", "skills.json", "classes.json", "enemies.json", "items.json", "combat.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -246,7 +246,25 @@ struct Parsed {
     std::vector<ClassDef> Classes;
     std::vector<EnemyDef> Enemies;
     std::vector<ItemDef> Items;
+    CombatRules Rules;
 };
+
+bool ParseEffect(std::string_view text, SkillEffect& out)
+{
+    if (text == "damage")
+        out = SkillEffect::Damage;
+    else if (text == "guard")
+        out = SkillEffect::Guard;
+    else if (text == "heal")
+        out = SkillEffect::Heal;
+    else if (text == "empower")
+        out = SkillEffect::Empower;
+    else if (text == "taunt")
+        out = SkillEffect::Taunt;
+    else
+        return false;
+    return true;
+}
 
 template <typename T> const T* FindId(const std::vector<T>& items, std::string_view id)
 {
@@ -351,10 +369,16 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (skill.Kind == SkillKind::Active) {
             if (!AllowKeys(entry,
-                           {"id", "name", "description", "kind", "target", "power", "focusCost",
-                            "scaling"},
+                           {"id", "name", "description", "kind", "effect", "target", "power",
+                            "focusCost", "scaling"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
+            std::string effect;
+            if (!RequireString(entry, "effect", effect, error))
+                return fail(error);
+            if (!ParseEffect(effect, skill.Effect))
+                return fail("'effect' must be \"damage\", \"guard\", \"heal\", \"empower\" or "
+                            "\"taunt\"");
             std::string target;
             if (!RequireString(entry, "target", target, error))
                 return fail(error);
@@ -366,8 +390,19 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 skill.Target = SkillTarget::AllEnemies;
             else
                 return fail("'target' must be \"self\", \"enemy\" or \"allEnemies\"");
+            const bool selfEffect = skill.Effect == SkillEffect::Guard ||
+                                    skill.Effect == SkillEffect::Heal ||
+                                    skill.Effect == SkillEffect::Empower;
+            if (selfEffect && skill.Target != SkillTarget::Self)
+                return fail(std::string("'target' for ") + ToString(skill.Effect) +
+                            " must be \"self\"");
+            if (!selfEffect && skill.Target == SkillTarget::Self)
+                return fail(std::string("'target' for ") + ToString(skill.Effect) +
+                            " must be \"enemy\" or \"allEnemies\"");
             if (!RequireInt(entry, "power", 0, 9999, skill.Power, error))
                 return fail(error);
+            if (skill.Effect == SkillEffect::Guard && skill.Power > 100)
+                return fail("'power' for a guard is a percent from 0 to 100");
             if (!RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
                 return fail(error);
             const auto scaling = entry.find("scaling");
@@ -599,6 +634,33 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("combat");
+    if (body == root.end() || !body->is_object()) {
+        error = "'combat' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body,
+                   {"hpPerVitality", "minDamage", "attackNumerator", "attackDenominator",
+                    "defenseNumerator", "defenseDenominator"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    CombatRules rules;
+    if (!RequireInt(*body, "hpPerVitality", 1, 999, rules.HpPerVitality, error) ||
+        !RequireInt(*body, "minDamage", 0, 999, rules.MinDamage, error) ||
+        !RequireInt(*body, "attackNumerator", 0, 999, rules.AttackNumerator, error) ||
+        !RequireInt(*body, "attackDenominator", 1, 999, rules.AttackDenominator, error) ||
+        !RequireInt(*body, "defenseNumerator", 0, 999, rules.DefenseNumerator, error) ||
+        !RequireInt(*body, "defenseDenominator", 1, 999, rules.DefenseDenominator, error))
+        return false;
+    parsed.Rules = rules;
+    return true;
+}
+
 bool SkillRefs(const Parsed& parsed, const std::vector<std::string>& ids, SkillKind kind,
                const std::string& where, std::string& error)
 {
@@ -671,9 +733,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats, LoadSkills, LoadClasses, LoadEnemies, LoadItems};
-    const char* names[] = {"stats.json", "skills.json", "classes.json", "enemies.json",
-                           "items.json"};
+    const Loader loaders[] = {LoadStats,   LoadSkills, LoadClasses,
+                              LoadEnemies, LoadItems,  LoadCombat};
+    const char* names[] = {"stats.json",   "skills.json", "classes.json",
+                           "enemies.json", "items.json",  "combat.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -688,7 +751,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats", "skills", "classes", "enemies", "items"};
+        const char* allowedTop[] = {"stats", "skills", "classes", "enemies", "items", "combat"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
@@ -774,6 +837,7 @@ bool Database::Load(DataError* error)
     m_Classes = std::move(parsed.Classes);
     m_Enemies = std::move(parsed.Enemies);
     m_Items = std::move(parsed.Items);
+    m_Rules = parsed.Rules;
     ApplyTimes(times);
     ++m_Revision;
     NoteSuccess(error);

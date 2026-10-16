@@ -81,7 +81,10 @@ void TestSample()
     Check(error.Message.empty(), "a successful load has no error");
     Check(data.GetRevision() == 1, "the first load is revision 1");
     Check(data.GetStats().size() == 5, "five stats");
-    Check(data.GetSkills().size() == 11, "eleven skills");
+    Check(data.GetSkills().size() == 13, "thirteen skills");
+    Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
+              data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1,
+          "combat.json supplies the damage rules");
     Check(data.GetEnemies().size() == 3, "three enemies");
     Check(data.GetItems().size() == 4, "four items");
 
@@ -96,7 +99,15 @@ void TestSample()
               fighter->Stats.Defense == 6 && fighter->Stats.Agility == 5 &&
               fighter->Stats.Focus == 4,
           "fighter level-1 stats");
-    Check(data.ActiveSkills(*fighter).size() == 2, "fighter has two skills");
+    const auto fighterSkills = data.ActiveSkills(*fighter);
+    Check(fighterSkills.size() == 4 && fighterSkills[0]->Id == "strike" &&
+              fighterSkills[1]->Id == "brace" && fighterSkills[2]->Id == "heavy_blow" &&
+              fighterSkills[3]->Id == "second_wind",
+          "fighter has strike, brace, heavy blow and second wind");
+    Check(fighterSkills[0]->Effect == SkillEffect::Damage && fighterSkills[0]->Power == 10,
+          "strike is a damage skill");
+    Check(fighterSkills[1]->Effect == SkillEffect::Guard && fighterSkills[1]->Power == 50,
+          "brace guards half of the next hit");
     Check(data.Passives(*fighter).empty(), "fighter has no passive");
 
     const auto evolutions = data.EvolutionsOf("fighter");
@@ -113,9 +124,9 @@ void TestSample()
           "guardian adds 2 skills and 1 passive");
 
     const auto berserkerSkills = data.ActiveSkills(*berserker);
-    Check(berserkerSkills.size() == 4 && berserkerSkills[0]->Id == "strike" &&
-              berserkerSkills[1]->Id == "brace" && berserkerSkills[2]->Id == "rage" &&
-              berserkerSkills[3]->Id == "cleave",
+    Check(berserkerSkills.size() == 6 && berserkerSkills[0]->Id == "strike" &&
+              berserkerSkills[1]->Id == "brace" && berserkerSkills[4]->Id == "rage" &&
+              berserkerSkills[5]->Id == "cleave",
           "berserker keeps fighter's skills and adds rage and cleave");
     const auto berserkerPassives = data.Passives(*berserker);
     Check(berserkerPassives.size() == 1 && berserkerPassives[0]->Id == "bloodlust" &&
@@ -299,6 +310,19 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "items.json", "\"slot\": \"weapon\"", "\"slot\": \"hat\"");
         TestRejected(copy.Path, "items.json", "slot", "an unknown gear slot is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "\"effect\": \"damage\"",
+                      "\"effect\": \"explode\"");
+        TestRejected(copy.Path, "skills.json", "effect", "an unknown skill effect is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "combat.json", "\"attackDenominator\": 1",
+                      "\"attackDenominator\": 0");
+        TestRejected(copy.Path, "combat.json", "attackDenominator",
+                     "a combat divisor of zero is rejected");
     }
     {
         TempCopy copy;

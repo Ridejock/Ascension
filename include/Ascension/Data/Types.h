@@ -50,17 +50,37 @@ enum class SkillKind : u8 { Active, Passive };
 // Who an active skill lands on. Passives leave this at Enemy; it is not used.
 enum class SkillTarget : u8 { Self, Enemy, AllEnemies };
 
+// What an active skill does. The numbers (power, scaling, focus) come from the skill; the
+// damage formula that combines them with defense comes from CombatRules.
+enum class SkillEffect : u8 { Damage, Guard, Heal, Empower, Taunt };
+
 struct SkillDef {
     std::string Id;
     std::string Name;
     std::string Description;
     SkillKind Kind = SkillKind::Active;
+    SkillEffect Effect = SkillEffect::Damage;
     SkillTarget Target = SkillTarget::Enemy;
-    i32 Power = 0;       // active: damage, or 0 for a skill that does not hit
+    i32 Power = 0;       // damage/heal added to the scaling stat; guard is a percent (0-100);
+                         // empower is the percent added to the next blow
     i32 FocusCost = 0;   // active
     std::string Scaling; // active: a stat id the power scales with, or empty
     std::string Stat;    // passive: the stat it changes
     i32 Amount = 0;      // passive: added to that stat
+};
+
+// The integers from combat.json. Damage, before a guard, is
+//   max(MinDamage, power + scalingStat * AttackNumerator / AttackDenominator
+//                      - defense * DefenseNumerator / DefenseDenominator)
+// and an empower percent is applied to the attack term first. Heal uses the same attack term
+// with no defense. Max health is vitality times HpPerVitality. Denominators are at least 1.
+struct CombatRules {
+    i32 HpPerVitality = 1;
+    i32 MinDamage = 0;
+    i32 AttackNumerator = 1;
+    i32 AttackDenominator = 1;
+    i32 DefenseNumerator = 1;
+    i32 DefenseDenominator = 1;
 };
 
 // A class. A base class (EvolvesFrom empty) has level-1 Stats and per-level Growth. An evolution
@@ -106,6 +126,7 @@ struct ItemDef {
 
 [[nodiscard]] const char* ToString(SkillKind kind);
 [[nodiscard]] const char* ToString(SkillTarget target);
+[[nodiscard]] const char* ToString(SkillEffect effect);
 [[nodiscard]] const char* ToString(GearSlot slot);
 
 // --- StatBlock (inline: five fields, no reason to hide them in a .cpp) ---
@@ -173,6 +194,19 @@ inline const char* ToString(SkillTarget target)
     if (target == SkillTarget::AllEnemies)
         return "allEnemies";
     return "enemy";
+}
+
+inline const char* ToString(SkillEffect effect)
+{
+    if (effect == SkillEffect::Guard)
+        return "guard";
+    if (effect == SkillEffect::Heal)
+        return "heal";
+    if (effect == SkillEffect::Empower)
+        return "empower";
+    if (effect == SkillEffect::Taunt)
+        return "taunt";
+    return "damage";
 }
 
 inline const char* ToString(GearSlot slot)

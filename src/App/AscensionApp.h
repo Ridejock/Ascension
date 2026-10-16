@@ -1,12 +1,16 @@
 #pragma once
 
-#include "Ascension/Data/Database.h"
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "Ascension/Combat/Battle.h"
 #include "Emerald/Core/Application.h"
 
 namespace Ascension {
 
-// Loads data/ next to the executable and draws the Fighter with rectangles and debug text.
-// CheckForChanges runs a few times a second, so saving a JSON file updates the screen.
+// One Fighter against one enemy from data/. Skills, health and the damage formula come from
+// the JSON, and a settled save updates the fight that is already on screen.
 class AscensionApp : public Emerald::Application {
 public:
     explicit AscensionApp(const Emerald::ApplicationSpec& spec);
@@ -18,7 +22,16 @@ protected:
     void OnRender2D(Emerald::Renderer2D& renderer) override;
 
 private:
+    void BeginFight();
+    void ResolveFoe();
+    void Note(std::string line);
+    void Note(const ActionResult& result);
+
     Database m_Data;
+    std::unique_ptr<Battle> m_Battle;
+    std::vector<std::string> m_Log;
+    std::string m_StartError;
+    i32 m_EnemyIndex = 0;
     f32 m_ReloadWait = 0.0f;
 };
 
