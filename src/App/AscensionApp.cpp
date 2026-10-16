@@ -9,7 +9,7 @@
 
 #include "Emerald/Core/Paths.h"
 #include "Emerald/Math/Mat4.h"
-#include "PlaceholderText.h"
+#include "Emerald/Renderer/DebugText.h"
 
 namespace Ascension {
 
@@ -36,6 +36,17 @@ constexpr Emerald::Vec4 kError{0.95f, 0.45f, 0.38f, 1.0f};
 constexpr Emerald::Vec4 kFigure{0.78f, 0.62f, 0.32f, 1.0f};
 
 constexpr f32 kPollSeconds = 0.25f;
+
+// The debug font draws letters as uppercase. Data names stay mixed case on disk.
+std::string Upper(std::string_view text)
+{
+    std::string out(text);
+    for (char& code : out) {
+        if (code >= 'a' && code <= 'z')
+            code = static_cast<char>(code - 'a' + 'A');
+    }
+    return out;
+}
 
 Emerald::Vec4 StatColor(std::string_view id)
 {
@@ -72,11 +83,11 @@ void DrawPanel(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin,
 void DrawStatRow(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, std::string_view name,
                  i32 value, const Emerald::Vec4& color)
 {
-    std::string label(name);
+    std::string label = Upper(name);
     if (label.size() < 10)
         label.append(10 - label.size(), ' ');
     label += std::to_string(value);
-    DrawText(renderer, origin, label, kInk, 2.0f);
+    Emerald::DrawDebugText(renderer, origin, label, kInk, 2);
     const Emerald::Vec2 bar{origin.x + 200.0f, origin.y + 2.0f};
     constexpr f32 kBarWidth = 220.0f;
     constexpr f32 kBarHeight = 12.0f;
@@ -134,57 +145,58 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     const ClassDef* fighter = m_Data.FindClass("fighter");
     if (!m_Data.IsLoaded() || fighter == nullptr) {
-        DrawText(renderer, {left.x + 24.0f, left.y + 28.0f}, "Ascension", kFrame, 3.0f);
+        Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 28.0f}, "ASCENSION", kFrame, 3);
         const std::string message =
-            m_Data.GetLastError().empty() ? "Could not load data/." : m_Data.GetLastError();
-        DrawText(renderer, {left.x + 24.0f, left.y + 80.0f}, message, kError, 2.0f,
-                 leftSize.x - 48.0f);
+            Upper(m_Data.GetLastError().empty() ? "Could not load data/." : m_Data.GetLastError());
+        Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 80.0f}, message, kError, 2,
+                               leftSize.x - 48.0f);
         renderer.End();
         return;
     }
 
     DrawFigure(renderer, {left.x + 36.0f, left.y + 28.0f}, 18.0f, kFigure);
     f32 y = left.y + 28.0f;
-    DrawText(renderer, {left.x + 150.0f, y}, "Ascension", kFrame, 3.0f);
-    y += TextLineHeight(3.0f) + 4.0f;
-    DrawText(renderer, {left.x + 150.0f, y}, "Placeholder", kDim, 2.0f);
+    Emerald::DrawDebugText(renderer, {left.x + 150.0f, y}, "ASCENSION", kFrame, 3);
+    y += Emerald::DebugTextLineHeight(3) + 4.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 150.0f, y}, "PLACEHOLDER", kDim, 2);
     y = left.y + 168.0f;
-    DrawText(renderer, {left.x + 28.0f, y}, fighter->Name, kInk, 3.0f);
-    y += TextLineHeight(3.0f) + 6.0f;
-    y = DrawText(renderer, {left.x + 28.0f, y}, fighter->Description, kDim, 2.0f,
-                 leftSize.x - 56.0f);
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(fighter->Name), kInk, 3);
+    y += Emerald::DebugTextLineHeight(3) + 6.0f;
+    y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(fighter->Description), kDim, 2,
+                               leftSize.x - 56.0f);
     y += 8.0f;
-    DrawText(renderer, {left.x + 28.0f, y}, "Level 1", kInk, 2.0f);
-    y += TextLineHeight(2.0f) + 10.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "LEVEL 1", kInk, 2);
+    y += Emerald::DebugTextLineHeight(2) + 10.0f;
 
     const StatBlock stats = m_Data.StatsAt(*fighter, 1);
     for (const StatDef& stat : m_Data.GetStats()) {
         DrawStatRow(renderer, {left.x + 28.0f, y}, stat.Name, stats.Get(stat.Id),
                     StatColor(stat.Id));
-        y += TextLineHeight(2.0f) + 6.0f;
+        y += Emerald::DebugTextLineHeight(2) + 6.0f;
     }
 
     y += 8.0f;
-    DrawText(renderer, {left.x + 28.0f, y}, "Skills", kFrame, 2.0f);
-    y += TextLineHeight(2.0f) + 4.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 4.0f;
     for (const SkillDef* skill : m_Data.ActiveSkills(*fighter)) {
-        DrawText(renderer, {left.x + 28.0f, y}, skill->Name, kInk, 2.0f);
-        y += TextLineHeight(2.0f) + 2.0f;
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(skill->Name), kInk, 2);
+        y += Emerald::DebugTextLineHeight(2) + 2.0f;
     }
 
     y = right.y + 24.0f;
-    DrawText(renderer, {right.x + 20.0f, y}, "Evolutions at level 5", kFrame, 2.0f);
-    y += TextLineHeight(2.0f) + 12.0f;
+    Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, "EVOLUTIONS AT LEVEL 5", kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 12.0f;
     for (const ClassDef* evolution : m_Data.EvolutionsOf(fighter->Id)) {
-        DrawText(renderer, {right.x + 20.0f, y}, evolution->Name, kInk, 2.0f);
-        y += TextLineHeight(2.0f) + 4.0f;
+        Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, Upper(evolution->Name), kInk, 2);
+        y += Emerald::DebugTextLineHeight(2) + 4.0f;
         const StatBlock atLevel = m_Data.StatsAt(*evolution, evolution->EvolveLevel);
-        std::string line = "Level " + std::to_string(evolution->EvolveLevel);
-        line += "   Vit " + std::to_string(atLevel.Vitality);
-        line += "  Str " + std::to_string(atLevel.Strength);
-        line += "  Def " + std::to_string(atLevel.Defense);
-        y = DrawText(renderer, {right.x + 20.0f, y}, line, kDim, 1.0f, rightSize.x - 40.0f);
-        std::string added = "Adds";
+        std::string line = "LEVEL " + std::to_string(evolution->EvolveLevel);
+        line += "   VIT " + std::to_string(atLevel.Vitality);
+        line += "  STR " + std::to_string(atLevel.Strength);
+        line += "  DEF " + std::to_string(atLevel.Defense);
+        y = Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, line, kDim, 1,
+                                   rightSize.x - 40.0f);
+        std::string added = "ADDS";
         for (const SkillDef* skill : m_Data.ActiveSkills(*evolution)) {
             bool onParent = false;
             for (const SkillDef* parentSkill : m_Data.ActiveSkills(*fighter)) {
@@ -192,39 +204,41 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                     onParent = true;
             }
             if (!onParent)
-                added += "  " + skill->Name;
+                added += "  " + Upper(skill->Name);
         }
         for (const SkillDef* skill : m_Data.Passives(*evolution))
-            added += "  [" + skill->Name + "]";
-        y = DrawText(renderer, {right.x + 20.0f, y}, added, kInk, 1.0f, rightSize.x - 40.0f);
+            added += "  (" + Upper(skill->Name) + ")";
+        y = Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, added, kInk, 1,
+                                   rightSize.x - 40.0f);
         y += 10.0f;
     }
 
     y += 6.0f;
-    std::string loaded = std::to_string(m_Data.GetEnemies().size()) + " enemies, " +
-                         std::to_string(m_Data.GetItems().size()) + " items";
-    DrawText(renderer, {right.x + 20.0f, y}, loaded, kDim, 2.0f);
-    y += TextLineHeight(2.0f) + 8.0f;
+    std::string loaded = std::to_string(m_Data.GetEnemies().size()) + " ENEMIES, " +
+                         std::to_string(m_Data.GetItems().size()) + " ITEMS";
+    Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, loaded, kDim, 2);
+    y += Emerald::DebugTextLineHeight(2) + 8.0f;
     for (const EnemyDef& enemy : m_Data.GetEnemies()) {
-        DrawText(renderer, {right.x + 20.0f, y}, enemy.Name, kInk, 2.0f);
-        y += TextLineHeight(2.0f) + 2.0f;
+        Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, Upper(enemy.Name), kInk, 2);
+        y += Emerald::DebugTextLineHeight(2) + 2.0f;
     }
     y += 6.0f;
     for (const ItemDef& item : m_Data.GetItems()) {
-        const std::string row = item.Name + "  (" + ToString(item.Slot) + ")";
-        DrawText(renderer, {right.x + 20.0f, y}, row, kDim, 1.0f);
-        y += TextLineHeight(1.0f) + 2.0f;
+        const std::string row = Upper(item.Name) + "  (" + Upper(ToString(item.Slot)) + ")";
+        Emerald::DrawDebugText(renderer, {right.x + 20.0f, y}, row, kDim, 1);
+        y += Emerald::DebugTextLineHeight(1) + 2.0f;
     }
 
     const std::string revision =
-        "Data rev " + std::to_string(m_Data.GetRevision()) + "    edit data/*.json to update";
-    DrawText(renderer, {left.x + 28.0f, height - 72.0f}, revision, kDim, 1.0f, width - 80.0f);
+        "DATA REV " + std::to_string(m_Data.GetRevision()) + "    EDIT A DATA JSON FILE TO UPDATE";
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, height - 72.0f}, revision, kDim, 1,
+                           width - 80.0f);
 
     if (!m_Data.GetLastError().empty()) {
         renderer.FillRect({16.0f, height - 40.0f}, {width - 32.0f, 28.0f},
                           {0.35f, 0.10f, 0.10f, 1.0f});
-        DrawText(renderer, {24.0f, height - 34.0f}, m_Data.GetLastError(), kError, 1.0f,
-                 width - 48.0f);
+        Emerald::DrawDebugText(renderer, {24.0f, height - 34.0f}, Upper(m_Data.GetLastError()),
+                               kError, 1, width - 48.0f);
     }
 
     renderer.End();

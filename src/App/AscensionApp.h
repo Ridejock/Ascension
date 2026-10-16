@@ -5,7 +5,7 @@
 
 namespace Ascension {
 
-// Loads data/ next to the executable and draws the Fighter with rectangles and placeholder text.
+// Loads data/ next to the executable and draws the Fighter with rectangles and debug text.
 // CheckForChanges runs a few times a second, so saving a JSON file updates the screen.
 class AscensionApp : public Emerald::Application {
 public:

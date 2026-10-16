@@ -44,7 +44,7 @@ endif()
 include(FetchContent)
 FetchContent_Declare(Emerald
     GIT_REPOSITORY https://github.com/Ridejock/Emerald.git
-    GIT_TAG        dc90b7ddae80c3fb6b8630cb47cd883a8a2e3bba
+    GIT_TAG        f45d5a65ab03fe533f2d0f37282602991da67165
     GIT_PROGRESS   TRUE
 )
 FetchContent_MakeAvailable(Emerald) # also brings SDL3, spdlog, stb, nlohmann/json (and ImGui if enabled)
@@ -72,8 +72,6 @@ add_executable(Ascension
     src/App/Main.cpp
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
-    src/App/PlaceholderText.cpp
-    src/App/PlaceholderText.h
 )
 target_link_libraries(Ascension PRIVATE AscensionData)
 # A dev build watches the source data/ so saving a JSON file updates the running

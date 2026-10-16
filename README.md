@@ -1,8 +1,8 @@
 # Ascension
 
-A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton and the JSON data layer. The window draws the loaded Fighter with rectangles and a placeholder font. Combat is not in yet.
+A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton and the JSON data layer. The window draws the loaded Fighter with rectangles and Emerald's built-in debug font. Combat is not in yet.
 
-Emerald is fetched by CMake and pinned to commit `dc90b7ddae80c3fb6b8630cb47cd883a8a2e3bba` (see `CMakeLists.txt`). To use a local checkout instead:
+Emerald is fetched by CMake and pinned to commit `f45d5a65ab03fe533f2d0f37282602991da67165` (see `CMakeLists.txt`). To use a local checkout instead:
 
 ```sh
 cmake --preset debug -DASCENSION_EMERALD_SOURCE_DIR=C:/dev/Emerald
