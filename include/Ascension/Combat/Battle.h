@@ -33,9 +33,17 @@ struct CombatantState {
 struct ActionResult {
     bool Accepted = false;
     std::string Text;
+    std::string SkillId;
     i32 Damage = 0;
     i32 Healing = 0;
     BattleResult Result = BattleResult::Ongoing;
+};
+
+// One practiced skill. Rank 1 is untrained. Battle adds (Rank - 1) * powerPerRank to damage
+// and healing for the player only; a guard's percent is left alone.
+struct SkillRank {
+    std::string Id;
+    i32 Rank = 1;
 };
 
 // The attack term after empower, minus defense, then raised to MinDamage. Guard is applied
@@ -99,6 +107,10 @@ public:
     [[nodiscard]] i32 Level() const { return m_Level; }
     [[nodiscard]] std::span<const std::string> PlayerSkillIds() const { return m_PlayerSkills; }
 
+    // Empty ranks and a zero bonus leave every skill at the power in skills.json, which is
+    // what the combat tests use. The sandbox passes the hero's ranks before each blow.
+    void SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks);
+
     ActionResult UseSkill(std::string_view skillId);
     ActionResult Wait();
     ActionResult EnemyAct();
@@ -109,6 +121,7 @@ private:
     ActionResult Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill);
     const SkillDef* ChooseEnemySkill() const;
     void FinishIfDead();
+    [[nodiscard]] i32 PlayerPower(const SkillDef& skill) const;
 
     const Database* m_Data = nullptr;
     std::unique_ptr<TurnModel> m_Turns;
@@ -120,6 +133,8 @@ private:
     std::vector<std::string> m_PlayerSkills;
     std::vector<std::string> m_EnemySkills;
     CombatRules m_Rules;
+    std::vector<SkillRank> m_PlayerRanks;
+    i32 m_PowerPerRank = 0;
     BattleResult m_Result = BattleResult::Ongoing;
     bool m_Started = false;
 };

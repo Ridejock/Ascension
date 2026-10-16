@@ -75,6 +75,16 @@ target_link_libraries(AscensionCombat PUBLIC AscensionData)
 emerald_set_warnings(AscensionCombat)
 
 # ---------------------------------------------------------------------------
+# Career: XP, skill ranks, and the evolution choice. Combat does not include this.
+# ---------------------------------------------------------------------------
+add_library(AscensionProgress STATIC
+    src/Progress/Hero.cpp
+    include/Ascension/Progress/Hero.h
+)
+target_link_libraries(AscensionProgress PUBLIC AscensionData)
+emerald_set_warnings(AscensionProgress)
+
+# ---------------------------------------------------------------------------
 # The combat sandbox. It has no shaders of its own; emerald_add_shaders compiles
 # the engine's with shadercross (the only shader compiler; .hlsl is not handed to fxc).
 # ---------------------------------------------------------------------------
@@ -83,7 +93,7 @@ add_executable(Ascension
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
 )
-target_link_libraries(Ascension PRIVATE AscensionCombat)
+target_link_libraries(Ascension PRIVATE AscensionCombat AscensionProgress)
 # A dev build watches the source data/ so saving a JSON file updates the running
 # game. The directory is missing in a packaged build, and the app then reads the
 # data/ copied next to the executable.
@@ -105,7 +115,7 @@ add_dependencies(Ascension AscensionContent)
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT Ascension)
 
 # ---------------------------------------------------------------------------
-# Tests (ctest): the JSON loaders, validation and hot reload. No window or GPU.
+# Tests (ctest): the JSON loaders, combat, and the XP / evolution career. No window or GPU.
 # ---------------------------------------------------------------------------
 option(ASCENSION_BUILD_TESTS "Build the Ascension data tests" ON)
 if(ASCENSION_BUILD_TESTS)
@@ -123,6 +133,13 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionCombatTests)
     add_test(NAME Combat COMMAND AscensionCombatTests)
+
+    add_executable(AscensionProgressTests tests/ProgressTests.cpp tests/Check.h)
+    target_link_libraries(AscensionProgressTests PRIVATE AscensionProgress AscensionCombat)
+    target_compile_definitions(AscensionProgressTests PRIVATE
+        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionProgressTests)
+    add_test(NAME Progress COMMAND AscensionProgressTests)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,8 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json", "skills.json", "classes.json", "enemies.json", "items.json", "combat.json",
+    "stats.json", "skills.json", "classes.json",  "enemies.json",
+    "items.json", "combat.json", "progress.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -247,6 +248,7 @@ struct Parsed {
     std::vector<EnemyDef> Enemies;
     std::vector<ItemDef> Items;
     CombatRules Rules;
+    ProgressRules Progress;
 };
 
 bool ParseEffect(std::string_view text, SkillEffect& out)
@@ -661,6 +663,57 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("progress");
+    if (body == root.end() || !body->is_object()) {
+        error = "'progress' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"xpToReach", "usesPerRank", "maxSkillRank", "powerPerRank"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    const auto curve = body->find("xpToReach");
+    if (curve == body->end() || !curve->is_array() || curve->empty()) {
+        error = "'xpToReach' must be a list of the total XP for each level";
+        return false;
+    }
+    if (curve->size() > 99) {
+        error = "'xpToReach' has more than 99 levels";
+        return false;
+    }
+    ProgressRules rules;
+    i32 previous = -1;
+    usize index = 0;
+    for (const Json& entry : *curve) {
+        i32 xp = 0;
+        if (!ReadInt(entry, 0, 999999, xp, error)) {
+            error = "level " + std::to_string(index + 1) + " xp " + error;
+            return false;
+        }
+        if (index == 0 && xp != 0) {
+            error = "level 1 xp must be 0";
+            return false;
+        }
+        if (index > 0 && xp <= previous) {
+            error = "level " + std::to_string(index + 1) + " xp must be greater than level " +
+                    std::to_string(index);
+            return false;
+        }
+        rules.XpToReach.push_back(xp);
+        previous = xp;
+        ++index;
+    }
+    if (!RequireInt(*body, "usesPerRank", 1, 999, rules.UsesPerRank, error) ||
+        !RequireInt(*body, "maxSkillRank", 1, 99, rules.MaxSkillRank, error) ||
+        !RequireInt(*body, "powerPerRank", 0, 999, rules.PowerPerRank, error))
+        return false;
+    parsed.Progress = std::move(rules);
+    return true;
+}
+
 bool SkillRefs(const Parsed& parsed, const std::vector<std::string>& ids, SkillKind kind,
                const std::string& where, std::string& error)
 {
@@ -733,10 +786,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats,   LoadSkills, LoadClasses,
-                              LoadEnemies, LoadItems,  LoadCombat};
-    const char* names[] = {"stats.json",   "skills.json", "classes.json",
-                           "enemies.json", "items.json",  "combat.json"};
+    const Loader loaders[] = {LoadStats, LoadSkills, LoadClasses, LoadEnemies,
+                              LoadItems, LoadCombat, LoadProgress};
+    const char* names[] = {"stats.json", "skills.json", "classes.json", "enemies.json",
+                           "items.json", "combat.json", "progress.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -751,7 +804,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats", "skills", "classes", "enemies", "items", "combat"};
+        const char* allowedTop[] = {"stats", "skills", "classes", "enemies",
+                                    "items", "combat", "progress"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
@@ -838,6 +892,7 @@ bool Database::Load(DataError* error)
     m_Enemies = std::move(parsed.Enemies);
     m_Items = std::move(parsed.Items);
     m_Rules = parsed.Rules;
+    m_Progress = std::move(parsed.Progress);
     ApplyTimes(times);
     ++m_Revision;
     NoteSuccess(error);

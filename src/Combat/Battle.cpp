@@ -261,6 +261,27 @@ const SkillDef* Battle::ChooseEnemySkill() const
     return best;
 }
 
+void Battle::SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks)
+{
+    m_PowerPerRank = powerPerRank > 0 ? powerPerRank : 0;
+    m_PlayerRanks = std::move(ranks);
+}
+
+i32 Battle::PlayerPower(const SkillDef& skill) const
+{
+    i32 rank = 1;
+    for (const SkillRank& row : m_PlayerRanks) {
+        if (row.Id == skill.Id && row.Rank > rank)
+            rank = row.Rank;
+    }
+    i64 power = static_cast<i64>(skill.Power) + static_cast<i64>(rank - 1) * m_PowerPerRank;
+    if (power < 0)
+        power = 0;
+    if (power > 9999)
+        power = 9999;
+    return static_cast<i32>(power);
+}
+
 ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill)
 {
     if (user.Focus < skill.FocusCost)
@@ -269,10 +290,12 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     user.Focus -= skill.FocusCost;
     ActionResult result;
     result.Accepted = true;
+    result.SkillId = skill.Id;
+    const i32 power = &user == &m_Player ? PlayerPower(skill) : skill.Power;
 
     if (skill.Effect == SkillEffect::Damage) {
         StrikeQuery hit;
-        hit.Power = skill.Power;
+        hit.Power = power;
         if (!skill.Scaling.empty())
             hit.ScalingStat = user.Stats.Get(skill.Scaling);
         hit.Defense = other.Stats.Defense;
@@ -292,7 +315,7 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
                       std::to_string(skill.Power) + " percent.";
     } else if (skill.Effect == SkillEffect::Heal) {
         const i32 scaling = skill.Scaling.empty() ? 0 : user.Stats.Get(skill.Scaling);
-        const i32 amount = HealAmount(skill.Power, scaling, m_Rules);
+        const i32 amount = HealAmount(power, scaling, m_Rules);
         const i32 before = user.Hp;
         const i32 room = user.MaxHp - user.Hp;
         user.Hp = before + (amount < room ? amount : room);

@@ -1,0 +1,8 @@
+{
+  "progress": {
+    "xpToReach": [0, 8, 20, 40, 60, 90, 130, 180, 240, 310],
+    "usesPerRank": 2,
+    "maxSkillRank": 5,
+    "powerPerRank": 1
+  }
+}
