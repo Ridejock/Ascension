@@ -327,9 +327,9 @@ void AscensionApp::OnUpdate(f32 dt)
     if (m_Data.GetRevision() == revision)
         return;
     if (!m_Hero.IsReady()) {
-        std::string error;
-        if (!m_Hero.Start(m_Data, error)) {
-            m_StartError = error;
+        std::string why;
+        if (!m_Hero.Start(m_Data, why)) {
+            m_StartError = why;
             return;
         }
         BeginFight();
