@@ -47,6 +47,55 @@
       "skills": ["slam"],
       "experience": 40,
       "gold": 25
+    },
+    {
+      "id": "mire_lurker",
+      "name": "Mire Lurker",
+      "description": "It waits under the black water and bites whatever leans in.",
+      "level": 5,
+      "stats": {
+        "vitality": 18,
+        "strength": 9,
+        "defense": 3,
+        "agility": 11,
+        "focus": 0
+      },
+      "skills": ["gnaw"],
+      "experience": 14,
+      "gold": 15
+    },
+    {
+      "id": "oathbreaker",
+      "name": "Oathbreaker",
+      "description": "Armor from a vow already broken. The plates still hold.",
+      "level": 5,
+      "stats": {
+        "vitality": 32,
+        "strength": 10,
+        "defense": 14,
+        "agility": 4,
+        "focus": 0
+      },
+      "skills": ["sunder"],
+      "experience": 20,
+      "gold": 18
+    },
+    {
+      "id": "cairn_warden",
+      "name": "Cairn Warden",
+      "description": "The stone that commands the cairn. It does not offer a second chance.",
+      "level": 8,
+      "boss": true,
+      "stats": {
+        "vitality": 60,
+        "strength": 18,
+        "defense": 6,
+        "agility": 3,
+        "focus": 6
+      },
+      "skills": ["crush", "rend"],
+      "experience": 80,
+      "gold": 40
     }
   ]
 }

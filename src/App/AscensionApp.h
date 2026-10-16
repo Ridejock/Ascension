@@ -25,7 +25,7 @@ protected:
 private:
     void BeginFight();
     void ResolveFoe();
-    void PushRanks();
+    void PushRanks(std::string_view pendingSkill = {});
     void AwardXp();
     void Note(std::string line);
     void Note(const ActionResult& result);

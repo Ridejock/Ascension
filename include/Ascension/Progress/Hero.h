@@ -41,6 +41,11 @@ public:
     // Counts one use. Returns the rank after this use (unchanged when `skillId` is unknown).
     i32 NoteUse(std::string_view skillId);
 
+    // The rank this skill would have if the next accepted use counted. Unknown ids stay put.
+    // The sandbox asks for this before the blow, so the use that crosses a rank deals the new
+    // power.
+    [[nodiscard]] i32 RankAfterUse(std::string_view skillId) const;
+
     // Active skills of the current class, parent first. Empty if the class is gone.
     [[nodiscard]] std::vector<std::string> SkillIds() const;
 

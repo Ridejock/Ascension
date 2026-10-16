@@ -54,6 +54,11 @@ enum class SkillTarget : u8 { Self, Enemy, AllEnemies };
 // damage formula that combines them with defense comes from CombatRules.
 enum class SkillEffect : u8 { Damage, Guard, Heal, Empower, Taunt };
 
+// What a passive does. Stat adds Amount to Stat. Bloodied adds Power percent of the attack
+// term at empty health, and nothing at full health. Ward shaves Power percent off every
+// incoming blow. Battle reads these; it does not special-case a passive id.
+enum class PassiveEffect : u8 { Stat, Bloodied, Ward };
+
 struct SkillDef {
     std::string Id;
     std::string Name;
@@ -61,19 +66,24 @@ struct SkillDef {
     SkillKind Kind = SkillKind::Active;
     SkillEffect Effect = SkillEffect::Damage;
     SkillTarget Target = SkillTarget::Enemy;
-    i32 Power = 0;       // damage/heal added to the scaling stat; guard is a percent (0-100);
-                         // empower is the percent added to the next blow
+    PassiveEffect Passive = PassiveEffect::Stat;
+    i32 Power = 0;       // damage/heal added to the scaling stat; guard and taunt are a percent
+                         // (0-100); empower is the percent added to the next blow; bloodied is
+                         // the percent added to the attack term at empty health; ward is the
+                         // percent shaved off every incoming blow
     i32 FocusCost = 0;   // active
+    i32 Refund = 0;      // taunt: focus paid back when the next hit actually lands
     std::string Scaling; // active: a stat id the power scales with, or empty
-    std::string Stat;    // passive: the stat it changes
-    i32 Amount = 0;      // passive: added to that stat
+    std::string Stat;    // stat passive: the stat it changes
+    i32 Amount = 0;      // stat passive: added to that stat
 };
 
 // The integers from combat.json. Damage, before a guard, is
 //   max(MinDamage, power + scalingStat * AttackNumerator / AttackDenominator
 //                      - defense * DefenseNumerator / DefenseDenominator)
-// and an empower percent is applied to the attack term first. Heal uses the same attack term
-// with no defense. Max health is vitality times HpPerVitality. Denominators are at least 1.
+// and an empower percent and a bloodied percent are applied to the attack term first. Heal
+// uses the same attack term with no defense. Max health is vitality times HpPerVitality.
+// Denominators are at least 1.
 struct CombatRules {
     i32 HpPerVitality = 1;
     i32 MinDamage = 0;
@@ -168,6 +178,7 @@ struct EnemyDef {
     std::vector<std::string> Skills; // active skill ids
     i32 Experience = 0;
     i32 Gold = 0;
+    bool Boss = false; // the roster has one boss, last in the sample
 };
 
 enum class GearSlot : u8 { Weapon, Armor, Accessory };
@@ -264,6 +275,15 @@ inline const char* ToString(SkillEffect effect)
     if (effect == SkillEffect::Taunt)
         return "taunt";
     return "damage";
+}
+
+inline const char* ToString(PassiveEffect effect)
+{
+    if (effect == PassiveEffect::Bloodied)
+        return "bloodied";
+    if (effect == PassiveEffect::Ward)
+        return "ward";
+    return "stat";
 }
 
 inline const char* ToString(GearSlot slot)

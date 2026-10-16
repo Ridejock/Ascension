@@ -122,6 +122,12 @@ void TestFormula()
     Check(GuardedDamage(16, 50) == 8, "a 50 percent guard halves the hit");
     Check(GuardedDamage(16, 100) == 0, "a full guard can reduce a hit to zero");
     Check(HealAmount(8, 0, rules) == 8, "a heal with no scaling is its power");
+    Check(BloodiedPercent(150, 72, 72) == 0, "bloodlust is quiet at full health");
+    Check(BloodiedPercent(150, 36, 72) == 75, "half health is half of the bloodied power");
+    hit.BloodiedPercent = 75;
+    hit.Defense = 2;
+    hit.EmpowerPercent = 0;
+    Check(StrikeDamage(hit, rules) == 29, "bloodied percent scales the attack before defense");
 }
 
 Battle StartSample(Database& data, std::unique_ptr<TurnModel> turns, const char* enemy)
@@ -275,8 +281,10 @@ void TestPassiveAndSwap()
     Battle battle = StartSample(
         data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
         "wolf");
-    Check(battle.Player().Stats.Strength == 10, "bloodlust adds its strength before the fight");
-    Check(battle.UseSkill("strike").Damage == 18, "the extra strength is in the blow");
+    Check(battle.Player().Stats.Strength == 8, "bloodlust does not add strength");
+    Check(battle.UseSkill("strike").Damage == 16, "bloodlust is quiet at full health");
+    battle.SetPlayerHp(36);
+    Check(battle.UseSkill("strike").Damage == 29, "half health adds 75 percent to the attack");
 
     Database sample(kSample);
     Check(sample.Load(), "sample data loads");
@@ -285,6 +293,118 @@ void TestPassiveAndSwap()
         "wolf");
     Check(swapped.Actor() == CombatantSide::Player,
           "the turn model can put the fighter first even though the wolf is faster");
+}
+
+void FightPlan(Battle& battle, bool shield)
+{
+    for (i32 step = 0; step < 80 && battle.Result() == BattleResult::Ongoing; ++step) {
+        if (battle.Actor() == CombatantSide::Enemy) {
+            battle.EnemyAct();
+            continue;
+        }
+        if (shield && battle.Player().Focus >= 3 && battle.Player().GuardPercent == 0)
+            battle.UseSkill("shield_wall");
+        else
+            battle.UseSkill("strike");
+    }
+}
+
+void TestWardAndTaunt()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    Battle guard(data, std::make_unique<AgilityRoundModel>());
+    std::string error;
+    Check(guard.Start("guardian", 5, "cairn_guard", error), "the guardian meets the cairn guard");
+    Check(guard.Player().WardPercent == 20, "bulwark wards every incoming blow");
+    Check(guard.Wait().Accepted, "the guardian lets the cairn guard swing");
+    Check(guard.EnemyAct().Damage == 8, "bulwark takes the slam from 11 down to 8");
+
+    Battle berserk(data, std::make_unique<AgilityRoundModel>());
+    Check(berserk.Start("berserker", 5, "cairn_guard", error),
+          "the berserker meets the cairn guard");
+    Check(berserk.Wait().Accepted, "the berserker lets the cairn guard swing");
+    Check(berserk.EnemyAct().Damage == 16, "without a ward the same slam deals 16");
+
+    Battle taunt(data, std::make_unique<AgilityRoundModel>());
+    Check(taunt.Start("guardian", 5, "cairn_guard", error), "the taunt fight starts");
+    Check(taunt.UseSkill("taunt").Accepted && taunt.Player().Focus == 6, "taunt spends 2 focus");
+    Check(taunt.Enemy().WeakenPercent == 40 && taunt.Player().RefundOnHit == 2,
+          "taunt weakens the next hit and offers focus back");
+    const ActionResult softened = taunt.EnemyAct();
+    Check(softened.Damage == 4 && taunt.Player().Focus == 8 && taunt.Player().RefundOnHit == 0,
+          "the weakened slam deals 4 and the focus comes back");
+    Check(taunt.Wait().Accepted, "the guardian waits out the second slam");
+    Check(taunt.EnemyAct().Damage == 8, "the weaken lasts for one blow");
+
+    Battle blocked(data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{
+                             CombatantSide::Player, CombatantSide::Player, CombatantSide::Enemy}));
+    Check(blocked.Start("guardian", 5, "cairn_guard", error), "the shielded taunt starts");
+    Check(blocked.UseSkill("taunt").Accepted && blocked.UseSkill("shield_wall").Accepted,
+          "taunt and shield wall both spend focus");
+    Check(blocked.Player().Focus == 3, "the two skills leave 3 focus");
+    const ActionResult stopped = blocked.EnemyAct();
+    Check(stopped.Damage == 0 && blocked.Player().Focus == 3 && blocked.Player().RefundOnHit == 2,
+          "a blow that deals nothing does not pay the focus back");
+}
+
+void TestWardReloads()
+{
+    TempCopy copy;
+    Database data(copy.Path);
+    Check(data.Load(), "copied sample loads");
+    Battle guard(data, std::make_unique<AgilityRoundModel>());
+    std::string error;
+    Check(guard.Start("guardian", 5, "cairn_guard", error), "the ward fight starts");
+    Check(guard.Wait().Accepted, "the guardian waits for the slam");
+    Check(guard.EnemyAct().Damage == 8, "the sample ward takes the slam to 8");
+
+    ReplaceInFile(copy.Path / "skills.json", "\"effect\": \"ward\",\n      \"power\": 20",
+                  "\"effect\": \"ward\",\n      \"power\": 0");
+    DataError reported;
+    Check(data.CheckForChanges(&reported) == 0, "the ward edit waits");
+    Check(data.CheckForChanges(&reported) == 1, "the ward edit reloads");
+    Check(guard.ApplyData(error), "the fight picks up the new ward");
+    Check(guard.Wait().Accepted, "the guardian waits for the second slam");
+    Check(guard.EnemyAct().Damage == 11, "a ward of 0 leaves the slam at 11");
+}
+
+void TestBossPlans()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+    Battle berserk(data, std::make_unique<AgilityRoundModel>());
+    Check(berserk.Start("berserker", 6, "cairn_warden", error), "the berserker meets the warden");
+    FightPlan(berserk, false);
+    Check(berserk.Result() == BattleResult::Victory && berserk.Player().Hp > 0,
+          "a berserker who keeps striking outraces the warden");
+
+    Battle naked(data, std::make_unique<AgilityRoundModel>());
+    Check(naked.Start("guardian", 6, "cairn_warden", error), "the guardian meets the warden");
+    FightPlan(naked, false);
+    Check(naked.Result() == BattleResult::Defeat, "striking through the warden kills a guardian");
+
+    Battle wall(data, std::make_unique<AgilityRoundModel>());
+    Check(wall.Start("guardian", 6, "cairn_warden", error), "the guardian sets a shield");
+    FightPlan(wall, true);
+    Check(wall.Result() == BattleResult::Victory && wall.Player().Hp > 0,
+          "shield wall is how a guardian outlasts the warden");
+
+    TempCopy copy;
+    Database quiet(copy.Path);
+    Check(quiet.Load(), "copied sample loads");
+    ReplaceInFile(copy.Path / "skills.json", "\"effect\": \"bloodied\",\n      \"power\": 150",
+                  "\"effect\": \"bloodied\",\n      \"power\": 0");
+    DataError reported;
+    Check(quiet.CheckForChanges(&reported) == 0, "the bloodlust edit waits");
+    Check(quiet.CheckForChanges(&reported) == 1, "the bloodlust edit reloads");
+    Battle flat(quiet, std::make_unique<AgilityRoundModel>());
+    Check(flat.Start("berserker", 6, "cairn_warden", error),
+          "the quiet berserker meets the warden");
+    FightPlan(flat, false);
+    Check(flat.Result() == BattleResult::Defeat,
+          "without bloodlust the same strikes lose to the warden");
 }
 
 } // namespace
@@ -297,6 +417,9 @@ int main()
     TestDefeatAndSkip();
     TestHotReloadAndPassive();
     TestPassiveAndSwap();
+    TestWardAndTaunt();
+    TestWardReloads();
+    TestBossPlans();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

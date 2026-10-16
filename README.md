@@ -69,7 +69,7 @@ ctest --test-dir build/debug --output-on-failure
 | `stats.json` | The five combat stats: vitality, strength, defense, agility, focus |
 | `skills.json` | Active skills and passives |
 | `classes.json` | Fighter, and the level-5 evolutions Berserker and Guardian |
-| `enemies.json` | Enemies (level, stats, skills, experience, gold) |
+| `enemies.json` | The roster (level, stats, skills, experience, gold) and which one is the boss |
 | `items.json` | Gear (weapon, armor, accessory) and the stats it adds |
 | `combat.json` | Health per vitality, minimum damage, and the attack and defense divisors |
 | `progress.json` | Total XP to reach each level, uses per skill rank, and power added per rank |
@@ -78,7 +78,9 @@ Fighter is the base class. At level 1 the sandbox gives them four skills: Strike
 
 `progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` once. The Wolf is 8, the Bandit is 18, and the Cairn Guard is 40, so those three wins in order (8 + 18 + 40 = 66) reach level 5 and open the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
 
-A skill starts at rank 1. Every `usesPerRank` uses (2 in the sample) raise it by one, up to `maxSkillRank`. Each rank above 1 adds `powerPerRank` to that skill's damage and healing. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
+A skill starts at rank 1. Every `usesPerRank` uses (2 in the sample) raise it by one, up to `maxSkillRank`. Each rank above 1 adds `powerPerRank` to that skill's damage and healing, including the blow that crosses the rank. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
+
+Bloodlust is a `bloodied` passive: at full health it adds nothing, and at empty health it adds its `power` percent to the attack (150 in the sample). Bulwark is a `ward`: every incoming blow loses its `power` percent (20 in the sample). Taunt's `power` is the percent taken off the enemy's next hit, and `refund` is the focus paid back when that hit actually deals damage. None of those three look up a skill id in the battle code.
 
 A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. Those divisors are 1 in the sample, so the stat is added and subtracted whole. Brace's `power` is the percent of the next hit that is ignored. Max health is vitality times `hpPerVitality`. Focus is the focus stat, and it does not come back until the fight restarts. Higher agility acts first each round; a tie lets the Fighter go first. The order comes from a turn model (`AgilityRoundModel`), so a later active-time model can replace it without rewriting damage.
 
@@ -95,10 +97,14 @@ Run the game. The Wolf is faster, so it bites first. Then:
 | `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind (up to `6` after evolving) |
 | Space | Wait, and let the enemy act |
 | `R` | Fight this enemy again. Level, XP, and skill ranks stay |
-| `N` | The next enemy in `enemies.json` (Wolf, Bandit, Cairn Guard) |
+| `N` | The next enemy in `enemies.json` |
 | Escape | Quit |
 
-After a win that reaches level 5 the skill list is replaced by the choice. `1` is Berserker (strength and the Bloodlust passive). `2` is Guardian (defense and the Bulwark passive). The new skills show immediately. `R` starts the next fight as that class.
+The roster, in order, is Wolf, Bandit, Cairn Guard, Mire Lurker, Oathbreaker, and the boss, Cairn Warden. The corner of the foe's name shows the place in that list, and the Warden is marked BOSS.
+
+After a win that reaches level 5 the skill list is replaced by the choice. `1` is Berserker. `2` is Guardian. The new skills show immediately. `R` starts the next fight as that class. Wolf, Bandit, and Cairn Guard are 8 + 18 + 40 XP, which is level 5. Mire Lurker and Oathbreaker come next (still level 5, then level 6). The Warden is the level-6 fight.
+
+Against the Warden the two paths are different. A Berserker keeps striking: Bloodlust hits harder as health drops, and that is what wins. A Guardian who only strikes loses. `5` is Shield Wall and blunts the Warden's crush. `6` is Taunt: the next hit lands lighter, and a hit that gets through pays 2 focus back.
 
 Waiting against the Wolf loses. Strike three times and it dies (8 XP, level 2). `N` restarts on the next foe.
 

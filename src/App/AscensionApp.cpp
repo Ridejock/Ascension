@@ -109,6 +109,10 @@ std::string AddsLine(const Database& data, const ClassDef& evolution)
 
 std::string PassiveLine(const Database& data, const SkillDef& passive)
 {
+    if (passive.Passive == PassiveEffect::Bloodied)
+        return "Passive " + passive.Name + " up to +" + std::to_string(passive.Power);
+    if (passive.Passive == PassiveEffect::Ward)
+        return "Passive " + passive.Name + " incoming -" + std::to_string(passive.Power);
     std::string stat = passive.Stat;
     if (const StatDef* named = data.FindStat(passive.Stat))
         stat = named->Name;
@@ -140,7 +144,7 @@ void AscensionApp::Note(const ActionResult& result)
     Note(result.Text);
 }
 
-void AscensionApp::PushRanks()
+void AscensionApp::PushRanks(std::string_view pendingSkill)
 {
     if (m_Battle == nullptr || !m_Hero.IsReady())
         return;
@@ -148,7 +152,10 @@ void AscensionApp::PushRanks()
     for (const std::string& id : m_Hero.SkillIds()) {
         SkillRank row;
         row.Id = id;
-        row.Rank = m_Hero.RankOf(id);
+        if (!pendingSkill.empty() && id == pendingSkill)
+            row.Rank = m_Hero.RankAfterUse(id);
+        else
+            row.Rank = m_Hero.RankOf(id);
         ranks.push_back(std::move(row));
     }
     m_Battle->SetPlayerRanks(m_Data.GetProgress().PowerPerRank, std::move(ranks));
@@ -309,7 +316,11 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     const auto skills = m_Battle->PlayerSkillIds();
     if (digit < 0 || digit >= kMaxHotkeys || digit >= static_cast<int>(skills.size()))
         return;
-    const ActionResult used = m_Battle->UseSkill(skills[static_cast<usize>(digit)]);
+    const std::string& skillId = skills[static_cast<usize>(digit)];
+    PushRanks(skillId);
+    const ActionResult used = m_Battle->UseSkill(skillId);
+    if (!used.Accepted)
+        PushRanks();
     Note(used);
     FinishAction(used, true);
     ResolveFoe();
@@ -476,8 +487,19 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
     y = right.y + 24.0f;
-    Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(enemy.Name), kInk, 3);
-    y += Emerald::DebugTextLineHeight(3) + 8.0f;
+    const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
+    const i32 foeCount = static_cast<i32>(m_Data.GetEnemies().size());
+    std::string foeTitle = enemy.Name;
+    if (foeCount > 0)
+        foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(foeCount);
+    Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(foeTitle), kInk, 3);
+    y += Emerald::DebugTextLineHeight(3) + 4.0f;
+    if (foe != nullptr && foe->Boss) {
+        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, "BOSS", kError, 2);
+        y += Emerald::DebugTextLineHeight(2) + 4.0f;
+    } else {
+        y += 4.0f;
+    }
     Emerald::DrawDebugText(renderer, {right.x + 140.0f, y},
                            Upper(PoolText("HP", enemy.Hp, enemy.MaxHp)), kInk, 2);
     y += Emerald::DebugTextLineHeight(2) + 4.0f;
@@ -485,7 +507,6 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
     DrawBar(renderer, {right.x + 140.0f, y}, 280.0f, enemyHp, kHp);
     y += 28.0f;
-    const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
     if (foe != nullptr) {
         y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foe->Description), kDim, 2,
                                    rightSize.x - 56.0f);

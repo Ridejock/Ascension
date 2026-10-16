@@ -372,7 +372,7 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
         if (skill.Kind == SkillKind::Active) {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "kind", "effect", "target", "power",
-                            "focusCost", "scaling"},
+                            "focusCost", "scaling", "refund"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string effect;
@@ -405,8 +405,16 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 return fail(error);
             if (skill.Effect == SkillEffect::Guard && skill.Power > 100)
                 return fail("'power' for a guard is a percent from 0 to 100");
+            if (skill.Effect == SkillEffect::Taunt && skill.Power > 100)
+                return fail("'power' for a taunt is a percent from 0 to 100");
             if (!RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
                 return fail(error);
+            if (skill.Effect == SkillEffect::Taunt) {
+                if (!RequireInt(entry, "refund", 0, 99, skill.Refund, error))
+                    return fail(error);
+            } else if (entry.contains("refund")) {
+                return fail("only a taunt has 'refund'");
+            }
             const auto scaling = entry.find("scaling");
             if (scaling != entry.end()) {
                 if (!scaling->is_string())
@@ -416,14 +424,39 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                     return fail("scaling stat " + Quote(skill.Scaling) + " does not exist");
             }
         } else {
-            if (!AllowKeys(entry, {"id", "name", "description", "kind", "stat", "amount"}, unknown))
+            if (!AllowKeys(
+                    entry,
+                    {"id", "name", "description", "kind", "effect", "stat", "amount", "power"},
+                    unknown))
                 return fail("unknown field " + Quote(unknown));
-            if (!RequireString(entry, "stat", skill.Stat, error))
+            std::string effect;
+            if (!RequireString(entry, "effect", effect, error))
                 return fail(error);
-            if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
-                return fail("stat " + Quote(skill.Stat) + " does not exist");
-            if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error))
-                return fail(error);
+            const bool hasStat = entry.contains("stat") || entry.contains("amount");
+            const bool hasPower = entry.contains("power");
+            if (effect == "stat") {
+                skill.Passive = PassiveEffect::Stat;
+                if (hasPower)
+                    return fail("a stat passive uses amount, not power");
+                if (!RequireString(entry, "stat", skill.Stat, error))
+                    return fail(error);
+                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
+                    return fail("stat " + Quote(skill.Stat) + " does not exist");
+                if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error))
+                    return fail(error);
+            } else if (effect == "bloodied" || effect == "ward") {
+                if (effect == "bloodied")
+                    skill.Passive = PassiveEffect::Bloodied;
+                else
+                    skill.Passive = PassiveEffect::Ward;
+                if (hasStat)
+                    return fail(std::string(effect) + " uses power, not a stat");
+                const i32 maxPower = skill.Passive == PassiveEffect::Ward ? 100 : 500;
+                if (!RequireInt(entry, "power", 0, maxPower, skill.Power, error))
+                    return fail(error);
+            } else {
+                return fail("'effect' must be \"stat\", \"bloodied\" or \"ward\"");
+            }
         }
         if (!RequireString(entry, "name", skill.Name, error) ||
             !RequireString(entry, "description", skill.Description, error))
@@ -552,10 +585,10 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (FindId(parsed.Enemies, enemy.Id) != nullptr)
             return fail("there is another enemy with this id");
         std::string unknown;
-        if (!AllowKeys(
-                entry,
-                {"id", "name", "description", "level", "stats", "skills", "experience", "gold"},
-                unknown))
+        if (!AllowKeys(entry,
+                       {"id", "name", "description", "level", "stats", "skills", "experience",
+                        "gold", "boss"},
+                       unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
             return fail(error);
@@ -574,10 +607,25 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (!RequireInt(entry, "experience", 0, 999999, enemy.Experience, error) ||
             !RequireInt(entry, "gold", 0, 999999, enemy.Gold, error))
             return fail(error);
+        const auto boss = entry.find("boss");
+        if (boss != entry.end()) {
+            if (!boss->is_boolean())
+                return fail("'boss' must be true or false");
+            enemy.Boss = boss->get<bool>();
+        }
         if (!RequireString(entry, "name", enemy.Name, error) ||
             !RequireString(entry, "description", enemy.Description, error))
             return fail(error);
         parsed.Enemies.push_back(std::move(enemy));
+    }
+    i32 bosses = 0;
+    for (const EnemyDef& enemy : parsed.Enemies) {
+        if (enemy.Boss)
+            ++bosses;
+    }
+    if (bosses != 1) {
+        error = "the roster needs exactly one boss";
+        return false;
     }
     return true;
 }

@@ -27,6 +27,8 @@ void CarryWounds(const CombatantState& from, CombatantState& to)
 {
     to.GuardPercent = from.GuardPercent;
     to.EmpowerPercent = from.EmpowerPercent;
+    to.WeakenPercent = from.WeakenPercent;
+    to.RefundOnHit = from.RefundOnHit;
     if (from.Hp <= 0 || from.MaxHp <= 0) {
         to.Hp = 0;
     } else {
@@ -47,12 +49,22 @@ void CarryWounds(const CombatantState& from, CombatantState& to)
 
 } // namespace
 
+i32 BloodiedPercent(i32 power, i32 hp, i32 maxHp)
+{
+    if (power <= 0 || maxHp <= 0 || hp >= maxHp)
+        return 0;
+    if (hp < 0)
+        hp = 0;
+    return static_cast<i32>(static_cast<i64>(power) * (maxHp - hp) / maxHp);
+}
+
 i32 StrikeDamage(const StrikeQuery& hit, const CombatRules& rules)
 {
     i64 attack = hit.Power;
     attack += Scaled(hit.ScalingStat, rules.AttackNumerator, rules.AttackDenominator);
-    if (hit.EmpowerPercent != 0)
-        attack = attack * (100 + hit.EmpowerPercent) / 100;
+    const i32 bonus = hit.EmpowerPercent + hit.BloodiedPercent;
+    if (bonus != 0)
+        attack = attack * (100 + bonus) / 100;
     attack = ClampPool(attack);
     const i32 defense = hit.Defense > 0 ? hit.Defense : 0;
     attack -= Scaled(defense, rules.DefenseNumerator, rules.DefenseDenominator);
@@ -133,12 +145,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     player.Id = klass->Id;
     player.Name = klass->Name;
     player.Stats = m_Data->StatsAt(*klass, m_Level);
-    for (const SkillDef* passive : m_Data->Passives(*klass)) {
-        i32 value = player.Stats.Get(passive->Stat) + passive->Amount;
-        if (value < 0)
-            value = 0;
-        player.Stats.Set(passive->Stat, value);
-    }
+    ApplyPassives(player);
     player.MaxHp = ClampPool(static_cast<i64>(player.Stats.Vitality) * rules.HpPerVitality);
     player.MaxFocus = ClampPool(player.Stats.Focus);
 
@@ -267,6 +274,56 @@ void Battle::SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks)
     m_PlayerRanks = std::move(ranks);
 }
 
+void Battle::SetPlayerHp(i32 hp)
+{
+    if (!m_Started || m_Player.MaxHp <= 0)
+        return;
+    if (hp < 1)
+        hp = 1;
+    if (hp > m_Player.MaxHp)
+        hp = m_Player.MaxHp;
+    m_Player.Hp = hp;
+}
+
+void Battle::ApplyPassives(CombatantState& player) const
+{
+    const ClassDef* klass = m_Data == nullptr ? nullptr : m_Data->FindClass(player.Id);
+    if (klass == nullptr)
+        return;
+    i32 ward = 0;
+    for (const SkillDef* passive : m_Data->Passives(*klass)) {
+        if (passive->Passive == PassiveEffect::Stat) {
+            i32 value = player.Stats.Get(passive->Stat) + passive->Amount;
+            if (value < 0)
+                value = 0;
+            player.Stats.Set(passive->Stat, value);
+        } else if (passive->Passive == PassiveEffect::Ward)
+            ward += passive->Power;
+    }
+    if (ward < 0)
+        ward = 0;
+    if (ward > 100)
+        ward = 100;
+    player.WardPercent = ward;
+}
+
+i32 Battle::BloodiedFor(const CombatantState& user) const
+{
+    if (m_Data == nullptr || user.MaxHp <= 0 || user.Hp >= user.MaxHp)
+        return 0;
+    const ClassDef* klass = m_Data->FindClass(user.Id);
+    if (klass == nullptr)
+        return 0;
+    i32 power = 0;
+    for (const SkillDef* passive : m_Data->Passives(*klass)) {
+        if (passive->Passive == PassiveEffect::Bloodied)
+            power += passive->Power;
+    }
+    if (power > 500)
+        power = 500;
+    return BloodiedPercent(power, user.Hp, user.MaxHp);
+}
+
 i32 Battle::PlayerPower(const SkillDef& skill) const
 {
     i32 rank = 1;
@@ -300,15 +357,30 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
             hit.ScalingStat = user.Stats.Get(skill.Scaling);
         hit.Defense = other.Stats.Defense;
         hit.EmpowerPercent = user.EmpowerPercent;
+        hit.BloodiedPercent = BloodiedFor(user);
         user.EmpowerPercent = 0;
         i32 damage = StrikeDamage(hit, m_Rules);
+        if (user.WeakenPercent > 0) {
+            damage = GuardedDamage(damage, user.WeakenPercent);
+            user.WeakenPercent = 0;
+        }
         damage = GuardedDamage(damage, other.GuardPercent);
         other.GuardPercent = 0;
+        damage = GuardedDamage(damage, other.WardPercent);
         other.Hp -= damage;
         if (other.Hp < 0)
             other.Hp = 0;
         result.Damage = damage;
         result.Text = user.Name + " uses " + skill.Name + " for " + std::to_string(damage) + ".";
+        if (damage > 0 && other.RefundOnHit > 0) {
+            const i32 paid = other.RefundOnHit;
+            i32 focus = other.Focus + paid;
+            if (focus > other.MaxFocus)
+                focus = other.MaxFocus;
+            other.Focus = focus;
+            other.RefundOnHit = 0;
+            result.Text += " " + std::to_string(paid) + " focus returns.";
+        }
     } else if (skill.Effect == SkillEffect::Guard) {
         user.GuardPercent = skill.Power;
         result.Text = user.Name + " uses " + skill.Name + ". The next hit is reduced by " +
@@ -328,6 +400,14 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     } else if (skill.Effect == SkillEffect::Empower) {
         user.EmpowerPercent = skill.Power;
         result.Text = user.Name + " uses " + skill.Name + ". The next blow hits harder.";
+    } else if (skill.Effect == SkillEffect::Taunt) {
+        other.WeakenPercent = skill.Power;
+        user.RefundOnHit = skill.Refund;
+        result.Text = user.Name + " uses " + skill.Name + ". The next hit is reduced by " +
+                      std::to_string(skill.Power) + " percent.";
+        if (skill.Refund > 0)
+            result.Text +=
+                " A connecting blow pays back " + std::to_string(skill.Refund) + " focus.";
     } else {
         result.Text = user.Name + " uses " + skill.Name + ".";
     }

@@ -72,6 +72,15 @@ i32 Hero::RankOf(std::string_view skillId) const
     return RankForUses(m_Data->GetProgress(), UsesOf(skillId));
 }
 
+i32 Hero::RankAfterUse(std::string_view skillId) const
+{
+    if (m_Data == nullptr || m_Data->FindSkill(skillId) == nullptr)
+        return RankOf(skillId);
+    const i32 uses = UsesOf(skillId);
+    const i32 next = uses >= 999999 ? uses : uses + 1;
+    return RankForUses(m_Data->GetProgress(), next);
+}
+
 i32 Hero::NoteUse(std::string_view skillId)
 {
     if (m_Data == nullptr || m_Data->FindSkill(skillId) == nullptr)

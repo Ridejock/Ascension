@@ -68,8 +68,8 @@
       "name": "Bloodlust",
       "description": "The lower your health, the harder you hit.",
       "kind": "passive",
-      "stat": "strength",
-      "amount": 2
+      "effect": "bloodied",
+      "power": 150
     },
     {
       "id": "shield_wall",
@@ -84,20 +84,21 @@
     {
       "id": "taunt",
       "name": "Taunt",
-      "description": "Force an enemy to strike at you.",
+      "description": "Dare the next swing. It lands lighter, and a blow that connects pays focus back.",
       "kind": "active",
       "effect": "taunt",
       "target": "enemy",
-      "power": 0,
-      "focusCost": 2
+      "power": 40,
+      "focusCost": 2,
+      "refund": 2
     },
     {
       "id": "bulwark",
       "name": "Bulwark",
       "description": "Hold the line. Incoming blows land lighter.",
       "kind": "passive",
-      "stat": "defense",
-      "amount": 3
+      "effect": "ward",
+      "power": 20
     },
     {
       "id": "bite",
@@ -130,6 +131,50 @@
       "target": "enemy",
       "power": 14,
       "focusCost": 2,
+      "scaling": "strength"
+    },
+    {
+      "id": "gnaw",
+      "name": "Gnaw",
+      "description": "A wet bite that worries the wound.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 12,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "sunder",
+      "name": "Sunder",
+      "description": "A short chop at a joint in the armor.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 8,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "rend",
+      "name": "Rend",
+      "description": "A tearing blow that keeps coming.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 14,
+      "focusCost": 0,
+      "scaling": "strength"
+    },
+    {
+      "id": "crush",
+      "name": "Crush",
+      "description": "The whole weight of the cairn, in one swing.",
+      "kind": "active",
+      "effect": "damage",
+      "target": "enemy",
+      "power": 34,
+      "focusCost": 3,
       "scaling": "strength"
     }
   ]

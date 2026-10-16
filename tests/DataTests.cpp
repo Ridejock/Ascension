@@ -81,11 +81,11 @@ void TestSample()
     Check(error.Message.empty(), "a successful load has no error");
     Check(data.GetRevision() == 1, "the first load is revision 1");
     Check(data.GetStats().size() == 5, "five stats");
-    Check(data.GetSkills().size() == 13, "thirteen skills");
+    Check(data.GetSkills().size() == 17, "seventeen skills");
     Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
               data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1,
           "combat.json supplies the damage rules");
-    Check(data.GetEnemies().size() == 3, "three enemies");
+    Check(data.GetEnemies().size() == 6, "six enemies, counting the boss");
     Check(data.GetItems().size() == 4, "four items");
     const ProgressRules& progress = data.GetProgress();
     Check(progress.XpToReach.size() == 10 && progress.XpToReach[0] == 0 &&
@@ -137,11 +137,18 @@ void TestSample()
     const auto berserkerPassives = data.Passives(*berserker);
     Check(berserkerPassives.size() == 1 && berserkerPassives[0]->Id == "bloodlust" &&
               berserkerPassives[0]->Kind == SkillKind::Passive &&
-              berserkerPassives[0]->Stat == "strength" && berserkerPassives[0]->Amount == 2,
+              berserkerPassives[0]->Passive == PassiveEffect::Bloodied &&
+              berserkerPassives[0]->Power == 150,
           "berserker's passive is bloodlust");
     const auto guardianPassives = data.Passives(*guardian);
-    Check(guardianPassives.size() == 1 && guardianPassives[0]->Id == "bulwark",
+    Check(guardianPassives.size() == 1 && guardianPassives[0]->Id == "bulwark" &&
+              guardianPassives[0]->Passive == PassiveEffect::Ward &&
+              guardianPassives[0]->Power == 20,
           "guardian's passive is bulwark");
+    const SkillDef* taunt = data.FindSkill("taunt");
+    Check(taunt != nullptr && taunt->Effect == SkillEffect::Taunt && taunt->Power == 40 &&
+              taunt->Refund == 2 && taunt->FocusCost == 2,
+          "taunt reduces the next hit and pays focus back");
 
     const StatBlock level1 = data.StatsAt(*fighter, 1);
     Check(level1.Vitality == 18 && level1.Strength == 8, "level 1 is the base stats");
@@ -163,8 +170,16 @@ void TestSample()
 
     const EnemyDef* wolf = data.FindEnemy("wolf");
     Check(wolf != nullptr && wolf->Level == 1 && wolf->Skills.size() == 1 &&
-              wolf->Skills[0] == "bite",
+              wolf->Skills[0] == "bite" && !wolf->Boss,
           "wolf is a level-1 enemy with bite");
+    const auto enemies = data.GetEnemies();
+    Check(enemies.size() == 6 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit" &&
+              enemies[2].Id == "cairn_guard" && enemies[3].Id == "mire_lurker" &&
+              enemies[4].Id == "oathbreaker" && enemies[5].Id == "cairn_warden",
+          "the roster ends at the cairn warden");
+    Check(enemies[3].Experience == 14 && enemies[4].Experience == 20 &&
+              enemies[5].Experience == 80 && enemies[5].Boss && enemies[5].Skills.size() == 2,
+          "the warden is the only boss and pays the most experience");
     const ItemDef* sword = data.FindItem("iron_sword");
     Check(sword != nullptr && sword->Slot == GearSlot::Weapon && sword->Bonus.Strength == 3,
           "iron sword is a weapon with +3 strength");
@@ -349,6 +364,23 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "progress.json", "[0, 8", "[1, 8");
         TestRejected(copy.Path, "progress.json", "level 1", "level 1 XP must be 0");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"id\": \"wolf\"",
+                      "\"id\": \"wolf\", \"boss\": true");
+        TestRejected(copy.Path, "enemies.json", "exactly one boss", "a second boss is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"boss\": true", "\"boss\": false");
+        TestRejected(copy.Path, "enemies.json", "exactly one boss", "a roster needs a boss");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "\"effect\": \"ward\",\n      \"power\": 20",
+                      "\"effect\": \"ward\",\n      \"power\": 101");
+        TestRejected(copy.Path, "skills.json", "power", "a ward cannot exceed 100 percent");
     }
 }
 

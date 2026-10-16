@@ -14,8 +14,10 @@ enum class CombatantSide : u8 { Player, Enemy };
 
 enum class BattleResult : u8 { Ongoing, Victory, Defeat };
 
-// One side of a fight. Stats already include the class passives. Guard and empower each last
-// for one incoming or outgoing blow.
+// One side of a fight. Stat passives are already in Stats. WardPercent stays for the whole
+// fight. Guard and empower each last for one incoming or outgoing blow. WeakenPercent is the
+// reduction on this side's next damaging blow. RefundOnHit is focus gained when a blow actually
+// deals damage to this side.
 struct CombatantState {
     std::string Id;
     std::string Name;
@@ -26,6 +28,9 @@ struct CombatantState {
     i32 MaxFocus = 0;
     i32 GuardPercent = 0;
     i32 EmpowerPercent = 0;
+    i32 WardPercent = 0;
+    i32 WeakenPercent = 0;
+    i32 RefundOnHit = 0;
 
     [[nodiscard]] bool Alive() const { return Hp > 0; }
 };
@@ -53,7 +58,11 @@ struct StrikeQuery {
     i32 ScalingStat = 0;
     i32 Defense = 0;
     i32 EmpowerPercent = 0;
+    i32 BloodiedPercent = 0;
 };
+
+// Power percent at empty health, and 0 at full health. Linear in the health that is gone.
+[[nodiscard]] i32 BloodiedPercent(i32 power, i32 hp, i32 maxHp);
 
 [[nodiscard]] i32 StrikeDamage(const StrikeQuery& hit, const CombatRules& rules);
 [[nodiscard]] i32 HealAmount(i32 power, i32 scalingStat, const CombatRules& rules);
@@ -111,6 +120,10 @@ public:
     // what the combat tests use. The sandbox passes the hero's ranks before each blow.
     void SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks);
 
+    // Clamps to 1..MaxHp. The sandbox never calls this; tests place a wound so a passive that
+    // reads health can be checked at a known total.
+    void SetPlayerHp(i32 hp);
+
     ActionResult UseSkill(std::string_view skillId);
     ActionResult Wait();
     ActionResult EnemyAct();
@@ -121,7 +134,9 @@ private:
     ActionResult Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill);
     const SkillDef* ChooseEnemySkill() const;
     void FinishIfDead();
+    void ApplyPassives(CombatantState& player) const;
     [[nodiscard]] i32 PlayerPower(const SkillDef& skill) const;
+    [[nodiscard]] i32 BloodiedFor(const CombatantState& user) const;
 
     const Database* m_Data = nullptr;
     std::unique_ptr<TurnModel> m_Turns;

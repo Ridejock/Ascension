@@ -172,16 +172,18 @@ void TestRanksAndEvolution()
 
     Battle rage(data, std::make_unique<AgilityRoundModel>());
     Check(rage.Start(hero.ClassId(), hero.Level(), "wolf", why), "a berserker fight starts");
-    Check(rage.Player().Stats.Strength == 22 && rage.Player().MaxHp == 144,
-          "bloodlust adds 2 strength and health is vitality times 4");
+    Check(rage.Player().Stats.Strength == 20 && rage.Player().MaxHp == 144 &&
+              rage.Player().WardPercent == 0,
+          "berserker health is vitality times 4, and bloodlust is not flat strength");
 
     Hero guard = StartHero(data);
     guard.GrantXp(60);
     Check(guard.Choose("guardian", why), "guardian is the second path");
     Battle wall(data, std::make_unique<AgilityRoundModel>());
     Check(wall.Start(guard.ClassId(), guard.Level(), "wolf", why), "a guardian fight starts");
-    Check(wall.Player().Stats.Defense == 18 && wall.Player().MaxHp == 148,
-          "bulwark adds 3 defense and health follows the guardian's vitality");
+    Check(wall.Player().Stats.Defense == 15 && wall.Player().MaxHp == 148 &&
+              wall.Player().WardPercent == 20,
+          "bulwark is a 20 percent ward, and health follows the guardian's vitality");
 }
 
 void TestRankPower()
@@ -226,6 +228,33 @@ void TestRankPower()
           "rank does not change a guard's percent");
 }
 
+void TestRankLandsOnTheBlow()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    Hero fresh = StartHero(data);
+    Check(fresh.RankAfterUse("strike") == 1, "the first use does not reach rank 2");
+
+    Hero hero = StartHero(data);
+    Check(hero.NoteUse("strike") == 1 && hero.RankOf("strike") == 1, "one use is still rank 1");
+    Check(hero.RankAfterUse("strike") == 2, "the next use is the one that reaches rank 2");
+
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    std::string error;
+    Check(battle.Start("fighter", 1, "wolf", error), "the earning blow starts");
+    std::vector<SkillRank> ranks = RanksOf(hero);
+    for (SkillRank& row : ranks) {
+        if (row.Id == "strike")
+            row.Rank = hero.RankAfterUse(row.Id);
+    }
+    battle.SetPlayerRanks(data.GetProgress().PowerPerRank, std::move(ranks));
+    Check(battle.EnemyAct().Accepted, "the wolf acts first");
+    Check(battle.UseSkill("strike").Damage == 17,
+          "the use that reaches rank 2 deals rank-2 damage");
+    Check(hero.RankOf("strike") == 1, "the stored rank waits until the use is counted");
+    Check(hero.NoteUse("strike") == 2, "counting the blow stores rank 2");
+}
+
 void TestHotReload()
 {
     TempCopy copy;
@@ -265,6 +294,7 @@ int main()
     TestCurveAndChoice();
     TestRanksAndEvolution();
     TestRankPower();
+    TestRankLandsOnTheBlow();
     TestHotReload();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
