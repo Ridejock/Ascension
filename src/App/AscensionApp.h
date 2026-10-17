@@ -11,7 +11,8 @@
 
 namespace Ascension {
 
-// One Fighter against one enemy. Wins grant XP and gold. Between fights, Old Pell's Provisions
+// One Fighter against an encounter. Wins grant the sum of each enemy's XP and gold. Between
+// fights, Old Pell's Provisions
 // buys and sells. At an evolution level the next fight waits until the player picks a path,
 // and that screen is the only place a build reset clears skill ranks. Consumables in the bag
 // are extra turn actions. C opens every stack; number keys still cover the ones that fit.

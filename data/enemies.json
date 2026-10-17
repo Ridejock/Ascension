@@ -84,7 +84,7 @@
     {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
-      "description": "Oathkeeper Varn keeps the Stillbarrow. Below half health the barrow throws rubble. A second foe for those shards comes later.",
+      "description": "Oathkeeper Varn keeps the Stillbarrow. Below half health the barrow throws a rubble shard into the fight.",
       "level": 8,
       "boss": true,
       "stats": {
@@ -98,10 +98,25 @@
       "pattern": ["maul_swing", "crushing_slam", "stone_skin"],
       "phaseAtPercent": 50,
       "phaseStatus": "enraged",
-      "shardDamage": 10,
-      "shardEvery": 3,
+      "summon": { "enemy": "rubble_shard", "every": 3 },
       "experience": 80,
       "gold": 40
+    },
+    {
+      "id": "rubble_shard",
+      "name": "Rubble Shard",
+      "description": "A stone the barrow threw. It falls until it breaks.",
+      "level": 1,
+      "stats": {
+        "vitality": 6,
+        "strength": 0,
+        "defense": 0,
+        "agility": 1,
+        "focus": 0
+      },
+      "skills": ["rubble_strike"],
+      "experience": 0,
+      "gold": 0
     }
   ]
 }

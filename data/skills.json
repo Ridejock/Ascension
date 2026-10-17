@@ -8,7 +8,7 @@
       "target": "enemy",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength", "target": "target" }
       ]
     },
     {
@@ -64,7 +64,7 @@
       "target": "allEnemies",
       "focusCost": 4,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength", "target": "allEnemies" }
       ]
     },
     {
@@ -189,7 +189,7 @@
       "target": "enemy",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength", "target": "target" }
       ]
     },
     {
@@ -213,6 +213,17 @@
       "windup": 1,
       "effects": [
         { "id": "hit", "trigger": "onUse", "op": "damage", "power": 24, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "rubble_strike",
+      "name": "Rubble Strike",
+      "description": "A barrow stone breaks loose and falls.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "target": "target" }
       ]
     },
     {

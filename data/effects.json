@@ -27,7 +27,8 @@
       "trigger": "onUse",
       "op": "damage",
       "power": 0,
-      "scaling": "strength"
+      "scaling": "strength",
+      "target": "target"
     },
     {
       "id": "heal",
@@ -67,13 +68,15 @@
       "trigger": "onHit",
       "op": "applyStatus",
       "status": "bleed",
-      "every": 1
+      "every": 1,
+      "target": "target"
     },
     {
       "id": "stun_windup",
       "trigger": "onHit",
       "op": "stunIfWindingUp",
-      "status": "stunned"
+      "status": "stunned",
+      "target": "target"
     }
   ]
 }

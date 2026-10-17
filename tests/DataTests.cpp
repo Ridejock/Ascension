@@ -81,13 +81,13 @@ void TestSample()
     Check(error.Message.empty(), "a successful load has no error");
     Check(data.GetRevision() == 1, "the first load is revision 1");
     Check(data.GetStats().size() == 5, "five stats");
-    Check(data.GetSkills().size() == 19, "nineteen skills");
+    Check(data.GetSkills().size() == 20, "twenty skills");
     Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
               data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1 &&
               data.GetRules().FocusBase == 4 && data.GetRules().FocusPerTurn == 1 &&
               data.GetRules().FocusOnWait == 2,
           "combat.json supplies the damage rules and focus regen");
-    Check(data.GetEnemies().size() == 6, "six enemies, counting the boss");
+    Check(data.GetEnemies().size() == 7, "seven enemies, counting the boss and the shard");
     Check(data.GetItems().size() == 7, "seven items");
     const ShopDef& shop = data.GetShop();
     Check(shop.Id == "pells_provisions" && shop.Name == "Old Pell's Provisions" &&
@@ -208,10 +208,11 @@ void TestSample()
               wolf->Skills[0].Id == "bite" && !wolf->Boss,
           "wolf is a level-1 enemy with bite");
     const auto enemies = data.GetEnemies();
-    Check(enemies.size() == 6 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit" &&
+    Check(enemies.size() == 7 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit" &&
               enemies[2].Id == "tomb_moth" && enemies[3].Id == "bone_archer" &&
-              enemies[4].Id == "barrow_sentry" && enemies[5].Id == "oathkeeper_varn",
-          "the roster ends at Oathkeeper Varn");
+              enemies[4].Id == "barrow_sentry" && enemies[5].Id == "oathkeeper_varn" &&
+              enemies[6].Id == "rubble_shard",
+          "the roster's boss is Oathkeeper Varn, and the shard follows");
     Check(enemies[2].Level == 4 && enemies[2].Experience == 14 && enemies[2].Gold == 4,
           "the tomb moth pays 14 XP and 4 gold");
     Check(enemies[3].Level == 5 && enemies[3].Experience == 22 && enemies[3].Gold == 8 &&
@@ -224,8 +225,18 @@ void TestSample()
     Check(enemies[5].Experience == 80 && enemies[5].Boss && enemies[5].Level == 8 &&
               enemies[5].Stats.Vitality == 60 && enemies[5].Stats.Strength == 14 &&
               enemies[5].Stats.Defense == 12 && enemies[5].Skills.size() == 3 &&
-              enemies[5].PhaseAtPercent == 50 && enemies[5].ShardDamage == 10,
+              enemies[5].PhaseAtPercent == 50 && enemies[5].SummonId == "rubble_shard" &&
+              enemies[5].SummonEvery == 3,
           "Oathkeeper Varn is the only boss");
+    Check(enemies.size() == 7 && enemies[6].Id == "rubble_shard" && enemies[6].Experience == 0 &&
+              enemies[6].Skills.size() == 1 && enemies[6].Skills[0].Id == "rubble_strike",
+          "the rubble shard is an enemy Varn can call");
+    const auto encounters = data.GetEncounters();
+    Check(encounters.size() == 7 && encounters[0].Id == "wolf" &&
+              encounters[0].Enemies.size() == 1 && encounters[4].Id == "wolf_pack" &&
+              encounters[4].Enemies.size() == 3 && encounters[4].Enemies[0] == "wolf" &&
+              encounters[4].Enemies[2] == "wolf",
+          "the wolf pack is three wolves");
     Check(data.FindEnemy("mire_lurker") == nullptr && data.FindEnemy("oathbreaker") == nullptr &&
               data.FindEnemy("cairn_guard") == nullptr && data.FindEnemy("cairn_warden") == nullptr,
           "mire lurker, oathbreaker and the cairn names are gone");
@@ -281,8 +292,9 @@ void TestSample()
     const SkillDef* cleave = data.FindSkill("cleave");
     const EffectDef* cleaveHit = cleave != nullptr ? cleave->FindEffect("hit") : nullptr;
     Check(cleave != nullptr && cleave->Target == SkillTarget::AllEnemies && cleaveHit != nullptr &&
-              cleaveHit->Power == 8 && cleave->FocusCost == 4 && cleaveHit->Scaling == "strength",
-          "cleave is parsed as an active skill");
+              cleaveHit->Power == 8 && cleave->FocusCost == 4 && cleaveHit->Scaling == "strength" &&
+              cleaveHit->Aim == EffectAim::AllEnemies,
+          "cleave is parsed as an active skill that hits every enemy");
 }
 
 void TestHotReload()
@@ -538,7 +550,7 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "skills.json",
                       "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": "
-                      "10, \"scaling\": \"strength\" }",
+                      "10, \"scaling\": \"strength\", \"target\": \"target\" }",
                       "{ \"id\": \"hit\", \"recipe\": \"missing_blow\" }");
         TestRejected(copy.Path, "skills.json", "missing_blow", "a missing effect recipe is named");
     }
@@ -558,6 +570,33 @@ void TestValidation()
                       "reaches level 5.\",\n      \"starter\": true,\n      \"evolvesFrom\": "
                       "\"fighter\"");
         TestRejected(copy.Path, "classes.json", "starter", "an evolution cannot be a starter");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "\"target\": \"target\"", "\"target\": \"sideways\"");
+        TestRejected(copy.Path, "skills.json", "randomEnemy", "an effect target must be a known aim");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "encounters.json",
+                      "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"enemies\": "
+                      "[\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"note\": "
+                      "\"pack\",\n      \"enemies\": [\"wolf\", \"wolf\", \"wolf\"]");
+        TestRejected(copy.Path, "encounters.json", "note", "an encounter rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "encounters.json", "\"enemies\": [\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"enemies\": [\"wolf\", \"wolf\", \"wolf\", \"wolf\"]");
+        TestRejected(copy.Path, "encounters.json", "more than 3",
+                     "an encounter cannot list more than 3 enemies");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "encounters.json", "\"enemies\": [\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"enemies\": [\"wolf\", \"dragon\"]");
+        TestRejected(copy.Path, "encounters.json", "dragon", "an encounter enemy must exist");
     }
 }
 
@@ -771,6 +810,15 @@ void TestUnusedFields()
                       "\"amount\": 1, \"turns\": 2 }");
         ExpectUnused(copy.Path, "skills.json", "bulwark", "focus", "turns",
                      "grantFocus does not use turns");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": 50 }",
+                      "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": 50, "
+                      "\"target\": \"self\" }");
+        ExpectUnused(copy.Path, "skills.json", "brace", "ward", "target",
+                     "a guard does not read target");
     }
     {
         TempCopy copy;

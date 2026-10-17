@@ -48,8 +48,14 @@ struct StatDef {
 
 enum class SkillKind : u8 { Active, Passive };
 
-// Who an active skill lands on. Passives leave this at Enemy; it is not read.
+// Who an active skill is aimed at, as a default for its effects. Passives leave this at
+// Enemy; it is not read. An effect's own aim wins when the effect sets one.
 enum class SkillTarget : u8 { Self, Enemy, AllEnemies };
+
+// Who one effect lands on. `target` is the foe the skill is pointed at: the player's
+// selected enemy, or the player when an enemy acts. `allEnemies` is every living enemy.
+// `randomEnemy` is one living enemy. `self` is the unit using the skill.
+enum class EffectAim : u8 { Self, Target, AllEnemies, RandomEnemy };
 
 // When an effect runs. Battle dispatches these. It does not look at a skill id.
 // always is folded into the unit (a flat stat, or a missing-health bonus on a blow).
@@ -91,6 +97,8 @@ struct EffectDef {
     std::optional<std::string> Stat;
     std::optional<std::string> Scaling;
     std::optional<std::string> Status;
+    // Empty: use the skill's target. A skill target of "enemy" means EffectAim::Target.
+    std::optional<EffectAim> Aim;
 };
 
 // A catalog skill, after its own tune and before any grant tune. Effects keep the ids a tune
@@ -254,10 +262,20 @@ struct EnemyDef {
     i32 Gold = 0;
     bool Boss = false;                // the roster has one boss, last in the sample
     std::vector<std::string> Pattern; // repeating skill ids; empty picks the strongest hit
-    i32 PhaseAtPercent = 0;           // 0 means one phase. Otherwise phase 2 begins at this health
-    std::string PhaseStatus;          // applied once when phase 2 begins
-    i32 ShardDamage = 0;              // phase-2 hit that stands in for a second enemy
-    i32 ShardEvery = 0;               // enemy actions in phase 2 between shard telegraphs
+    i32 PhaseAtPercent = 0;  // 0 means one phase. Otherwise phase 2 begins at this health
+    std::string PhaseStatus; // applied once when phase 2 begins
+    // In phase 2, every SummonEvery actions, this enemy calls SummonId into the fight.
+    // Empty SummonId means no add. A second copy is not called while one is still up.
+    std::string SummonId;
+    i32 SummonEvery = 0;
+};
+
+// A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack).
+// The sandbox walks this list. One id is still a normal single-enemy fight.
+struct EncounterDef {
+    std::string Id;
+    std::string Name;
+    std::vector<std::string> Enemies;
 };
 
 enum class GearSlot : u8 { Weapon, Offhand, Armor, Accessory, Consumable };
@@ -303,6 +321,7 @@ struct ShopDef {
 
 [[nodiscard]] const char* ToString(SkillKind kind);
 [[nodiscard]] const char* ToString(SkillTarget target);
+[[nodiscard]] const char* ToString(EffectAim aim);
 [[nodiscard]] const char* ToString(EffectTrigger trigger);
 [[nodiscard]] const char* ToString(EffectOp op);
 [[nodiscard]] const char* ToString(GearSlot slot);
@@ -377,6 +396,17 @@ inline const char* ToString(SkillTarget target)
     if (target == SkillTarget::AllEnemies)
         return "allEnemies";
     return "enemy";
+}
+
+inline const char* ToString(EffectAim aim)
+{
+    if (aim == EffectAim::Self)
+        return "self";
+    if (aim == EffectAim::AllEnemies)
+        return "allEnemies";
+    if (aim == EffectAim::RandomEnemy)
+        return "randomEnemy";
+    return "target";
 }
 
 inline const char* ToString(EffectTrigger trigger)

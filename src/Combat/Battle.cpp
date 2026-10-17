@@ -1,5 +1,6 @@
 #include "Ascension/Combat/Battle.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace Ascension {
@@ -66,6 +67,39 @@ void CopyFightState(const CombatantState& from, CombatantState& to)
         to.Focus = 0;
     if (to.Focus > to.MaxFocus)
         to.Focus = to.MaxFocus;
+}
+
+// The first copy of a repeated name stays as it is. Later copies gain " 2", " 3", and so on.
+void DisambiguateNames(std::vector<CombatantState>& foes)
+{
+    const usize count = foes.size();
+    std::vector<i32> place(count, 0);
+    for (usize nameIndex = 0; nameIndex < count; ++nameIndex) {
+        i32 copies = 0;
+        i32 seen = 0;
+        for (usize other = 0; other < count; ++other) {
+            if (foes[other].Name != foes[nameIndex].Name)
+                continue;
+            ++copies;
+            if (other <= nameIndex)
+                ++seen;
+        }
+        if (copies > 1)
+            place[nameIndex] = seen;
+    }
+    for (usize nameIndex = 0; nameIndex < count; ++nameIndex) {
+        if (place[nameIndex] > 1)
+            foes[nameIndex].Name += " " + std::to_string(place[nameIndex]);
+    }
+}
+
+bool SeatListed(const TurnSeat& seat, std::span<const TurnSeat> living)
+{
+    for (const TurnSeat& other : living) {
+        if (other.Side == seat.Side && other.Index == seat.Index)
+            return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -205,20 +239,35 @@ void AgilityRoundModel::Reset()
     m_Open = false;
 }
 
-CombatantSide AgilityRoundModel::Next(i32 playerAgility, i32 enemyAgility)
+void AgilityRoundModel::Open(std::span<const TurnSeat> living)
 {
-    if (!m_Open || m_Index >= m_Round.size()) {
-        m_Round.clear();
-        if (playerAgility >= enemyAgility) {
-            m_Round.push_back(CombatantSide::Player);
-            m_Round.push_back(CombatantSide::Enemy);
-        } else {
-            m_Round.push_back(CombatantSide::Enemy);
-            m_Round.push_back(CombatantSide::Player);
-        }
-        m_Index = 0;
-        m_Open = true;
+    m_Round.assign(living.begin(), living.end());
+    std::sort(m_Round.begin(), m_Round.end(), [](const TurnSeat& left, const TurnSeat& right) {
+        if (left.Agility != right.Agility)
+            return left.Agility > right.Agility;
+        if (left.Side != right.Side)
+            return left.Side == CombatantSide::Player;
+        return left.Index < right.Index;
+    });
+    m_Index = 0;
+    m_Open = true;
+}
+
+TurnSeat AgilityRoundModel::Next(std::span<const TurnSeat> living)
+{
+    if (living.empty())
+        return {};
+    if (!m_Open || m_Index >= m_Round.size())
+        Open(living);
+    while (m_Index < m_Round.size() && !SeatListed(m_Round[m_Index], living))
+        ++m_Index;
+    if (m_Index >= m_Round.size()) {
+        Open(living);
+        while (m_Index < m_Round.size() && !SeatListed(m_Round[m_Index], living))
+            ++m_Index;
     }
+    if (m_Index >= m_Round.size())
+        return living.front();
     return m_Round[m_Index];
 }
 
@@ -233,6 +282,21 @@ Battle::Battle(const Database& data, std::unique_ptr<TurnModel> turns)
 {
 }
 
+void Battle::MakeFoe(const EnemyDef& def, CombatantState& foe) const
+{
+    const CombatRules rules = m_Data != nullptr ? m_Data->GetRules() : CombatRules{};
+    foe = {};
+    foe.Id = def.Id;
+    foe.Name = def.Name;
+    foe.Stats = def.Stats;
+    ApplyAlways(foe, false);
+    foe.MaxHp = ClampPool(static_cast<i64>(foe.Stats.Vitality) * rules.HpPerVitality);
+    // Enemies spend only the focus on their stat line, and it does not regenerate.
+    foe.MaxFocus = ClampPool(foe.Stats.Focus);
+    foe.Hp = foe.MaxHp;
+    foe.Focus = foe.MaxFocus;
+}
+
 bool Battle::Build(std::string& error, bool keepWounds)
 {
     if (m_Data == nullptr || m_Turns == nullptr) {
@@ -244,9 +308,28 @@ bool Battle::Build(std::string& error, bool keepWounds)
         error = "class '" + m_ClassId + "' does not exist";
         return false;
     }
-    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
-    if (enemy == nullptr) {
-        error = "enemy '" + m_EnemyId + "' does not exist";
+
+    std::vector<std::string> ids;
+    std::string encounterName = m_EncounterName;
+    if (!m_EncounterId.empty()) {
+        const EncounterDef* encounter = m_Data->FindEncounter(m_EncounterId);
+        if (encounter == nullptr) {
+            error = "encounter '" + m_EncounterId + "' does not exist";
+            return false;
+        }
+        ids = encounter->Enemies;
+        encounterName = encounter->Name;
+    } else if (!m_FallbackEnemy.empty()) {
+        if (m_Data->FindEnemy(m_FallbackEnemy) == nullptr) {
+            error = "enemy '" + m_FallbackEnemy + "' does not exist";
+            return false;
+        }
+        ids.push_back(m_FallbackEnemy);
+        const EnemyDef* lone = m_Data->FindEnemy(m_FallbackEnemy);
+        if (lone != nullptr)
+            encounterName = lone->Name;
+    } else {
+        error = "the fight has no encounter";
         return false;
     }
 
@@ -266,32 +349,54 @@ bool Battle::Build(std::string& error, bool keepWounds)
     for (const SkillDef* skill : m_Data->ActiveSkills(*klass))
         playerSkills.push_back(skill->Id);
 
-    CombatantState foe;
-    foe.Id = enemy->Id;
-    foe.Name = enemy->Name;
-    foe.Stats = enemy->Stats;
-    ApplyAlways(foe, false);
-    foe.MaxHp = ClampPool(static_cast<i64>(foe.Stats.Vitality) * rules.HpPerVitality);
-    foe.MaxFocus = ClampPool(foe.Stats.Focus);
-    std::vector<std::string> foeSkills;
-    for (const SkillGrant& grant : enemy->Skills)
-        foeSkills.push_back(grant.Id);
-
+    const std::vector<CombatantState> previous = m_Enemies;
+    const i32 previousBase = m_BaseCount;
+    std::vector<CombatantState> foes;
+    foes.reserve(ids.size() + 2);
+    for (usize slot = 0; slot < ids.size(); ++slot) {
+        const EnemyDef* def = m_Data->FindEnemy(ids[slot]);
+        if (def == nullptr) {
+            error = "enemy '" + ids[slot] + "' does not exist";
+            return false;
+        }
+        CombatantState foe;
+        MakeFoe(*def, foe);
+        if (keepWounds && static_cast<i32>(slot) < previousBase && slot < previous.size())
+            CopyFightState(previous[slot], foe);
+        foes.push_back(std::move(foe));
+    }
     if (keepWounds) {
+        for (i32 extra = previousBase; extra < static_cast<i32>(previous.size()); ++extra) {
+            if (foes.size() >= 3)
+                break;
+            const CombatantState& older = previous[static_cast<usize>(extra)];
+            const EnemyDef* def = m_Data->FindEnemy(older.Id);
+            if (def == nullptr)
+                continue;
+            CombatantState foe;
+            MakeFoe(*def, foe);
+            CopyFightState(older, foe);
+            foes.push_back(std::move(foe));
+        }
+    }
+    DisambiguateNames(foes);
+
+    if (keepWounds)
         CopyFightState(m_Player, player);
-        CopyFightState(m_Enemy, foe);
-    } else {
+    else {
         player.Hp = player.MaxHp;
         player.Focus = player.MaxFocus;
-        foe.Hp = foe.MaxHp;
-        foe.Focus = foe.MaxFocus;
     }
 
     m_Player = std::move(player);
-    m_Enemy = std::move(foe);
+    m_Enemies = std::move(foes);
     m_PlayerSkills = std::move(playerSkills);
-    m_EnemySkills = foeSkills;
     m_Rules = rules;
+    m_EncounterName = std::move(encounterName);
+    m_BaseCount = static_cast<i32>(ids.size());
+    if (!keepWounds || m_Target < 0 || m_Target >= static_cast<i32>(m_Enemies.size()))
+        m_Target = 0;
+    Retarget();
     return true;
 }
 
@@ -299,19 +404,38 @@ bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId
                    std::string& error)
 {
     m_ClassId = std::string(classId);
-    m_EnemyId = std::string(enemyId);
     m_Level = level;
+    m_EncounterId.clear();
+    m_FallbackEnemy.clear();
+    m_EncounterName.clear();
+    m_RandomCursor = 0;
+    m_Target = 0;
+    m_BaseCount = 0;
     m_Started = false;
     m_Result = BattleResult::Ongoing;
     m_UpkeepDone = false;
     m_Opening.clear();
+    if (m_Data == nullptr) {
+        error = "combat is missing its data or its turn model";
+        return false;
+    }
+    if (const EncounterDef* encounter = m_Data->FindEncounter(enemyId)) {
+        m_EncounterId = encounter->Id;
+        m_EncounterName = encounter->Name;
+    } else if (m_Data->FindEnemy(enemyId) != nullptr) {
+        m_FallbackEnemy = std::string(enemyId);
+    } else {
+        error = "encounter '" + std::string(enemyId) + "' does not exist";
+        return false;
+    }
+    m_Enemies.clear();
     if (!Build(error, false))
         return false;
     m_Turns->Reset();
     if (m_Player.Hp <= 0)
         m_Result = BattleResult::Defeat;
-    else if (m_Enemy.Hp <= 0)
-        m_Result = BattleResult::Victory;
+    else
+        FinishIfDead();
     m_Started = true;
     error.clear();
     return true;
@@ -324,27 +448,151 @@ bool Battle::ApplyData(std::string& error)
         return false;
     }
     const CombatantState player = m_Player;
-    const CombatantState enemy = m_Enemy;
+    const std::vector<CombatantState> enemies = m_Enemies;
     const std::vector<std::string> playerSkills = m_PlayerSkills;
-    const std::vector<std::string> enemySkills = m_EnemySkills;
     const CombatRules rules = m_Rules;
+    const i32 baseCount = m_BaseCount;
+    const i32 target = m_Target;
+    const std::string encounterName = m_EncounterName;
     if (!Build(error, true)) {
         m_Player = player;
-        m_Enemy = enemy;
+        m_Enemies = enemies;
         m_PlayerSkills = playerSkills;
-        m_EnemySkills = enemySkills;
         m_Rules = rules;
+        m_BaseCount = baseCount;
+        m_Target = target;
+        m_EncounterName = encounterName;
         return false;
     }
     error.clear();
     return true;
 }
 
-CombatantSide Battle::Actor()
+const CombatantState& Battle::Enemy() const
+{
+    if (m_Target >= 0 && m_Target < static_cast<i32>(m_Enemies.size()))
+        return m_Enemies[static_cast<usize>(m_Target)];
+    if (!m_Enemies.empty())
+        return m_Enemies.front();
+    static const CombatantState kEmpty;
+    return kEmpty;
+}
+
+bool Battle::SetTarget(i32 index)
+{
+    if (index < 0 || index >= static_cast<i32>(m_Enemies.size()))
+        return false;
+    if (!m_Enemies[static_cast<usize>(index)].Alive())
+        return false;
+    m_Target = index;
+    return true;
+}
+
+void Battle::CycleTarget(i32 delta)
+{
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    if (count <= 0 || delta == 0)
+        return;
+    const i32 step = delta > 0 ? 1 : -1;
+    for (i32 tries = 0; tries < count; ++tries) {
+        i32 next = m_Target + step;
+        if (next < 0)
+            next = count - 1;
+        else if (next >= count)
+            next = 0;
+        m_Target = next;
+        if (m_Enemies[static_cast<usize>(m_Target)].Alive())
+            return;
+    }
+}
+
+void Battle::Retarget()
+{
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    if (count <= 0)
+        return;
+    if (m_Target < 0 || m_Target >= count)
+        m_Target = 0;
+    if (m_Enemies[static_cast<usize>(m_Target)].Alive())
+        return;
+    for (i32 step = 1; step <= count; ++step) {
+        const i32 candidate = (m_Target + step) % count;
+        if (m_Enemies[static_cast<usize>(candidate)].Alive()) {
+            m_Target = candidate;
+            return;
+        }
+    }
+}
+
+i32 Battle::Experience() const
+{
+    i32 sum = 0;
+    if (m_Data == nullptr)
+        return 0;
+    for (const CombatantState& foe : m_Enemies) {
+        const EnemyDef* def = m_Data->FindEnemy(foe.Id);
+        if (def != nullptr)
+            sum += def->Experience;
+    }
+    return sum;
+}
+
+i32 Battle::Gold() const
+{
+    i32 sum = 0;
+    if (m_Data == nullptr)
+        return 0;
+    for (const CombatantState& foe : m_Enemies) {
+        const EnemyDef* def = m_Data->FindEnemy(foe.Id);
+        if (def != nullptr)
+            sum += def->Gold;
+    }
+    return sum;
+}
+
+std::vector<TurnSeat> Battle::Living() const
+{
+    std::vector<TurnSeat> seats;
+    if (m_Player.Alive()) {
+        TurnSeat seat;
+        seat.Side = CombatantSide::Player;
+        seat.Agility = m_Player.Stats.Agility;
+        seats.push_back(seat);
+    }
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    for (i32 foeIndex = 0; foeIndex < count; ++foeIndex) {
+        if (!m_Enemies[static_cast<usize>(foeIndex)].Alive())
+            continue;
+        TurnSeat seat;
+        seat.Side = CombatantSide::Enemy;
+        seat.Index = foeIndex;
+        seat.Agility = m_Enemies[static_cast<usize>(foeIndex)].Stats.Agility;
+        seats.push_back(seat);
+    }
+    return seats;
+}
+
+TurnSeat Battle::CurrentSeat()
 {
     if (!m_Started || m_Turns == nullptr || m_Result != BattleResult::Ongoing)
-        return CombatantSide::Player;
-    return m_Turns->Next(m_Player.Stats.Agility, m_Enemy.Stats.Agility);
+        return {};
+    const std::vector<TurnSeat> living = Living();
+    if (living.empty())
+        return {};
+    return m_Turns->Next(living);
+}
+
+CombatantSide Battle::Actor()
+{
+    return CurrentSeat().Side;
+}
+
+i32 Battle::ActorIndex()
+{
+    const TurnSeat seat = CurrentSeat();
+    if (seat.Side != CombatantSide::Enemy)
+        return -1;
+    return seat.Index;
 }
 
 ActionResult Battle::Reject(std::string text) const
@@ -357,9 +605,16 @@ ActionResult Battle::Reject(std::string text) const
 
 void Battle::FinishIfDead()
 {
-    if (m_Player.Hp <= 0)
+    if (m_Player.Hp <= 0) {
         m_Result = BattleResult::Defeat;
-    else if (m_Enemy.Hp <= 0)
+        return;
+    }
+    Retarget();
+    for (const CombatantState& foe : m_Enemies) {
+        if (foe.Alive())
+            return;
+    }
+    if (!m_Enemies.empty())
         m_Result = BattleResult::Victory;
 }
 
@@ -394,7 +649,8 @@ void Battle::GrantFocus(CombatantState& who, i32 amount) const
     who.Focus = static_cast<i32>(focus);
 }
 
-void Battle::CollectGranted(bool hero, std::vector<const SkillDef*>& out) const
+void Battle::CollectGranted(bool hero, std::string_view enemyId,
+                            std::vector<const SkillDef*>& out) const
 {
     out.clear();
     if (m_Data == nullptr)
@@ -409,7 +665,7 @@ void Battle::CollectGranted(bool hero, std::vector<const SkillDef*>& out) const
             out.push_back(skill);
         return;
     }
-    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
+    const EnemyDef* enemy = m_Data->FindEnemy(enemyId);
     if (enemy == nullptr)
         return;
     for (const SkillGrant& grant : enemy->Skills)
@@ -419,7 +675,7 @@ void Battle::CollectGranted(bool hero, std::vector<const SkillDef*>& out) const
 void Battle::ApplyAlways(CombatantState& who, bool hero) const
 {
     std::vector<const SkillDef*> granted;
-    CollectGranted(hero, granted);
+    CollectGranted(hero, who.Id, granted);
     for (const SkillDef* skill : granted) {
         for (const EffectDef& effect : skill->Effects) {
             if (effect.Trigger != EffectTrigger::Always || effect.Op != EffectOp::Stat)
@@ -439,7 +695,7 @@ void Battle::RunTrigger(CombatantState& who, EffectTrigger trigger) const
     if (m_Data == nullptr)
         return;
     std::vector<const SkillDef*> granted;
-    CollectGranted(&who == &m_Player, granted);
+    CollectGranted(&who == &m_Player, who.Id, granted);
     for (const SkillDef* skill : granted) {
         for (const EffectDef& effect : skill->Effects) {
             if (effect.Trigger != trigger)
@@ -466,7 +722,7 @@ i32 Battle::MissingFor(const CombatantState& user, std::string_view statId) cons
     if (user.MaxHp <= 0)
         return 0;
     std::vector<const SkillDef*> granted;
-    CollectGranted(&user == &m_Player, granted);
+    CollectGranted(&user == &m_Player, user.Id, granted);
     i32 bonus = 0;
     for (const SkillDef* skill : granted) {
         for (const EffectDef& effect : skill->Effects) {
@@ -540,11 +796,11 @@ const SkillDef* Battle::PlayerSkill(std::string_view skillId) const
     return nullptr;
 }
 
-const SkillDef* Battle::EnemySkill(std::string_view skillId) const
+const SkillDef* Battle::EnemySkill(const CombatantState& who, std::string_view skillId) const
 {
     if (m_Data == nullptr)
         return nullptr;
-    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
+    const EnemyDef* enemy = m_Data->FindEnemy(who.Id);
     if (enemy == nullptr)
         return nullptr;
     for (const SkillGrant& grant : enemy->Skills) {
@@ -561,7 +817,7 @@ Battle::HitLanded Battle::LandHit(CombatantState& attacker, CombatantState& defe
         m_Data != nullptr ? m_Data->GetStatuses() : std::span<const StatusDef>{};
     i32 taken = GuardedDamage(raw, defender.GuardPercent);
     const i32 blocked = raw > taken ? raw - taken : 0;
-    if (blocked > 0 && defender.ReflectPercent > 0) {
+    if (&attacker != &defender && blocked > 0 && defender.ReflectPercent > 0) {
         landed.Reflected = ReflectedDamage(blocked, defender.ReflectPercent, defender.ReflectFlat);
         const i32 back = StatusTakenPercent(attacker, catalog);
         if (back != 0)
@@ -602,41 +858,50 @@ i32 Battle::NoteSkillUse(CombatantState& who, const std::string& skillId)
     return 1;
 }
 
-void Battle::EnterPhase(std::string& note)
+void Battle::EnterPhase(i32 index, std::string& note)
 {
-    if (m_Data == nullptr || m_Enemy.Phase >= 2 || m_Enemy.MaxHp <= 0 || m_Enemy.Hp <= 0)
+    if (m_Data == nullptr || index < 0 || index >= static_cast<i32>(m_Enemies.size()))
         return;
-    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
+    CombatantState& foe = m_Enemies[static_cast<usize>(index)];
+    if (foe.Phase >= 2 || foe.MaxHp <= 0 || foe.Hp <= 0)
+        return;
+    const EnemyDef* enemy = m_Data->FindEnemy(foe.Id);
     if (enemy == nullptr || enemy->PhaseAtPercent <= 0)
         return;
-    if (static_cast<i64>(m_Enemy.Hp) * 100 >
-        static_cast<i64>(m_Enemy.MaxHp) * enemy->PhaseAtPercent)
+    if (static_cast<i64>(foe.Hp) * 100 > static_cast<i64>(foe.MaxHp) * enemy->PhaseAtPercent)
         return;
-    m_Enemy.Phase = 2;
+    foe.Phase = 2;
     if (!enemy->PhaseStatus.empty()) {
         const StatusDef* status = m_Data->FindStatus(enemy->PhaseStatus);
         if (status != nullptr)
-            ApplyStatus(m_Enemy, *status);
+            ApplyStatus(foe, *status);
     }
     if (!note.empty())
         note += " ";
-    note += m_Enemy.Name + " enters phase 2.";
+    note += foe.Name + " enters phase 2.";
 }
 
-void Battle::ArmShard(std::string& note)
+void Battle::ArmSummon(i32 index, std::string& note)
 {
-    if (m_Data == nullptr || m_Result != BattleResult::Ongoing || m_Enemy.Phase < 2)
+    if (m_Data == nullptr || m_Result != BattleResult::Ongoing)
         return;
-    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
-    if (enemy == nullptr || enemy->ShardEvery <= 0 || enemy->ShardDamage <= 0)
+    if (index < 0 || index >= static_cast<i32>(m_Enemies.size()))
         return;
-    ++m_Enemy.PhaseTurns;
-    if (m_Enemy.PhaseTurns % enemy->ShardEvery != 0)
+    CombatantState& foe = m_Enemies[static_cast<usize>(index)];
+    if (foe.Phase < 2 || !foe.Alive())
         return;
-    m_Enemy.ShardDue = true;
+    const EnemyDef* enemy = m_Data->FindEnemy(foe.Id);
+    if (enemy == nullptr || enemy->SummonEvery <= 0 || enemy->SummonId.empty())
+        return;
+    ++foe.PhaseTurns;
+    if (foe.PhaseTurns % enemy->SummonEvery != 0)
+        return;
+    foe.ShardDue = true;
+    const EnemyDef* add = m_Data->FindEnemy(enemy->SummonId);
+    const std::string addName = add != nullptr ? add->Name : enemy->SummonId;
     if (!note.empty())
         note += " ";
-    note += "Rubble shifts in the barrow.";
+    note += addName + " stirs.";
 }
 
 Battle::TurnOpen Battle::PrepareTurn(CombatantState& user)
@@ -768,19 +1033,22 @@ void Battle::SetPlayerHp(i32 hp)
 
 void Battle::SetEnemyHp(i32 hp)
 {
-    if (!m_Started || m_Enemy.MaxHp <= 0)
+    if (!m_Started || m_Target < 0 || m_Target >= static_cast<i32>(m_Enemies.size()))
+        return;
+    CombatantState& foe = m_Enemies[static_cast<usize>(m_Target)];
+    if (foe.MaxHp <= 0)
         return;
     if (hp < 0)
         hp = 0;
-    if (hp > m_Enemy.MaxHp)
-        hp = m_Enemy.MaxHp;
-    m_Enemy.Hp = hp;
-    if (m_Enemy.Hp <= 0) {
+    if (hp > foe.MaxHp)
+        hp = foe.MaxHp;
+    foe.Hp = hp;
+    if (foe.Hp <= 0) {
         FinishIfDead();
         return;
     }
     std::string note;
-    EnterPhase(note);
+    EnterPhase(m_Target, note);
 }
 
 bool Battle::Inflict(CombatantSide side, std::string_view statusId, std::string& error)
@@ -794,12 +1062,104 @@ bool Battle::Inflict(CombatantSide side, std::string_view statusId, std::string&
         error = "status '" + std::string(statusId) + "' does not exist";
         return false;
     }
-    ApplyStatus(side == CombatantSide::Player ? m_Player : m_Enemy, *status);
+    if (side == CombatantSide::Player) {
+        ApplyStatus(m_Player, *status);
+    } else {
+        if (m_Target < 0 || m_Target >= static_cast<i32>(m_Enemies.size())) {
+            error = "there is no enemy to afflict";
+            return false;
+        }
+        ApplyStatus(m_Enemies[static_cast<usize>(m_Target)], *status);
+    }
     error.clear();
     return true;
 }
 
-ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill)
+EffectAim Battle::AimOf(const SkillDef& skill, const EffectDef& effect) const
+{
+    if (effect.Aim.has_value())
+        return *effect.Aim;
+    if (skill.Target == SkillTarget::Self)
+        return EffectAim::Self;
+    if (skill.Target == SkillTarget::AllEnemies)
+        return EffectAim::AllEnemies;
+    return EffectAim::Target;
+}
+
+void Battle::CollectAims(const CombatantState& user, EffectAim aim, std::vector<AimRef>& out)
+{
+    out.clear();
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    if (aim == EffectAim::Self) {
+        AimRef self;
+        if (&user == &m_Player) {
+            self.Player = true;
+            out.push_back(self);
+            return;
+        }
+        for (i32 foeIndex = 0; foeIndex < count; ++foeIndex) {
+            if (&m_Enemies[static_cast<usize>(foeIndex)] != &user)
+                continue;
+            self.Index = foeIndex;
+            out.push_back(self);
+            return;
+        }
+        return;
+    }
+
+    if (aim == EffectAim::Target) {
+        if (&user == &m_Player) {
+            if (m_Target >= 0 && m_Target < count && m_Enemies[static_cast<usize>(m_Target)].Alive()) {
+                AimRef foe;
+                foe.Index = m_Target;
+                out.push_back(foe);
+            }
+            return;
+        }
+        if (m_Player.Alive()) {
+            AimRef player;
+            player.Player = true;
+            out.push_back(player);
+        }
+        return;
+    }
+
+    std::vector<i32> pool;
+    for (i32 foeIndex = 0; foeIndex < count; ++foeIndex) {
+        if (!m_Enemies[static_cast<usize>(foeIndex)].Alive())
+            continue;
+        if (&m_Enemies[static_cast<usize>(foeIndex)] == &user)
+            continue;
+        pool.push_back(foeIndex);
+    }
+    if (pool.empty())
+        return;
+    if (aim == EffectAim::RandomEnemy) {
+        const i32 poolCount = static_cast<i32>(pool.size());
+        const i32 cursor = m_RandomCursor % poolCount;
+        ++m_RandomCursor;
+        if (m_RandomCursor > 1000000)
+            m_RandomCursor = 0;
+        AimRef foe;
+        foe.Index = pool[static_cast<usize>(cursor)];
+        out.push_back(foe);
+        return;
+    }
+    for (const i32 foeIndex : pool) {
+        AimRef foe;
+        foe.Index = foeIndex;
+        out.push_back(foe);
+    }
+}
+
+CombatantState& Battle::Aimed(const AimRef& aim)
+{
+    if (aim.Player)
+        return m_Player;
+    return m_Enemies[static_cast<usize>(aim.Index)];
+}
+
+ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
 {
     if (user.Focus < skill.FocusCost)
         return Reject("Not enough focus.");
@@ -809,12 +1169,23 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     result.Accepted = true;
     result.SkillId = skill.Id;
     const bool hero = &user == &m_Player;
+    i32 userIndex = -1;
+    if (!hero) {
+        const i32 count = static_cast<i32>(m_Enemies.size());
+        for (i32 foeIndex = 0; foeIndex < count; ++foeIndex) {
+            if (&m_Enemies[static_cast<usize>(foeIndex)] == &user) {
+                userIndex = foeIndex;
+                break;
+            }
+        }
+    }
     const std::span<const StatusDef> catalog =
         m_Data != nullptr ? m_Data->GetStatuses() : std::span<const StatusDef>{};
 
     bool damageRan = false;
     i32 taken = 0;
     i32 reflected = 0;
+    i32 struck = 0;
     bool sawGuard = false;
     i32 guardAmount = 0;
     bool sawReflect = false;
@@ -826,6 +1197,12 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     bool noted = false;
     i32 notedUses = 0;
     std::string extra;
+    std::string phaseNote;
+    struct StrikeNote {
+        std::string Name;
+        i32 Taken = 0;
+    };
+    std::vector<StrikeNote> blows;
     auto countUse = [&]() {
         if (!noted) {
             notedUses = NoteSkillUse(user, skill.Id);
@@ -838,6 +1215,10 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
         if (effect.Trigger != EffectTrigger::OnUse)
             continue;
         if (effect.Op == EffectOp::Damage) {
+            std::vector<AimRef> aims;
+            CollectAims(user, AimOf(skill, effect), aims);
+            const i32 empower = user.EmpowerPercent;
+            user.EmpowerPercent = 0;
             const i32 base = effect.Power.value_or(0);
             const i32 power = hero ? RankedPower(skill, base) : base;
             i32 scalingStat = 0;
@@ -848,20 +1229,31 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
                     scalingStat = user.Stats.Get(*effect.Scaling);
                 scalingStat += MissingFor(user, *effect.Scaling);
             }
-            StrikeQuery hit;
-            hit.Power = power;
-            hit.ScalingStat = scalingStat;
-            hit.Defense = DefenseOf(other);
-            hit.EmpowerPercent = user.EmpowerPercent;
-            user.EmpowerPercent = 0;
-            i32 raw = StrikeDamage(hit, m_Rules);
             const i32 dealt = StatusDealtPercent(user, catalog);
-            if (dealt != 0)
-                raw = ScalePercent(raw, 100 + dealt);
-            const HitLanded landed = LandHit(user, other, raw);
-            taken += landed.Taken;
-            reflected += landed.Reflected;
-            damageRan = true;
+            for (const AimRef& aim : aims) {
+                CombatantState& foe = Aimed(aim);
+                StrikeQuery hit;
+                hit.Power = power;
+                hit.ScalingStat = scalingStat;
+                hit.Defense = DefenseOf(foe);
+                hit.EmpowerPercent = empower;
+                i32 raw = StrikeDamage(hit, m_Rules);
+                if (dealt != 0)
+                    raw = ScalePercent(raw, 100 + dealt);
+                const HitLanded landed = LandHit(user, foe, raw);
+                taken += landed.Taken;
+                reflected += landed.Reflected;
+                ++struck;
+                StrikeNote blow;
+                blow.Name = foe.Name;
+                blow.Taken = landed.Taken;
+                blows.push_back(std::move(blow));
+                if (!aim.Player)
+                    EnterPhase(aim.Index, phaseNote);
+                if (userIndex >= 0)
+                    EnterPhase(userIndex, phaseNote);
+            }
+            damageRan = !aims.empty();
         } else if (effect.Op == EffectOp::Guard) {
             user.GuardPercent = effect.Amount.value_or(0);
             user.ReflectPercent = 0;
@@ -913,41 +1305,10 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
             if (every <= 1 || uses % every == 0) {
                 const StatusDef* inflicted = m_Data->FindStatus(*effect.Status);
                 if (inflicted != nullptr) {
-                    CombatantState& afflicted = skill.Target == SkillTarget::Self ? user : other;
-                    ApplyStatus(afflicted, *inflicted);
-                    extra += " ";
-                    extra += inflicted->Name;
-                    extra += ".";
-                }
-            }
-        }
-    }
-
-    if (damageRan) {
-        for (const EffectDef& follow : skill.Effects) {
-            if (follow.Trigger != EffectTrigger::OnHit)
-                continue;
-            if (follow.Op == EffectOp::StunIfWindingUp && !other.WindupSkill.empty()) {
-                if (follow.Status.has_value() && m_Data != nullptr) {
-                    const StatusDef* stun = m_Data->FindStatus(*follow.Status);
-                    if (stun != nullptr) {
-                        ApplyStatus(other, *stun);
-                        extra += " ";
-                        extra += other.Name;
-                        extra += " is stunned.";
-                    }
-                }
-                other.WindupSkill.clear();
-                other.WindupLeft = 0;
-                other.WindupTotal = 0;
-            } else if (follow.Op == EffectOp::ApplyStatus && follow.Status.has_value() &&
-                       m_Data != nullptr) {
-                const i32 every = follow.Every.value_or(1);
-                const i32 uses = countUse();
-                if (every <= 1 || uses % every == 0) {
-                    const StatusDef* inflicted = m_Data->FindStatus(*follow.Status);
-                    if (inflicted != nullptr) {
-                        ApplyStatus(other, *inflicted);
+                    std::vector<AimRef> aims;
+                    CollectAims(user, AimOf(skill, effect), aims);
+                    for (const AimRef& aim : aims) {
+                        ApplyStatus(Aimed(aim), *inflicted);
                         extra += " ";
                         extra += inflicted->Name;
                         extra += ".";
@@ -958,8 +1319,63 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     }
 
     if (damageRan) {
-        result.Damage = taken;
-        result.Text = user.Name + " uses " + skill.Name + " for " + std::to_string(taken) + ".";
+        for (const EffectDef& follow : skill.Effects) {
+            if (follow.Trigger != EffectTrigger::OnHit)
+                continue;
+            std::vector<AimRef> aims;
+            CollectAims(user, AimOf(skill, follow), aims);
+            if (follow.Op == EffectOp::StunIfWindingUp) {
+                for (const AimRef& aim : aims) {
+                    CombatantState& foe = Aimed(aim);
+                    if (foe.WindupSkill.empty())
+                        continue;
+                    if (follow.Status.has_value() && m_Data != nullptr) {
+                        const StatusDef* stun = m_Data->FindStatus(*follow.Status);
+                        if (stun != nullptr) {
+                            ApplyStatus(foe, *stun);
+                            extra += " ";
+                            extra += foe.Name;
+                            extra += " is stunned.";
+                        }
+                    }
+                    foe.WindupSkill.clear();
+                    foe.WindupLeft = 0;
+                    foe.WindupTotal = 0;
+                }
+            } else if (follow.Op == EffectOp::ApplyStatus && follow.Status.has_value() &&
+                       m_Data != nullptr) {
+                const i32 every = follow.Every.value_or(1);
+                const i32 uses = countUse();
+                if (every > 1 && uses % every != 0)
+                    continue;
+                const StatusDef* inflicted = m_Data->FindStatus(*follow.Status);
+                if (inflicted == nullptr)
+                    continue;
+                for (const AimRef& aim : aims) {
+                    ApplyStatus(Aimed(aim), *inflicted);
+                    extra += " ";
+                    extra += inflicted->Name;
+                    extra += ".";
+                }
+            }
+        }
+    }
+
+    if (damageRan) {
+        if (struck <= 1) {
+            result.Damage = taken;
+            result.Text = user.Name + " uses " + skill.Name + " for " + std::to_string(taken) + ".";
+        } else {
+            result.Damage = taken;
+            result.Text = user.Name + " uses " + skill.Name + ".";
+            for (const StrikeNote& blow : blows) {
+                result.Text += " ";
+                result.Text += blow.Name;
+                result.Text += " ";
+                result.Text += std::to_string(blow.Taken);
+                result.Text += ".";
+            }
+        }
         if (reflected > 0)
             result.Text += " " + std::to_string(reflected) + " returns.";
     } else if (sawGuard && sawReflect) {
@@ -984,8 +1400,11 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
         result.Text = user.Name + " uses " + skill.Name + ".";
     }
     result.Text += extra;
+    if (!phaseNote.empty()) {
+        result.Text += " ";
+        result.Text += phaseNote;
+    }
 
-    EnterPhase(result.Text);
     FinishIfDead();
     PrefixOpening(result);
     result.Result = m_Result;
@@ -998,19 +1417,38 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     return result;
 }
 
-ActionResult Battle::ResolveShard()
+ActionResult Battle::ResolveSummon(i32 index)
 {
-    const EnemyDef* enemy = m_Data != nullptr ? m_Data->FindEnemy(m_EnemyId) : nullptr;
-    const i32 raw = enemy != nullptr && enemy->ShardDamage > 0 ? enemy->ShardDamage : 0;
     ActionResult result;
     result.Accepted = true;
-    result.SkillId = "rubble";
-    const HitLanded landed = LandHit(m_Enemy, m_Player, raw);
-    result.Damage = landed.Taken;
-    result.Text = "Rubble hits " + m_Player.Name + " for " + std::to_string(landed.Taken) + ".";
-    if (landed.Reflected > 0)
-        result.Text += " " + std::to_string(landed.Reflected) + " returns.";
-    EnterPhase(result.Text);
+    const EnemyDef* host =
+        m_Data != nullptr && index >= 0 && index < static_cast<i32>(m_Enemies.size())
+            ? m_Data->FindEnemy(m_Enemies[static_cast<usize>(index)].Id)
+            : nullptr;
+    const EnemyDef* add =
+        host != nullptr && m_Data != nullptr ? m_Data->FindEnemy(host->SummonId) : nullptr;
+    result.SkillId = add != nullptr ? add->Id : "";
+    const std::string hostName =
+        index >= 0 && index < static_cast<i32>(m_Enemies.size())
+            ? m_Enemies[static_cast<usize>(index)].Name
+            : std::string("The foe");
+    bool already = false;
+    if (add != nullptr) {
+        for (const CombatantState& foe : m_Enemies) {
+            if (foe.Alive() && foe.Id == add->Id)
+                already = true;
+        }
+    }
+    if (add == nullptr) {
+        result.Text = hostName + " calls, and nothing answers.";
+    } else if (already || m_Enemies.size() >= 3) {
+        result.Text = add->Name + " is already in the fight.";
+    } else {
+        CombatantState shard;
+        MakeFoe(*add, shard);
+        m_Enemies.push_back(std::move(shard));
+        result.Text = m_Enemies.back().Name + " joins the fight.";
+    }
     FinishIfDead();
     PrefixOpening(result);
     result.Result = m_Result;
@@ -1023,32 +1461,34 @@ ActionResult Battle::ResolveShard()
     return result;
 }
 
-const SkillDef* Battle::TakeEnemySkill()
+const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
 {
     if (m_Data == nullptr)
         return nullptr;
-    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
+    const EnemyDef* enemy = m_Data->FindEnemy(who.Id);
     if (enemy != nullptr && !enemy->Pattern.empty()) {
         const i32 count = static_cast<i32>(enemy->Pattern.size());
         for (i32 step = 0; step < count; ++step) {
-            const i32 index = (m_Enemy.PatternStep + step) % count;
-            const SkillDef* skill = EnemySkill(enemy->Pattern[static_cast<usize>(index)]);
+            const i32 patternIndex = (who.PatternStep + step) % count;
+            const SkillDef* skill = EnemySkill(who, enemy->Pattern[static_cast<usize>(patternIndex)]);
             if (skill == nullptr || skill->Kind != SkillKind::Active)
                 continue;
-            if (skill->FocusCost > m_Enemy.Focus)
+            if (skill->FocusCost > who.Focus)
                 continue;
-            m_Enemy.PatternStep = index + 1;
+            who.PatternStep = patternIndex + 1;
             return skill;
         }
         return nullptr;
     }
 
     const SkillDef* best = nullptr;
-    for (const std::string& id : m_EnemySkills) {
-        const SkillDef* skill = EnemySkill(id);
-        if (skill == nullptr || skill->Kind != SkillKind::Active)
+    if (enemy == nullptr)
+        return nullptr;
+    for (const SkillGrant& grant : enemy->Skills) {
+        const SkillDef* skill = &grant.Resolved;
+        if (skill->Kind != SkillKind::Active)
             continue;
-        if (skill->FocusCost > m_Enemy.Focus)
+        if (skill->FocusCost > who.Focus)
             continue;
         if (best == nullptr) {
             best = skill;
@@ -1080,7 +1520,7 @@ ActionResult Battle::UseSkill(std::string_view skillId)
     const SkillDef* skill = PlayerSkill(skillId);
     if (skill == nullptr || skill->Kind != SkillKind::Active)
         return Reject("You do not know that skill.");
-    return Resolve(m_Player, m_Enemy, *skill);
+    return Resolve(m_Player, *skill);
 }
 
 ActionResult Battle::Wait()
@@ -1113,77 +1553,90 @@ ActionResult Battle::EnemyAct()
         return Reject("There is no fight.");
     if (m_Result != BattleResult::Ongoing)
         return Reject("The fight is over.");
-    if (Actor() != CombatantSide::Enemy)
+    const TurnSeat seat = CurrentSeat();
+    if (seat.Side != CombatantSide::Enemy)
         return Reject("It is not the foe's turn.");
-    const TurnOpen open = PrepareTurn(m_Enemy);
+    const i32 foeIndex = seat.Index;
+    if (foeIndex < 0 || foeIndex >= static_cast<i32>(m_Enemies.size()) ||
+        !m_Enemies[static_cast<usize>(foeIndex)].Alive()) {
+        AdvanceTurn();
+        return Reject("That foe is already down.");
+    }
+    const TurnOpen open = PrepareTurn(m_Enemies[static_cast<usize>(foeIndex)]);
     if (!open.Continue)
         return open.Result;
 
-    if (m_Enemy.ShardDue) {
-        m_Enemy.ShardDue = false;
-        ActionResult shard = ResolveShard();
-        ArmShard(shard.Text);
-        return shard;
+    if (m_Enemies[static_cast<usize>(foeIndex)].ShardDue) {
+        m_Enemies[static_cast<usize>(foeIndex)].ShardDue = false;
+        ActionResult summoned = ResolveSummon(foeIndex);
+        ArmSummon(foeIndex, summoned.Text);
+        return summoned;
     }
 
-    if (!m_Enemy.WindupSkill.empty() && m_Data != nullptr) {
-        const SkillDef* winding = EnemySkill(m_Enemy.WindupSkill);
+    if (!m_Enemies[static_cast<usize>(foeIndex)].WindupSkill.empty() && m_Data != nullptr) {
+        const SkillDef* winding =
+            EnemySkill(m_Enemies[static_cast<usize>(foeIndex)],
+                       m_Enemies[static_cast<usize>(foeIndex)].WindupSkill);
         if (winding == nullptr) {
-            m_Enemy.WindupSkill.clear();
-            m_Enemy.WindupLeft = 0;
-            m_Enemy.WindupTotal = 0;
-        } else if (m_Enemy.WindupLeft > 0) {
-            const i32 shown = m_Enemy.WindupTotal - m_Enemy.WindupLeft + 1;
-            --m_Enemy.WindupLeft;
+            m_Enemies[static_cast<usize>(foeIndex)].WindupSkill.clear();
+            m_Enemies[static_cast<usize>(foeIndex)].WindupLeft = 0;
+            m_Enemies[static_cast<usize>(foeIndex)].WindupTotal = 0;
+        } else if (m_Enemies[static_cast<usize>(foeIndex)].WindupLeft > 0) {
+            const i32 shown = m_Enemies[static_cast<usize>(foeIndex)].WindupTotal -
+                              m_Enemies[static_cast<usize>(foeIndex)].WindupLeft + 1;
+            --m_Enemies[static_cast<usize>(foeIndex)].WindupLeft;
             ActionResult result;
             result.Accepted = true;
             result.SkillId = winding->Id;
-            result.Text = m_Enemy.Name + " is winding up " + winding->Name + " " +
-                          std::to_string(shown) + "/" + std::to_string(m_Enemy.WindupTotal) + ".";
+            result.Text = m_Enemies[static_cast<usize>(foeIndex)].Name + " is winding up " +
+                          winding->Name + " " + std::to_string(shown) + "/" +
+                          std::to_string(m_Enemies[static_cast<usize>(foeIndex)].WindupTotal) + ".";
             PrefixOpening(result);
-            ArmShard(result.Text);
+            ArmSummon(foeIndex, result.Text);
             result.Result = m_Result;
             AdvanceTurn();
             return result;
         } else {
             const SkillDef firing = *winding;
-            m_Enemy.WindupSkill.clear();
-            m_Enemy.WindupLeft = 0;
-            m_Enemy.WindupTotal = 0;
-            ActionResult fired = Resolve(m_Enemy, m_Player, firing);
-            ArmShard(fired.Text);
+            m_Enemies[static_cast<usize>(foeIndex)].WindupSkill.clear();
+            m_Enemies[static_cast<usize>(foeIndex)].WindupLeft = 0;
+            m_Enemies[static_cast<usize>(foeIndex)].WindupTotal = 0;
+            ActionResult fired =
+                Resolve(m_Enemies[static_cast<usize>(foeIndex)], firing);
+            ArmSummon(foeIndex, fired.Text);
             return fired;
         }
     }
 
-    const SkillDef* skill = TakeEnemySkill();
+    const SkillDef* skill = TakeEnemySkill(m_Enemies[static_cast<usize>(foeIndex)]);
     if (skill == nullptr) {
         ActionResult result;
         result.Accepted = true;
-        result.Text = m_Enemy.Name + " has nothing to spend.";
+        result.Text = m_Enemies[static_cast<usize>(foeIndex)].Name + " has nothing to spend.";
         PrefixOpening(result);
-        ArmShard(result.Text);
+        ArmSummon(foeIndex, result.Text);
         result.Result = m_Result;
         AdvanceTurn();
         return result;
     }
     if (skill->Windup > 0) {
-        m_Enemy.WindupSkill = skill->Id;
-        m_Enemy.WindupTotal = skill->Windup;
-        m_Enemy.WindupLeft = skill->Windup - 1;
+        m_Enemies[static_cast<usize>(foeIndex)].WindupSkill = skill->Id;
+        m_Enemies[static_cast<usize>(foeIndex)].WindupTotal = skill->Windup;
+        m_Enemies[static_cast<usize>(foeIndex)].WindupLeft = skill->Windup - 1;
         ActionResult result;
         result.Accepted = true;
         result.SkillId = skill->Id;
-        result.Text = m_Enemy.Name + " is winding up " + skill->Name + " 1/" +
-                      std::to_string(skill->Windup) + ".";
+        result.Text = m_Enemies[static_cast<usize>(foeIndex)].Name + " is winding up " +
+                      skill->Name + " 1/" + std::to_string(skill->Windup) + ".";
         PrefixOpening(result);
-        ArmShard(result.Text);
+        ArmSummon(foeIndex, result.Text);
         result.Result = m_Result;
         AdvanceTurn();
         return result;
     }
-    ActionResult acted = Resolve(m_Enemy, m_Player, *skill);
-    ArmShard(acted.Text);
+    const SkillDef acting = *skill;
+    ActionResult acted = Resolve(m_Enemies[static_cast<usize>(foeIndex)], acting);
+    ArmSummon(foeIndex, acted.Text);
     return acted;
 }
 

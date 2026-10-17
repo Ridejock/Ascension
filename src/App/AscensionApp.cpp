@@ -218,6 +218,48 @@ std::string StatusLine(const Database& data, const CombatantState& who)
     return line;
 }
 
+// Wind-up, a summoned add that is about to join, and statuses. The y that comes back is
+// just under the last line.
+f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const CombatantState& who,
+                  const Emerald::Vec2& origin, f32 wrap, int scale)
+{
+    f32 alertY = origin.y;
+    if (!who.WindupSkill.empty()) {
+        const SkillDef* winding = data.FindSkill(who.WindupSkill);
+        const std::string windName = winding != nullptr ? winding->Name : who.WindupSkill;
+        i32 shown = who.WindupTotal - who.WindupLeft;
+        if (shown < 1)
+            shown = 1;
+        if (who.WindupTotal > 0 && shown > who.WindupTotal)
+            shown = who.WindupTotal;
+        std::string windLine =
+            windName + " " + std::to_string(shown) + "/" + std::to_string(who.WindupTotal);
+        if (who.WindupLeft <= 0)
+            windLine += " incoming";
+        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(windLine), kError,
+                                        scale, wrap);
+        alertY += 4.0f;
+    }
+    if (who.ShardDue) {
+        std::string incoming = "Incoming";
+        const EnemyDef* host = data.FindEnemy(who.Id);
+        if (host != nullptr && !host->SummonId.empty()) {
+            const EnemyDef* add = data.FindEnemy(host->SummonId);
+            incoming = add != nullptr ? add->Name : host->SummonId;
+        }
+        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(incoming), kError,
+                                        scale, wrap);
+        alertY += 4.0f;
+    }
+    const std::string foeStatus = StatusLine(data, who);
+    if (!foeStatus.empty()) {
+        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(foeStatus), kError,
+                                        scale, wrap);
+        alertY += 4.0f;
+    }
+    return alertY;
+}
+
 } // namespace
 
 AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec)
@@ -261,9 +303,8 @@ void AscensionApp::AwardVictory()
     if (m_XpAwarded || m_Battle == nullptr || !m_Hero.IsReady())
         return;
     m_XpAwarded = true;
-    const EnemyDef* foe = m_Data.FindEnemy(m_Battle->Enemy().Id);
-    const i32 amount = foe != nullptr ? foe->Experience : 0;
-    const i32 gold = foe != nullptr ? foe->Gold : 0;
+    const i32 amount = m_Battle->Experience();
+    const i32 gold = m_Battle->Gold();
     const XpGrant grant = m_Hero.GrantXp(amount);
     m_Inventory.GrantGold(gold);
     if (amount > 0)
@@ -305,7 +346,7 @@ void AscensionApp::ResolveFoe()
 {
     if (m_Battle == nullptr)
         return;
-    for (i32 step = 0; step < 4 && m_Battle->Result() == BattleResult::Ongoing &&
+    for (i32 step = 0; step < 8 && m_Battle->Result() == BattleResult::Ongoing &&
                        m_Battle->Actor() == CombatantSide::Enemy;
          ++step) {
         const ActionResult act = m_Battle->EnemyAct();
@@ -330,13 +371,13 @@ void AscensionApp::BeginFight()
     m_Picking = false;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
-    const auto enemies = m_Data.GetEnemies();
-    if (enemies.empty()) {
-        m_StartError = "No enemies in data/.";
+    const auto encounters = m_Data.GetEncounters();
+    if (encounters.empty()) {
+        m_StartError = "No encounters in data/.";
         m_Battle.reset();
         return;
     }
-    if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(enemies.size()))
+    if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(encounters.size()))
         m_EnemyIndex = 0;
     if (m_Battle == nullptr)
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
@@ -345,7 +386,7 @@ void AscensionApp::BeginFight()
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(),
-                         enemies[static_cast<usize>(m_EnemyIndex)].Id, error)) {
+                         encounters[static_cast<usize>(m_EnemyIndex)].Id, error)) {
         m_StartError = error;
         return;
     }
@@ -354,10 +395,16 @@ void AscensionApp::BeginFight()
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
         return;
     }
-    if (m_Battle->Actor() == CombatantSide::Enemy)
-        Note(m_Battle->Enemy().Name + " moves first.");
-    else
+    if (m_Battle->Actor() == CombatantSide::Enemy) {
+        const i32 acting = m_Battle->ActorIndex();
+        const auto foes = m_Battle->Enemies();
+        const std::string& name =
+            acting >= 0 && acting < static_cast<i32>(foes.size()) ? foes[static_cast<usize>(acting)].Name
+                                                                  : m_Battle->Enemy().Name;
+        Note(name + " moves first.");
+    } else {
         Note("You move first.");
+    }
     ResolveFoe();
 }
 
@@ -392,7 +439,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         return;
     }
     if (event.key.scancode == SDL_SCANCODE_N) {
-        const i32 count = static_cast<i32>(m_Data.GetEnemies().size());
+        const i32 count = static_cast<i32>(m_Data.GetEncounters().size());
         m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
         BeginFight();
         return;
@@ -489,6 +536,15 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
         Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
         PushRanks();
+        return;
+    }
+
+    if (event.key.scancode == SDL_SCANCODE_LEFT || event.key.scancode == SDL_SCANCODE_RIGHT) {
+        if (m_Battle->Actor() != CombatantSide::Player) {
+            Note("Wait for your turn.");
+            return;
+        }
+        m_Battle->CycleTarget(event.key.scancode == SDL_SCANCODE_RIGHT ? 1 : -1);
         return;
     }
 
@@ -625,6 +681,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     const CombatantState& player = m_Battle->Player();
     const CombatantState& enemy = m_Battle->Enemy();
+    const std::span<const CombatantState> pack = m_Battle->Enemies();
+    const i32 packCount = static_cast<i32>(pack.size());
+    const i32 actorSlot =
+        m_Battle->Result() == BattleResult::Ongoing ? m_Battle->ActorIndex() : -1;
+    const i32 encounterTotal = static_cast<i32>(m_Data.GetEncounters().size());
     const bool playerTurn =
         m_Battle->Result() == BattleResult::Ongoing && m_Battle->Actor() == CombatantSide::Player;
 
@@ -829,69 +890,129 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         }
     }
 
-    DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
-    y = right.y + 24.0f;
-    const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
-    const i32 foeCount = static_cast<i32>(m_Data.GetEnemies().size());
-    std::string foeTitle = enemy.Name;
-    if (foeCount > 0)
-        foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(foeCount);
-    Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(foeTitle), kInk, 3);
-    y += Emerald::DebugTextLineHeight(3) + 4.0f;
-    if (foe != nullptr && foe->Boss) {
-        std::string bossLine = "BOSS";
-        if (enemy.Phase >= 2)
-            bossLine += "  PHASE " + std::to_string(enemy.Phase);
-        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, bossLine, kError, 2);
+    if (packCount <= 1) {
+        DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
+        y = right.y + 24.0f;
+        const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
+        std::string foeTitle = enemy.Name;
+        if (encounterTotal > 0) {
+            foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
+                        std::to_string(encounterTotal);
+        }
+        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(foeTitle), kInk, 3);
+        y += Emerald::DebugTextLineHeight(3) + 4.0f;
+        if (foe != nullptr && foe->Boss) {
+            std::string bossLine = "BOSS";
+            if (enemy.Phase >= 2)
+                bossLine += "  PHASE " + std::to_string(enemy.Phase);
+            Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, bossLine, kError, 2);
+            y += Emerald::DebugTextLineHeight(2) + 4.0f;
+        } else {
+            y += 4.0f;
+        }
+        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y},
+                               Upper(PoolText("HP", enemy.Hp, enemy.MaxHp)), kInk, 2);
         y += Emerald::DebugTextLineHeight(2) + 4.0f;
+        const f32 enemyHp =
+            enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
+        DrawBar(renderer, {right.x + 140.0f, y}, 280.0f, enemyHp, kHp);
+        y += 22.0f;
+        y = DrawFoeAlerts(renderer, m_Data, enemy, {right.x + 28.0f, y}, rightSize.x - 56.0f, 2);
+        y += 8.0f;
+        if (foe != nullptr) {
+            y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foe->Description),
+                                       kDim, 2, rightSize.x - 56.0f);
+            y += 10.0f;
+        }
     } else {
-        y += 4.0f;
-    }
-    Emerald::DrawDebugText(renderer, {right.x + 140.0f, y},
-                           Upper(PoolText("HP", enemy.Hp, enemy.MaxHp)), kInk, 2);
-    y += Emerald::DebugTextLineHeight(2) + 4.0f;
-    const f32 enemyHp =
-        enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
-    DrawBar(renderer, {right.x + 140.0f, y}, 280.0f, enemyHp, kHp);
-    y += 22.0f;
-    if (!enemy.WindupSkill.empty()) {
-        const SkillDef* winding = m_Data.FindSkill(enemy.WindupSkill);
-        const std::string windName = winding != nullptr ? winding->Name : enemy.WindupSkill;
-        i32 shown = enemy.WindupTotal - enemy.WindupLeft;
-        if (shown < 1)
-            shown = 1;
-        if (enemy.WindupTotal > 0 && shown > enemy.WindupTotal)
-            shown = enemy.WindupTotal;
-        std::string windLine =
-            windName + " " + std::to_string(shown) + "/" + std::to_string(enemy.WindupTotal);
-        if (enemy.WindupLeft <= 0)
-            windLine += " incoming";
-        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(windLine), kError, 2);
-        y += Emerald::DebugTextLineHeight(2) + 4.0f;
-    }
-    if (enemy.ShardDue) {
-        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, "RUBBLE", kError, 2);
-        y += Emerald::DebugTextLineHeight(2) + 4.0f;
-    }
-    const std::string foeStatus = StatusLine(m_Data, enemy);
-    if (!foeStatus.empty()) {
-        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foeStatus), kError, 1);
-        y += Emerald::DebugTextLineHeight(1) + 4.0f;
-    }
-    y += 8.0f;
-    if (foe != nullptr) {
-        y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foe->Description), kDim, 2,
-                                   rightSize.x - 56.0f);
-        y += 10.0f;
+        y = right.y + 16.0f;
+        std::string packTitle = m_Battle->EncounterName();
+        if (encounterTotal > 0) {
+            packTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
+                         std::to_string(encounterTotal);
+        }
+        Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(packTitle), kInk, 2);
+        y += Emerald::DebugTextLineHeight(2) + 8.0f;
+
+        const f32 columnGap = 8.0f;
+        const f32 columnsWidth = rightSize.x - 24.0f;
+        const f32 columnSpan = columnsWidth - columnGap * static_cast<f32>(packCount - 1);
+        const f32 columnWidth = columnSpan / static_cast<f32>(packCount);
+        const int columnScale = packCount >= 3 ? 1 : 2;
+        const f32 figureSize = packCount >= 3 ? 7.0f : 11.0f;
+        const f32 cardTop = y;
+        const f32 cardHeight = packCount >= 3 ? 200.0f : 252.0f;
+        f32 columnX = right.x + 12.0f;
+        for (i32 column = 0; column < packCount; ++column) {
+            const CombatantState& member = pack[static_cast<usize>(column)];
+            const bool selected = column == m_Battle->TargetIndex();
+            const bool acting = column == actorSlot;
+            const Emerald::Vec4 body = member.Alive() ? kFoe : kDim;
+            const Emerald::Vec4 ink = member.Alive() ? kInk : kDim;
+            if (selected)
+                renderer.DrawRect({columnX, cardTop}, {columnWidth, cardHeight}, kFrame);
+            DrawFigure(renderer, {columnX + 8.0f, cardTop + 8.0f}, figureSize, body);
+            f32 textY = cardTop + 12.0f + figureSize * 6.6f;
+            const f32 textX = columnX + 8.0f;
+            const f32 textWrap = columnWidth - 16.0f;
+            Emerald::DrawDebugText(renderer, {textX, textY}, Upper(member.Name),
+                                   selected ? kFrame : ink, columnScale, textWrap);
+            textY += Emerald::DebugTextLineHeight(columnScale) + 2.0f;
+            const EnemyDef* memberDef = m_Data.FindEnemy(member.Id);
+            if (memberDef != nullptr && memberDef->Boss) {
+                std::string bossLine = "BOSS";
+                if (member.Phase >= 2)
+                    bossLine += "  P" + std::to_string(member.Phase);
+                Emerald::DrawDebugText(renderer, {textX, textY}, bossLine, kError, 1);
+                textY += Emerald::DebugTextLineHeight(1) + 2.0f;
+            }
+            Emerald::DrawDebugText(renderer, {textX, textY},
+                                   Upper(PoolText("HP", member.Hp, member.MaxHp)), ink, 1);
+            textY += Emerald::DebugTextLineHeight(1) + 2.0f;
+            const f32 memberHp = member.MaxHp > 0
+                                     ? static_cast<f32>(member.Hp) / static_cast<f32>(member.MaxHp)
+                                     : 0.0f;
+            DrawBar(renderer, {textX, textY}, textWrap, memberHp, member.Alive() ? kHp : kDim);
+            textY += 18.0f;
+            textY = DrawFoeAlerts(renderer, m_Data, member, {textX, textY}, textWrap, 1);
+            std::string mark;
+            if (acting)
+                mark = "ACTS";
+            if (selected) {
+                if (!mark.empty())
+                    mark += "  ";
+                mark += "TARGET";
+            }
+            if (!member.Alive()) {
+                if (!mark.empty())
+                    mark += "  ";
+                mark += "DOWN";
+            }
+            if (!mark.empty()) {
+                Emerald::DrawDebugText(renderer, {textX, textY}, mark, selected ? kFrame : kDim, 1,
+                                       textWrap);
+            }
+            columnX += columnWidth + columnGap;
+        }
+        y = cardTop + cardHeight + 10.0f;
+        const EnemyDef* marked = m_Data.FindEnemy(enemy.Id);
+        if (marked != nullptr) {
+            y = Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(marked->Description),
+                                       kDim, 1, rightSize.x - 32.0f);
+            y += 8.0f;
+        }
     }
     std::string order = "Acts with you";
     if (enemy.Stats.Agility > player.Stats.Agility)
         order = "Acts first";
     else if (enemy.Stats.Agility < player.Stats.Agility)
         order = "Acts second";
-    Emerald::DrawDebugText(renderer, {right.x + 28.0f, y},
-                           Upper("AGILITY " + std::to_string(enemy.Stats.Agility) + "  " + order),
-                           kDim, 2);
+    const std::string orderLine =
+        "AGILITY " + std::to_string(enemy.Stats.Agility) + "  " + order;
+    if (packCount <= 1)
+        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(orderLine), kDim, 2);
+    else
+        Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(orderLine), kDim, 1);
 
     std::string banner = "YOUR TURN";
     Emerald::Vec4 bannerColor = kFrame;
@@ -909,7 +1030,10 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         banner = "DEFEAT";
         bannerColor = kError;
     } else if (!playerTurn) {
-        banner = Upper(enemy.Name) + " ACTS";
+        std::string actingName = enemy.Name;
+        if (actorSlot >= 0 && actorSlot < packCount)
+            actingName = pack[static_cast<usize>(actorSlot)].Name;
+        banner = Upper(actingName) + " ACTS";
     }
     Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, banner, bannerColor, 2);
 
@@ -972,6 +1096,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                     help +=
                         std::to_string(drinkFirst) + "-" + std::to_string(shownLast) + " ITEM    ";
             }
+            if (!fightOver && packCount > 1)
+                help += "LEFT RIGHT TARGET    ";
             if (!fightOver)
                 help += "C ITEMS    ";
             help += "SPACE WAIT    ";
