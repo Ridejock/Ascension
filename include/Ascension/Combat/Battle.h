@@ -108,6 +108,14 @@ struct StatusTick {
 [[nodiscard]] i32 StatusDealtPercent(const CombatantState& who, std::span<const StatusDef> catalog);
 [[nodiscard]] i32 StatusTakenPercent(const CombatantState& who, std::span<const StatusDef> catalog);
 
+// One combatant in the turn order. Index is the enemy slot; the player's index is 0 and is
+// not read. Agility is what the round model sorts on.
+struct TurnSeat {
+    CombatantSide Side = CombatantSide::Player;
+    i32 Index = 0;
+    i32 Agility = 0;
+};
+
 // Who acts next. Battle never sorts agility itself: a later active-time or cooldown model
 // replaces this and the damage math stays put.
 class TurnModel {
@@ -118,29 +126,31 @@ public:
     virtual ~TurnModel() = default;
 
     virtual void Reset() = 0;
-    // Both sides are alive. Repeated calls return the same side until Advance.
-    virtual CombatantSide Next(i32 playerAgility, i32 enemyAgility) = 0;
+    // `living` is every combatant still up. Repeated calls return the same seat until Advance.
+    // A seat that is no longer in `living` is skipped.
+    virtual TurnSeat Next(std::span<const TurnSeat> living) = 0;
     virtual void Advance() = 0;
 };
 
 // One action each per round. Higher agility goes first. An equal agility gives the player
-// the first action.
+// the first action, then enemies in encounter order.
 class AgilityRoundModel final : public TurnModel {
 public:
     void Reset() override;
-    CombatantSide Next(i32 playerAgility, i32 enemyAgility) override;
+    TurnSeat Next(std::span<const TurnSeat> living) override;
     void Advance() override;
 
 private:
-    std::vector<CombatantSide> m_Round;
+    void Open(std::span<const TurnSeat> living);
+
+    std::vector<TurnSeat> m_Round;
     usize m_Index = 0;
     bool m_Open = false;
 };
 
-// One player class against one enemy. Skill ids are kept, not pointers, so a hot reload can
-// replace the database underneath. Pass TurnModel in; AgilityRoundModel is the sandbox default.
-// Multi-enemy fights (a real rubble-shard add) are a later slice: phase 2's shard is one extra
-// hit on this enemy's turn.
+// One player class against an encounter (one enemy, or a pack). Skill ids are kept, not
+// pointers, so a hot reload can replace the database underneath. Pass TurnModel in;
+// AgilityRoundModel is the sandbox default.
 class Battle {
 public:
     Battle(const Database& data, std::unique_ptr<TurnModel> turns);
@@ -152,10 +162,23 @@ public:
     bool ApplyData(std::string& error);
 
     [[nodiscard]] const CombatantState& Player() const { return m_Player; }
-    [[nodiscard]] const CombatantState& Enemy() const { return m_Enemy; }
+    // The selected enemy. After the fight starts this is one of Enemies().
+    [[nodiscard]] const CombatantState& Enemy() const;
+    [[nodiscard]] std::span<const CombatantState> Enemies() const { return m_Enemies; }
+    [[nodiscard]] i32 TargetIndex() const { return m_Target; }
+    // False when `index` is outside the pack or that enemy is dead.
+    bool SetTarget(i32 index);
+    // Steps through the pack. Dead enemies are skipped. `delta` is -1 or 1.
+    void CycleTarget(i32 delta);
     [[nodiscard]] CombatantSide Actor();
+    // Enemy slot of the combatant whose turn it is, or -1 when it is the player's turn.
+    [[nodiscard]] i32 ActorIndex();
     [[nodiscard]] BattleResult Result() const { return m_Result; }
     [[nodiscard]] i32 Level() const { return m_Level; }
+    [[nodiscard]] const std::string& EncounterName() const { return m_EncounterName; }
+    // Sum of every enemy in the fight, including a shard that has already joined.
+    [[nodiscard]] i32 Experience() const;
+    [[nodiscard]] i32 Gold() const;
     [[nodiscard]] std::span<const std::string> PlayerSkillIds() const { return m_PlayerSkills; }
 
     // Empty ranks and a zero bonus leave every skill at the power in skills.json, which is
@@ -179,7 +202,8 @@ public:
     // reads health can be checked at a known total.
     void SetPlayerHp(i32 hp);
 
-    // Clamps to 0..MaxHp. 0 ends the fight. Crossing the enemy's phase threshold starts phase 2.
+    // Clamps the selected enemy to 0..MaxHp. 0 may end the fight. Crossing that enemy's phase
+    // threshold starts phase 2.
     void SetEnemyHp(i32 hp);
 
     // Applies a status from statuses.json. Tests use this for Exposed, which no sample skill
@@ -202,21 +226,33 @@ private:
     void AdvanceTurn();
     void PrefixOpening(ActionResult& result);
     TurnOpen PrepareTurn(CombatantState& user);
-    ActionResult Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill);
-    ActionResult ResolveShard();
+    struct AimRef {
+        bool Player = false;
+        i32 Index = 0;
+    };
     struct HitLanded {
         i32 Taken = 0;
         i32 Reflected = 0;
     };
 
-    const SkillDef* TakeEnemySkill();
+    ActionResult Resolve(CombatantState& user, const SkillDef& skill);
+    ActionResult ResolveSummon(i32 index);
+    void MakeFoe(const EnemyDef& def, CombatantState& foe) const;
+    void CollectAims(const CombatantState& user, EffectAim aim, std::vector<AimRef>& out);
+    [[nodiscard]] EffectAim AimOf(const SkillDef& skill, const EffectDef& effect) const;
+    [[nodiscard]] CombatantState& Aimed(const AimRef& aim);
+    [[nodiscard]] std::vector<TurnSeat> Living() const;
+    [[nodiscard]] TurnSeat CurrentSeat();
+    void Retarget();
+
+    const SkillDef* TakeEnemySkill(CombatantState& who);
     const SkillDef* PlayerSkill(std::string_view skillId) const;
-    const SkillDef* EnemySkill(std::string_view skillId) const;
-    void CollectGranted(bool hero, std::vector<const SkillDef*>& out) const;
+    const SkillDef* EnemySkill(const CombatantState& who, std::string_view skillId) const;
+    void CollectGranted(bool hero, std::string_view enemyId, std::vector<const SkillDef*>& out) const;
     void ApplyAlways(CombatantState& who, bool hero) const;
     void RunTrigger(CombatantState& who, EffectTrigger trigger) const;
-    void ArmShard(std::string& note);
-    void EnterPhase(std::string& note);
+    void ArmSummon(i32 index, std::string& note);
+    void EnterPhase(i32 index, std::string& note);
     [[nodiscard]] i32 RankedPower(const SkillDef& skill, i32 base) const;
     [[nodiscard]] i32 MissingFor(const CombatantState& user, std::string_view statId) const;
     [[nodiscard]] i32 DefenseOf(const CombatantState& who) const;
@@ -229,12 +265,16 @@ private:
     const Database* m_Data = nullptr;
     std::unique_ptr<TurnModel> m_Turns;
     std::string m_ClassId;
-    std::string m_EnemyId;
+    std::string m_EncounterId;
+    std::string m_EncounterName;
+    std::string m_FallbackEnemy;
     i32 m_Level = 1;
+    i32 m_BaseCount = 0;
+    i32 m_Target = 0;
+    i32 m_RandomCursor = 0;
     CombatantState m_Player;
-    CombatantState m_Enemy;
+    std::vector<CombatantState> m_Enemies;
     std::vector<std::string> m_PlayerSkills;
-    std::vector<std::string> m_EnemySkills;
     CombatRules m_Rules;
     std::vector<SkillRank> m_PlayerRanks;
     i32 m_PowerPerRank = 0;

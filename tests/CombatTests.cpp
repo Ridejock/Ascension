@@ -1,5 +1,5 @@
-// Combat tests: the damage formula, one Fighter against one enemy, and a swapped turn model.
-// No window or GPU.
+// Combat tests: the damage formula, one Fighter against the sample encounters, and a swapped
+// turn model. No window or GPU.
 
 #include <chrono>
 #include <filesystem>
@@ -68,16 +68,26 @@ void ReplaceInFile(const fs::path& path, std::string_view from, std::string_view
 }
 
 // A turn model with a fixed order, so tests can force the player to act before a faster foe.
+// A side on its own means enemy slot 0. Pass TurnSeat to name a later enemy in a pack.
 class ScriptedTurns final : public TurnModel {
 public:
-    explicit ScriptedTurns(std::vector<CombatantSide> order) : m_Order(std::move(order)) {}
+    explicit ScriptedTurns(std::vector<CombatantSide> order)
+    {
+        for (const CombatantSide side : order) {
+            TurnSeat seat;
+            seat.Side = side;
+            m_Order.push_back(seat);
+        }
+    }
+
+    explicit ScriptedTurns(std::vector<TurnSeat> order) : m_Order(std::move(order)) {}
 
     void Reset() override { m_Index = 0; }
 
-    CombatantSide Next(i32, i32) override
+    TurnSeat Next(std::span<const TurnSeat>) override
     {
         if (m_Order.empty())
-            return CombatantSide::Player;
+            return {};
         if (m_Index >= m_Order.size())
             return m_Order.back();
         return m_Order[m_Index];
@@ -90,9 +100,17 @@ public:
     }
 
 private:
-    std::vector<CombatantSide> m_Order;
+    std::vector<TurnSeat> m_Order;
     usize m_Index = 0;
 };
+
+TurnSeat EnemySeat(i32 index)
+{
+    TurnSeat seat;
+    seat.Side = CombatantSide::Enemy;
+    seat.Index = index;
+    return seat;
+}
 
 CombatRules SampleRules()
 {
@@ -501,34 +519,78 @@ void TestPhaseShard()
     boss.EnemyAct();
     boss.EnemyAct();
     boss.EnemyAct();
-    Check(boss.Enemy().ShardDue, "rubble is telegraphed after three phase-2 actions");
+    Check(boss.Enemy().ShardDue && boss.Enemies().size() == 1,
+          "rubble is telegraphed after three phase-2 actions");
     const ActionResult shard = boss.EnemyAct();
-    Check(shard.Damage == 10 && shard.Text.find("Rubble") != std::string::npos,
-          "the shard stands in for a second enemy and hits for 10");
+    Check(shard.Damage == 0 && shard.Text.find("Rubble Shard joins") != std::string::npos,
+          "Varn's next action calls the rubble shard into the fight");
+    Check(boss.Enemies().size() == 2 && boss.Enemies()[1].Id == "rubble_shard" &&
+              boss.Enemies()[1].Alive() && boss.Enemies()[1].Hp == 24 &&
+              boss.Result() == BattleResult::Ongoing,
+          "the shard is a second enemy, and the fight is not over");
+    Check(boss.Experience() == 80 && boss.Gold() == 40,
+          "a shard with no experience and no gold does not change the reward");
+}
+
+i32 LivingEnemies(const Battle& battle)
+{
+    i32 living = 0;
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Alive())
+            ++living;
+    }
+    return living;
+}
+
+bool PackThreat(const Battle& battle)
+{
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Alive() && (!foe.WindupSkill.empty() || foe.ShardDue))
+            return true;
+    }
+    return false;
+}
+
+i32 LivingAdd(const Battle& battle)
+{
+    const std::span<const CombatantState> foes = battle.Enemies();
+    for (i32 foeIndex = 1; foeIndex < static_cast<i32>(foes.size()); ++foeIndex) {
+        if (foes[static_cast<usize>(foeIndex)].Alive())
+            return foeIndex;
+    }
+    return -1;
 }
 
 bool SensiblePlan(Battle& battle, bool guardian, bool& sawPhase, bool& sawShard)
 {
     for (i32 step = 0; step < 200 && battle.Result() == BattleResult::Ongoing; ++step) {
-        if (battle.Enemy().Phase >= 2)
-            sawPhase = true;
+        for (const CombatantState& foe : battle.Enemies()) {
+            if (foe.Phase >= 2)
+                sawPhase = true;
+        }
         if (battle.Actor() == CombatantSide::Enemy) {
             const ActionResult act = battle.EnemyAct();
-            if (act.Text.find("Rubble hits") != std::string::npos)
+            if (act.Text.find("Rubble") != std::string::npos)
                 sawShard = true;
             continue;
         }
-        const bool threat = !battle.Enemy().WindupSkill.empty() || battle.Enemy().ShardDue;
+        const bool threat = PackThreat(battle);
         const i32 focus = battle.Player().Focus;
         const bool hurt = battle.Player().Hp * 100 < battle.Player().MaxHp * 40;
+        const i32 add = LivingAdd(battle);
         if (!guardian && threat && focus >= 2)
             battle.UseSkill("heavy_blow");
         else if (guardian && threat && battle.Player().GuardPercent == 0 && focus >= 2)
             battle.UseSkill("riposte");
         else if (hurt && focus >= 2 && battle.Player().Hp < battle.Player().MaxHp)
             battle.UseSkill("second_wind");
-        else
+        else if (!guardian && LivingEnemies(battle) >= 2 && focus >= 4)
+            battle.UseSkill("cleave");
+        else {
+            if (add >= 0)
+                battle.SetTarget(add);
             battle.UseSkill("strike");
+        }
     }
     return battle.Result() == BattleResult::Victory && battle.Player().Hp > 0;
 }
@@ -544,7 +606,7 @@ void TestBossPlans()
     Check(berserk.Start("berserker", 6, "oathkeeper_varn", error),
           "the berserker meets Oathkeeper Varn");
     Check(SensiblePlan(berserk, false, berserkPhase, berserkShard) && berserkPhase && berserkShard,
-          "a berserker who stuns wind-ups wins, including the rubble");
+          "a berserker who stuns wind-ups and cleaves the shard wins");
 
     bool guardPhase = false;
     bool guardShard = false;
@@ -552,7 +614,234 @@ void TestBossPlans()
     Check(guard.Start("guardian", 6, "oathkeeper_varn", error),
           "the guardian meets Oathkeeper Varn");
     Check(SensiblePlan(guard, true, guardPhase, guardShard) && guardPhase && guardShard,
-          "a guardian who ripostes wind-ups and rubble wins");
+          "a guardian who ripostes wind-ups and strikes the shard wins");
+}
+
+void TestWolfPack()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+    Battle pack(data, std::make_unique<AgilityRoundModel>());
+    Check(pack.Start("fighter", 1, "wolf_pack", error), "the wolf pack draws");
+    Check(pack.EncounterName() == "Wolf Pack" && pack.Enemies().size() == 3 &&
+              pack.Enemies()[0].Name == "Wolf" && pack.Enemies()[1].Name == "Wolf 2" &&
+              pack.Enemies()[2].Name == "Wolf 3" && pack.Enemies()[0].Hp == 40,
+          "three wolves, and only the later copies are numbered");
+    Check(pack.Actor() == CombatantSide::Enemy && pack.ActorIndex() == 0, "the first wolf acts");
+    Check(pack.EnemyAct().Damage == 5 && pack.Player().Hp == 67, "the first bite is 5");
+    Check(pack.ActorIndex() == 1 && pack.Enemies()[1].Name == "Wolf 2", "wolf 2 is next");
+    Check(pack.EnemyAct().Damage == 5 && pack.Player().Hp == 62, "the second bite is 5");
+    Check(pack.ActorIndex() == 2, "wolf 3 is next");
+    Check(pack.EnemyAct().Damage == 5 && pack.Player().Hp == 57 &&
+              pack.Actor() == CombatantSide::Player,
+          "the fighter acts after every wolf");
+
+    pack.SetEnemyHp(0);
+    Check(pack.Enemies()[0].Hp == 0, "the first wolf can be dropped");
+    Check(pack.Result() == BattleResult::Ongoing && pack.TargetIndex() == 1 && !pack.SetTarget(0),
+          "a dead wolf is not a target, and the marker steps to the next");
+    pack.CycleTarget(1);
+    Check(pack.TargetIndex() == 2, "right moves to wolf 3");
+    pack.CycleTarget(1);
+    Check(pack.TargetIndex() == 1, "right skips the corpse and wraps to wolf 2");
+    const ActionResult strike = pack.UseSkill("strike");
+    Check(strike.Accepted && strike.Damage == 16 && pack.Enemies()[1].Hp == 24 &&
+              pack.Enemies()[2].Hp == 40 && pack.Enemies()[0].Hp == 0,
+          "strike hits only the marked wolf");
+
+    Battle cleave(data, Sides({CombatantSide::Player, CombatantSide::Player}));
+    Check(cleave.Start("berserker", 5, "wolf_pack", error), "the berserker meets the pack");
+    const ActionResult wide = cleave.UseSkill("cleave");
+    Check(wide.Accepted && wide.Damage == 78 && cleave.Enemies()[0].Hp == 14 &&
+              cleave.Enemies()[1].Hp == 14 && cleave.Enemies()[2].Hp == 14 &&
+              wide.Text.find("Wolf 2 26") != std::string::npos &&
+              wide.Text.find("Wolf 3 26") != std::string::npos,
+          "cleave hits every living wolf for 26");
+    cleave.SetTarget(0);
+    cleave.SetEnemyHp(0);
+    const ActionResult rest = cleave.UseSkill("cleave");
+    Check(rest.Damage == 52 && cleave.Enemies()[0].Hp == 0 && cleave.Enemies()[1].Hp == 0 &&
+              cleave.Enemies()[2].Hp == 0 && rest.Result == BattleResult::Victory,
+          "a second cleave skips the corpse and ends the pack");
+    Check(cleave.Experience() == 24 && cleave.Gold() == 9,
+          "the pack pays the sum of each wolf's experience and gold");
+
+    Battle reflect(data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{
+                             EnemySeat(0), TurnSeat{}, EnemySeat(0), TurnSeat{}, EnemySeat(1)}));
+    Check(reflect.Start("guardian", 5, "wolf_pack", error), "the guardian meets the pack");
+    Check(reflect.EnemyAct().Accepted, "the first wolf bites before the guardian");
+    Check(reflect.UseSkill("riposte").Accepted, "riposte is up");
+    const ActionResult back = reflect.EnemyAct();
+    Check(back.Damage == 0 && back.Text.find("returns") != std::string::npos &&
+              reflect.Enemies()[0].Hp == 12 && reflect.Enemies()[1].Hp == 40 &&
+              reflect.Enemies()[2].Hp == 40,
+          "the riposte lands on the wolf that bit, not the rest of the pack");
+    Check(reflect.UseSkill("riposte").Accepted && reflect.EnemyAct().Accepted &&
+              reflect.Enemies()[1].Hp == 12 && reflect.Enemies()[0].Hp == 12,
+          "a second riposte returns the next bite to wolf 2");
+
+    Battle bleeding(data, std::make_unique<ScriptedTurns>(
+                             std::vector<TurnSeat>{TurnSeat{}, EnemySeat(1)}));
+    Check(bleeding.Start("fighter", 1, "wolf_pack", error), "another pack, for bleed");
+    Check(bleeding.SetTarget(1) && bleeding.Inflict(CombatantSide::Enemy, "bleed", error),
+          "bleed is applied to wolf 2");
+    Check(bleeding.UseSkill("strike").Accepted && bleeding.EnemyAct().Text.find("bleeds") !=
+                                                     std::string::npos,
+          "wolf 2's turn opens with its own bleed");
+    Check(bleeding.Enemies()[1].Hp == 21 && bleeding.Enemies()[0].Hp == 40 &&
+              bleeding.Enemies()[2].Hp == 40,
+          "the other wolves do not bleed");
+}
+
+i32 ShardSlot(const Battle& battle, bool livingOnly)
+{
+    const std::span<const CombatantState> foes = battle.Enemies();
+    for (i32 foeIndex = 0; foeIndex < static_cast<i32>(foes.size()); ++foeIndex) {
+        const CombatantState& foe = foes[static_cast<usize>(foeIndex)];
+        if (foe.Id != "rubble_shard")
+            continue;
+        if (livingOnly && !foe.Alive())
+            continue;
+        return foeIndex;
+    }
+    return -1;
+}
+
+bool NamedShard(const Battle& battle, const char* name, bool livingOnly)
+{
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Id == "rubble_shard" && foe.Name == name && (!livingOnly || foe.Alive()))
+            return true;
+    }
+    return false;
+}
+
+ActionResult DriveVarn(Battle& battle)
+{
+    battle.SetPlayerHp(battle.Player().MaxHp);
+    return battle.EnemyAct();
+}
+
+void TestSummonSeats()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+    std::vector<CombatantSide> turns(20, CombatantSide::Enemy);
+    Battle boss(data, Sides(std::move(turns)));
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can call more than one shard");
+    boss.SetEnemyHp(120);
+    Check(boss.Enemy().Phase == 2, "phase 2 is open");
+
+    ActionResult joined;
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
+        joined = DriveVarn(boss);
+    const i32 firstShard = ShardSlot(boss, true);
+    Check(firstShard >= 0 && joined.Text.find("Rubble Shard joins") != std::string::npos &&
+              boss.Enemies().size() == 2,
+          "the first shard joins under its own name");
+    Check(boss.SetTarget(firstShard), "the shard can be marked");
+    boss.SetEnemyHp(0);
+    Check(boss.Result() == BattleResult::Ongoing && boss.TargetIndex() != firstShard &&
+              !boss.Enemies()[static_cast<usize>(firstShard)].Alive(),
+          "a dead shard leaves the marker on someone still up");
+
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
+        joined = DriveVarn(boss);
+    Check(joined.Text.find("Rubble Shard 2 joins") != std::string::npos &&
+              NamedShard(boss, "Rubble Shard", false) && NamedShard(boss, "Rubble Shard 2", true) &&
+              boss.Enemies().size() == 3,
+          "a second shard is numbered, and the corpse keeps the first name");
+
+    const i32 secondShard = ShardSlot(boss, true);
+    Check(boss.SetTarget(secondShard), "the second shard can be marked");
+    boss.SetEnemyHp(0);
+    Check(ShardSlot(boss, true) < 0 && boss.Enemies().size() == 3 &&
+              boss.Result() == BattleResult::Ongoing,
+          "both shards are down and still listed");
+
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0 &&
+                       boss.Result() == BattleResult::Ongoing;
+         ++step)
+        joined = DriveVarn(boss);
+    Check(joined.Text.find("joins") != std::string::npos &&
+              joined.Text.find("already") == std::string::npos && ShardSlot(boss, true) >= 0 &&
+              boss.Enemies().size() == 3,
+          "a corpse does not fill the fight, so the next shard takes its seat");
+    Check(boss.TargetIndex() >= 0 &&
+              boss.Enemies()[static_cast<usize>(boss.TargetIndex())].Alive(),
+          "the marker is on a living enemy");
+    const i32 marked = boss.TargetIndex();
+    boss.CycleTarget(1);
+    Check(boss.Enemy().Alive() && boss.TargetIndex() != marked, "cycling skips a corpse");
+    Check(boss.ActorIndex() == 0, "Varn's seat in the turn order is unchanged");
+}
+
+void TestPackAim()
+{
+    TempCopy copy;
+    Database data(copy.Path);
+    Check(data.Load(), "copied sample loads");
+    std::string error;
+    DataError reload;
+    ReplaceInFile(copy.Path / "skills.json",
+                  "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": 10, "
+                  "\"scaling\": \"strength\", \"target\": \"target\" }",
+                  "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": 10, "
+                  "\"scaling\": \"strength\", \"target\": \"randomEnemy\" }");
+    Check(data.CheckForChanges(&reload) == 0, "the aim edit waits a check");
+    Check(data.CheckForChanges(&reload) == 1, "the aim edit reloads");
+    Battle random(data, Sides({CombatantSide::Player, CombatantSide::Player, CombatantSide::Player}));
+    Check(random.Start("fighter", 1, "wolf_pack", error), "the pack waits on the fighter");
+    const ActionResult first = random.UseSkill("strike");
+    const ActionResult second = random.UseSkill("strike");
+    const ActionResult third = random.UseSkill("strike");
+    Check(first.Damage == 16 && second.Damage == 16 && third.Damage == 16 &&
+              random.Enemies()[0].Hp == 24 && random.Enemies()[1].Hp == 24 &&
+              random.Enemies()[2].Hp == 24,
+          "randomEnemy hits one wolf, then the next, in encounter order");
+
+    ReplaceInFile(copy.Path / "skills.json",
+                  "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": 8, "
+                  "\"scaling\": \"strength\", \"target\": \"allEnemies\" }",
+                  "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": 8, "
+                  "\"scaling\": \"strength\", \"target\": \"target\" }");
+    Check(data.CheckForChanges(&reload) == 0, "cleave's aim edit waits a check");
+    Check(data.CheckForChanges(&reload) == 1, "cleave's aim edit reloads");
+    Battle marked(data, Sides({CombatantSide::Player}));
+    Check(marked.Start("berserker", 5, "wolf_pack", error) && marked.SetTarget(2),
+          "the berserker marks wolf 3");
+    const ActionResult narrowed = marked.UseSkill("cleave");
+    Check(narrowed.Damage == 26 && marked.Enemies()[0].Hp == 40 && marked.Enemies()[1].Hp == 40 &&
+              marked.Enemies()[2].Hp == 14,
+          "an effect target hits only the marked wolf, even when the skill says all enemies");
+    const SkillDef* tuned = data.FindSkill("cleave");
+    const ClassDef* berserkClass = data.FindClass("berserker");
+    const SkillDef* grantedCleave = nullptr;
+    if (berserkClass != nullptr) {
+        for (const SkillDef* granted : data.ActiveSkills(*berserkClass)) {
+            if (granted->Id == "cleave")
+                grantedCleave = granted;
+        }
+    }
+    Check(tuned != nullptr && grantedCleave != nullptr &&
+              DescribeSkill(*tuned).find("Hits the marked enemy.") != std::string::npos &&
+              DescribeSkill(*tuned).find("every enemy") == std::string::npos &&
+              DescribeSkill(*grantedCleave).find("Hits the marked enemy.") != std::string::npos,
+          "cleave's description follows the effect target");
+
+    Battle wounds(data, Sides({CombatantSide::Player}));
+    Check(wounds.Start("fighter", 1, "wolf_pack", error), "a pack can shrink on reload");
+    Check(wounds.SetTarget(0), "wolf 0 is marked");
+    wounds.SetEnemyHp(24);
+    ReplaceInFile(copy.Path / "encounters.json", "\"enemies\": [\"wolf\", \"wolf\", \"wolf\"]",
+                  "\"enemies\": [\"wolf\", \"wolf\"]");
+    Check(data.CheckForChanges(&reload) == 0, "the shorter pack waits a check");
+    Check(data.CheckForChanges(&reload) == 1, "the shorter pack reloads");
+    Check(wounds.ApplyData(error) && wounds.Enemies().size() == 2 && wounds.Enemies()[0].Hp == 24 &&
+              wounds.Enemies()[1].Hp == 40,
+          "a hot reload drops the third wolf and keeps the wounds");
 }
 
 void TestGearAndConsumables()
@@ -718,6 +1007,9 @@ int main()
     TestStatusReloads();
     TestWindup();
     TestPhaseShard();
+    TestWolfPack();
+    TestSummonSeats();
+    TestPackAim();
     TestGearAndConsumables();
     TestBossPlans();
     TestGrantCopies();

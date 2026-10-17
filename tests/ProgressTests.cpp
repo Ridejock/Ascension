@@ -455,7 +455,7 @@ void TestNextFoeStaysWhileChoosing()
     Check(data.Load(), "sample data loads");
     const auto enemies = data.GetEnemies();
     const i32 roster = static_cast<i32>(enemies.size());
-    Check(roster == 6 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit",
+    Check(roster == 7 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit",
           "the roster opens wolf, then bandit");
 
     Hero hero = StartHero(data);
@@ -473,7 +473,7 @@ void TestNextFoeStaysWhileChoosing()
     Check(foe == 0 && enemies[static_cast<usize>(foe)].Id == "wolf",
           "N while the choice is open leaves the wolf selected");
     Check(hero.IndexAfterNextFoe(roster - 1, roster) == roster - 1,
-          "N does not wrap off the boss while the choice is open");
+          "N does not move the last slot while the choice is open");
 
     std::string why;
     Check(hero.Choose("berserker", why), "berserker is chosen with the wolf still selected");

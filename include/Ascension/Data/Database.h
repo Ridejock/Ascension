@@ -17,8 +17,9 @@ struct DataError {
     std::string Message;
 };
 
-// The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies, items,
-// shop, combat, progress), checked against each other. Load once, then call CheckForChanges from
+// The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
+// encounters, items, shop, combat, progress), checked against each other. Load once, then
+// call CheckForChanges from
 // the frame loop: a file that changed, and then stayed unchanged for one more check, is read
 // again. A failed read keeps the previous definitions and sets GetLastError().
 //
@@ -51,6 +52,7 @@ public:
     [[nodiscard]] std::span<const StatusDef> GetStatuses() const { return m_Statuses; }
     [[nodiscard]] std::span<const ClassDef> GetClasses() const { return m_Classes; }
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
+    [[nodiscard]] std::span<const EncounterDef> GetEncounters() const { return m_Encounters; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
     [[nodiscard]] const ShopDef& GetShop() const { return m_Shop; }
     [[nodiscard]] const CombatRules& GetRules() const { return m_Rules; }
@@ -61,6 +63,7 @@ public:
     [[nodiscard]] const StatusDef* FindStatus(std::string_view id) const;
     [[nodiscard]] const ClassDef* FindClass(std::string_view id) const;
     [[nodiscard]] const EnemyDef* FindEnemy(std::string_view id) const;
+    [[nodiscard]] const EncounterDef* FindEncounter(std::string_view id) const;
     [[nodiscard]] const ItemDef* FindItem(std::string_view id) const;
 
     // Evolutions whose EvolvesFrom is `baseId`, in file order.
@@ -99,6 +102,7 @@ private:
     std::vector<StatusDef> m_Statuses;
     std::vector<ClassDef> m_Classes;
     std::vector<EnemyDef> m_Enemies;
+    std::vector<EncounterDef> m_Encounters;
     std::vector<ItemDef> m_Items;
     ShopDef m_Shop;
     CombatRules m_Rules;
@@ -106,5 +110,10 @@ private:
     std::string m_LastError;
     u32 m_Revision = 0;
 };
+
+// The skill's own description, then one sentence for each effect that lands on an aim
+// (damage, a status, a stun). That sentence uses the effect's target, or the skill's target
+// when the effect doesn't set one. A retune of `target` changes this text with the behavior.
+[[nodiscard]] std::string DescribeSkill(const SkillDef& skill);
 
 } // namespace Ascension

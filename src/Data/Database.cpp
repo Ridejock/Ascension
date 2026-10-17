@@ -19,8 +19,9 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json",   "effects.json", "skills.json", "statuses.json", "classes.json",
-    "enemies.json", "items.json",   "shop.json",   "combat.json",   "progress.json",
+    "stats.json",    "effects.json", "skills.json", "statuses.json", "classes.json",
+    "enemies.json",  "encounters.json", "items.json", "shop.json",   "combat.json",
+    "progress.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -290,11 +291,27 @@ struct Parsed {
     std::vector<StatusDef> Statuses;
     std::vector<ClassDef> Classes;
     std::vector<EnemyDef> Enemies;
+    std::vector<EncounterDef> Encounters;
     std::vector<ItemDef> Items;
     ShopDef Shop;
     CombatRules Rules;
     ProgressRules Progress;
 };
+
+bool ParseAim(std::string_view text, EffectAim& out)
+{
+    if (text == "self")
+        out = EffectAim::Self;
+    else if (text == "target")
+        out = EffectAim::Target;
+    else if (text == "allEnemies")
+        out = EffectAim::AllEnemies;
+    else if (text == "randomEnemy")
+        out = EffectAim::RandomEnemy;
+    else
+        return false;
+    return true;
+}
 
 template <typename T> const T* FindId(const std::vector<T>& items, std::string_view id)
 {
@@ -436,7 +453,7 @@ bool FieldUsed(EffectTrigger trigger, EffectOp op, std::string_view key)
     if (trigger == EffectTrigger::Always && op == EffectOp::StatPerMissingHp)
         return key == "stat" || key == "amount" || key == "per" || key == "max";
     if (trigger == EffectTrigger::OnUse && op == EffectOp::Damage)
-        return key == "power" || key == "scaling";
+        return key == "power" || key == "scaling" || key == "target";
     if (trigger == EffectTrigger::OnUse && op == EffectOp::Heal)
         return key == "power" || key == "scaling";
     if (trigger == EffectTrigger::OnTurnStart && op == EffectOp::Heal)
@@ -455,11 +472,11 @@ bool FieldUsed(EffectTrigger trigger, EffectOp op, std::string_view key)
         return key == "amount";
     if (op == EffectOp::ApplyStatus &&
         (trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnHit))
-        return key == "status" || key == "every";
+        return key == "status" || key == "every" || key == "target";
     if (trigger == EffectTrigger::OnDamaged && op == EffectOp::ApplyStatus)
-        return key == "status";
+        return key == "status" || key == "target";
     if (trigger == EffectTrigger::OnHit && op == EffectOp::StunIfWindingUp)
-        return key == "status";
+        return key == "status" || key == "target";
     return false;
 }
 
@@ -479,7 +496,8 @@ bool EffectKeysOk(const Json& object, EffectTrigger trigger, EffectOp op, std::s
 bool KnownEffectField(std::string_view key)
 {
     return key == "power" || key == "amount" || key == "percent" || key == "per" || key == "max" ||
-           key == "turns" || key == "every" || key == "stat" || key == "scaling" || key == "status";
+           key == "turns" || key == "every" || key == "stat" || key == "scaling" ||
+           key == "status" || key == "target";
 }
 
 bool HasEffectField(const EffectDef& effect, std::string_view key)
@@ -502,6 +520,8 @@ bool HasEffectField(const EffectDef& effect, std::string_view key)
         return effect.Stat.has_value();
     if (key == "scaling")
         return effect.Scaling.has_value();
+    if (key == "target")
+        return effect.Aim.has_value();
     return key == "status" && effect.Status.has_value();
 }
 
@@ -584,6 +604,20 @@ bool AssignEffectField(EffectDef& effect, const std::string& key, const Json& fi
             effect.Stat = text;
         else
             effect.Scaling = text;
+        return true;
+    }
+    if (key == "target") {
+        if (!fieldValue.is_string()) {
+            error = "'target' must be text";
+            return false;
+        }
+        const std::string text = fieldValue.get<std::string>();
+        EffectAim aim = EffectAim::Target;
+        if (!ParseAim(text, aim)) {
+            error = "'target' must be \"self\", \"target\", \"allEnemies\" or \"randomEnemy\"";
+            return false;
+        }
+        effect.Aim = aim;
         return true;
     }
     i32 min = 0;
@@ -1136,8 +1170,7 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "level", "stats", "skills", "experience",
-                        "gold", "boss", "pattern", "phaseAtPercent", "phaseStatus", "shardDamage",
-                        "shardEvery"},
+                        "gold", "boss", "pattern", "phaseAtPercent", "phaseStatus", "summon"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
@@ -1170,16 +1203,28 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
                 return fail(patternError);
         }
         if (!OptionalInt(entry, "phaseAtPercent", 1, 99, enemy.PhaseAtPercent, error) ||
-            !OptionalId(entry, "phaseStatus", enemy.PhaseStatus, error) ||
-            !OptionalInt(entry, "shardDamage", 0, 9999, enemy.ShardDamage, error) ||
-            !OptionalInt(entry, "shardEvery", 1, 99, enemy.ShardEvery, error))
+            !OptionalId(entry, "phaseStatus", enemy.PhaseStatus, error))
             return fail(error);
         if (!enemy.PhaseStatus.empty() && enemy.PhaseAtPercent <= 0)
             return fail("'phaseStatus' needs 'phaseAtPercent'");
-        if (enemy.ShardDamage > 0 && enemy.ShardEvery <= 0)
-            return fail("'shardDamage' needs 'shardEvery'");
-        if (enemy.ShardEvery > 0 && enemy.PhaseAtPercent <= 0)
-            return fail("'shardEvery' needs 'phaseAtPercent'");
+        const auto summon = entry.find("summon");
+        if (summon != entry.end()) {
+            if (!summon->is_object())
+                return fail("'summon' must be an object");
+            std::string summonUnknown;
+            if (!AllowKeys(*summon, {"enemy", "every"}, summonUnknown))
+                return fail("'summon' unknown field " + Quote(summonUnknown));
+            if (!RequireString(*summon, "enemy", enemy.SummonId, error))
+                return fail(error);
+            if (!IsId(enemy.SummonId))
+                return fail("'summon' enemy must be an id");
+            if (enemy.SummonId == enemy.Id)
+                return fail("'summon' cannot name this enemy");
+            if (!RequireInt(*summon, "every", 1, 99, enemy.SummonEvery, error))
+                return fail(error);
+            if (enemy.PhaseAtPercent <= 0)
+                return fail("'summon' needs 'phaseAtPercent'");
+        }
         if (!RequireString(entry, "name", enemy.Name, error) ||
             !RequireString(entry, "description", enemy.Description, error))
             return fail(error);
@@ -1193,6 +1238,51 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
     if (bosses != 1) {
         error = "the roster needs exactly one boss";
         return false;
+    }
+    return true;
+}
+
+bool LoadEncounters(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("encounters");
+    if (list == root.end() || !list->is_array() || list->empty()) {
+        error = "'encounters' must be a list with at least one encounter";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "encounter entries must be objects";
+            return false;
+        }
+        EncounterDef encounter;
+        if (!RequireString(entry, "id", encounter.Id, error))
+            return false;
+        const std::string where = "encounter " + Quote(encounter.Id);
+        auto fail = [&](std::string message) {
+            error = where + ": " + std::move(message);
+            return false;
+        };
+        if (!IsId(encounter.Id))
+            return fail("id must be letters, digits and _, starting with a letter");
+        if (FindId(parsed.Encounters, encounter.Id) != nullptr)
+            return fail("there is another encounter with this id");
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "name", "enemies"}, unknown))
+            return fail("unknown field " + Quote(unknown));
+        std::string listed;
+        if (!ReadIdList(entry, "enemies", encounter.Enemies, listed, true))
+            return fail(listed);
+        if (encounter.Enemies.empty())
+            return fail("'enemies' must list at least one enemy");
+        if (encounter.Enemies.size() > 3)
+            return fail("'enemies' cannot list more than 3");
+        for (const std::string& enemyId : encounter.Enemies) {
+            if (FindId(parsed.Enemies, enemyId) == nullptr)
+                return fail("enemy " + Quote(enemyId) + " does not exist");
+        }
+        if (!RequireString(entry, "name", encounter.Name, error))
+            return fail(error);
+        parsed.Encounters.push_back(std::move(encounter));
     }
     return true;
 }
@@ -1599,6 +1689,10 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             error = enemyWhere + ": status " + Quote(enemy.PhaseStatus) + " does not exist";
             return false;
         }
+        if (!enemy.SummonId.empty() && FindId(parsed.Enemies, enemy.SummonId) == nullptr) {
+            error = enemyWhere + ": summon " + Quote(enemy.SummonId) + " does not exist";
+            return false;
+        }
     }
     for (const ItemDef& item : parsed.Items) {
         if (!GrantsKnown(parsed, item.Grants, "item " + Quote(item.Id), error))
@@ -1623,11 +1717,12 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills, LoadStatuses, LoadClasses,
-                              LoadEnemies, LoadItems,   LoadShop,   LoadCombat,   LoadProgress};
-    const char* names[] = {"stats.json",   "effects.json", "skills.json", "statuses.json",
-                           "classes.json", "enemies.json", "items.json",  "shop.json",
-                           "combat.json",  "progress.json"};
+    const Loader loaders[] = {LoadStats,     LoadEffects, LoadSkills,   LoadStatuses, LoadClasses,
+                              LoadEnemies,  LoadEncounters, LoadItems, LoadShop,     LoadCombat,
+                              LoadProgress};
+    const char* names[] = {"stats.json",     "effects.json", "skills.json", "statuses.json",
+                           "classes.json",   "enemies.json", "encounters.json", "items.json",
+                           "shop.json",      "combat.json",  "progress.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -1642,8 +1737,9 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats",   "effects", "skills", "statuses", "classes",
-                                    "enemies", "items",   "shop",   "combat",   "progress"};
+        const char* allowedTop[] = {"stats",    "effects", "skills", "statuses", "classes",
+                                    "enemies", "encounters", "items", "shop",     "combat",
+                                    "progress"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
@@ -1658,6 +1754,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const char* file = "classes.json";
         if (why.compare(0, 6, "enemy ") == 0)
             file = "enemies.json";
+        else if (why.compare(0, 10, "encounter ") == 0)
+            file = "encounters.json";
         else if (why.compare(0, 6, "skill ") == 0)
             file = "skills.json";
         else if (why.compare(0, 7, "effect ") == 0)
@@ -1739,6 +1837,7 @@ bool Database::Load(DataError* error)
     m_Statuses = std::move(parsed.Statuses);
     m_Classes = std::move(parsed.Classes);
     m_Enemies = std::move(parsed.Enemies);
+    m_Encounters = std::move(parsed.Encounters);
     m_Items = std::move(parsed.Items);
     m_Shop = std::move(parsed.Shop);
     m_Rules = parsed.Rules;
@@ -1800,6 +1899,11 @@ const ClassDef* Database::FindClass(std::string_view id) const
 const EnemyDef* Database::FindEnemy(std::string_view id) const
 {
     return FindId(m_Enemies, id);
+}
+
+const EncounterDef* Database::FindEncounter(std::string_view id) const
+{
+    return FindId(m_Encounters, id);
 }
 
 const ItemDef* Database::FindItem(std::string_view id) const
@@ -1882,6 +1986,62 @@ StatBlock Database::StatsAt(const ClassDef& klass, i32 level) const
         return stats;
     }
     return klass.Stats + Scaled(klass.Growth, level - 1);
+}
+
+namespace {
+
+EffectAim AimFor(const SkillDef& skill, const EffectDef& effect)
+{
+    if (effect.Aim.has_value())
+        return *effect.Aim;
+    if (skill.Target == SkillTarget::Self)
+        return EffectAim::Self;
+    if (skill.Target == SkillTarget::AllEnemies)
+        return EffectAim::AllEnemies;
+    return EffectAim::Target;
+}
+
+const char* AimWords(EffectAim aim)
+{
+    if (aim == EffectAim::Self)
+        return "you";
+    if (aim == EffectAim::AllEnemies)
+        return "every enemy";
+    if (aim == EffectAim::RandomEnemy)
+        return "a random enemy";
+    return "the marked enemy";
+}
+
+// Empty for an op that does not pick someone. Battle aims damage, a status, and a stun.
+// A guard, a heal, and the other self effects ignore target, so they add no sentence.
+std::string EffectSentence(EffectOp op, EffectAim aim)
+{
+    const char* verb = nullptr;
+    if (op == EffectOp::Damage)
+        verb = "Hits";
+    else if (op == EffectOp::ApplyStatus)
+        verb = "Afflicts";
+    else if (op == EffectOp::StunIfWindingUp)
+        verb = "Stuns";
+    if (verb == nullptr)
+        return {};
+    return std::string(verb) + " " + AimWords(aim) + ".";
+}
+
+} // namespace
+
+std::string DescribeSkill(const SkillDef& skill)
+{
+    std::string text = skill.Description;
+    for (const EffectDef& effect : skill.Effects) {
+        const std::string sentence = EffectSentence(effect.Op, AimFor(skill, effect));
+        if (sentence.empty())
+            continue;
+        if (!text.empty())
+            text += " ";
+        text += sentence;
+    }
+    return text;
 }
 
 } // namespace Ascension

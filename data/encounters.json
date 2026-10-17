@@ -1,0 +1,39 @@
+{
+  "encounters": [
+    {
+      "id": "wolf",
+      "name": "Wolf",
+      "enemies": ["wolf"]
+    },
+    {
+      "id": "bandit",
+      "name": "Bandit",
+      "enemies": ["bandit"]
+    },
+    {
+      "id": "tomb_moth",
+      "name": "Tomb Moth",
+      "enemies": ["tomb_moth"]
+    },
+    {
+      "id": "bone_archer",
+      "name": "Bone Archer",
+      "enemies": ["bone_archer"]
+    },
+    {
+      "id": "wolf_pack",
+      "name": "Wolf Pack",
+      "enemies": ["wolf", "wolf", "wolf"]
+    },
+    {
+      "id": "barrow_sentry",
+      "name": "Barrow Sentry",
+      "enemies": ["barrow_sentry"]
+    },
+    {
+      "id": "oathkeeper_varn",
+      "name": "Oathkeeper Varn",
+      "enemies": ["oathkeeper_varn"]
+    }
+  ]
+}
