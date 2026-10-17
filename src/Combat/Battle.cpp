@@ -70,7 +70,7 @@ void CopyFightState(const CombatantState& from, CombatantState& to)
 
 } // namespace
 
-i32 BloodlustBonus(i32 amount, i32 stepPercent, i32 maxBonus, i32 hp, i32 maxHp)
+i32 MissingHpBonus(i32 amount, i32 stepPercent, i32 maxBonus, i32 hp, i32 maxHp)
 {
     if (amount == 0 || stepPercent <= 0 || maxHp <= 0 || hp >= maxHp)
         return 0;
@@ -254,9 +254,9 @@ bool Battle::Build(std::string& error, bool keepWounds)
     CombatantState player;
     player.Id = klass->Id;
     player.Name = klass->Name;
-    player.Stats = m_Data->StatsAt(*klass, m_Level);
+    player.Stats = m_HasBaseStats ? m_BaseStats : m_Data->StatsAt(*klass, m_Level);
     player.Stats += m_Gear;
-    ApplyPassives(player);
+    ApplyAlways(player, true);
     player.MaxHp = ClampPool(static_cast<i64>(player.Stats.Vitality) * rules.HpPerVitality);
     // The hero's pool is the focus stat plus focusBase. Enemies spend only the focus on
     // their stat line, and it does not regenerate, so a pattern is not gated by a pool.
@@ -270,9 +270,12 @@ bool Battle::Build(std::string& error, bool keepWounds)
     foe.Id = enemy->Id;
     foe.Name = enemy->Name;
     foe.Stats = enemy->Stats;
+    ApplyAlways(foe, false);
     foe.MaxHp = ClampPool(static_cast<i64>(foe.Stats.Vitality) * rules.HpPerVitality);
     foe.MaxFocus = ClampPool(foe.Stats.Focus);
-    const std::vector<std::string> foeSkills = enemy->Skills;
+    std::vector<std::string> foeSkills;
+    for (const SkillGrant& grant : enemy->Skills)
+        foeSkills.push_back(grant.Id);
 
     if (keepWounds) {
         CopyFightState(m_Player, player);
@@ -391,39 +394,89 @@ void Battle::GrantFocus(CombatantState& who, i32 amount) const
     who.Focus = static_cast<i32>(focus);
 }
 
-void Battle::ApplyPassives(CombatantState& player) const
+void Battle::CollectGranted(bool hero, std::vector<const SkillDef*>& out) const
 {
-    player.BulwarkFocus = 0;
-    const ClassDef* klass = m_Data == nullptr ? nullptr : m_Data->FindClass(player.Id);
-    if (klass == nullptr)
+    out.clear();
+    if (m_Data == nullptr)
         return;
-    for (const SkillDef* passive : m_Data->Passives(*klass)) {
-        if (passive->Passive == PassiveEffect::Stat || passive->Passive == PassiveEffect::Bulwark) {
-            i32 value = player.Stats.Get(passive->Stat) + passive->Amount;
-            if (value < 0)
-                value = 0;
-            player.Stats.Set(passive->Stat, value);
-        }
-        if (passive->Passive == PassiveEffect::Bulwark)
-            player.BulwarkFocus += passive->FocusGain;
+    if (hero) {
+        const ClassDef* klass = m_Data->FindClass(m_ClassId);
+        if (klass == nullptr)
+            return;
+        for (const SkillDef* skill : m_Data->ActiveSkills(*klass))
+            out.push_back(skill);
+        for (const SkillDef* skill : m_Data->Passives(*klass))
+            out.push_back(skill);
+        return;
     }
-    if (player.BulwarkFocus < 0)
-        player.BulwarkFocus = 0;
+    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
+    if (enemy == nullptr)
+        return;
+    for (const SkillGrant& grant : enemy->Skills)
+        out.push_back(&grant.Resolved);
 }
 
-i32 Battle::BloodlustFor(const CombatantState& user, std::string_view statId) const
+void Battle::ApplyAlways(CombatantState& who, bool hero) const
 {
-    if (m_Data == nullptr || user.MaxHp <= 0)
+    std::vector<const SkillDef*> granted;
+    CollectGranted(hero, granted);
+    for (const SkillDef* skill : granted) {
+        for (const EffectDef& effect : skill->Effects) {
+            if (effect.Trigger != EffectTrigger::Always || effect.Op != EffectOp::Stat)
+                continue;
+            if (!effect.Stat.has_value())
+                continue;
+            i32 value = who.Stats.Get(*effect.Stat) + effect.Amount.value_or(0);
+            if (value < 0)
+                value = 0;
+            who.Stats.Set(*effect.Stat, value);
+        }
+    }
+}
+
+void Battle::RunTrigger(CombatantState& who, EffectTrigger trigger) const
+{
+    if (m_Data == nullptr)
+        return;
+    std::vector<const SkillDef*> granted;
+    CollectGranted(&who == &m_Player, granted);
+    for (const SkillDef* skill : granted) {
+        for (const EffectDef& effect : skill->Effects) {
+            if (effect.Trigger != trigger)
+                continue;
+            if (effect.Op == EffectOp::GrantFocus) {
+                GrantFocus(who, effect.Amount.value_or(0));
+            } else if (effect.Op == EffectOp::Heal) {
+                const i32 amount = effect.Power.value_or(0);
+                if (amount <= 0 || who.Hp >= who.MaxHp)
+                    continue;
+                const i32 room = who.MaxHp - who.Hp;
+                who.Hp += amount < room ? amount : room;
+            } else if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value()) {
+                const StatusDef* status = m_Data->FindStatus(*effect.Status);
+                if (status != nullptr)
+                    ApplyStatus(who, *status);
+            }
+        }
+    }
+}
+
+i32 Battle::MissingFor(const CombatantState& user, std::string_view statId) const
+{
+    if (user.MaxHp <= 0)
         return 0;
-    const ClassDef* klass = m_Data->FindClass(user.Id);
-    if (klass == nullptr)
-        return 0;
+    std::vector<const SkillDef*> granted;
+    CollectGranted(&user == &m_Player, granted);
     i32 bonus = 0;
-    for (const SkillDef* passive : m_Data->Passives(*klass)) {
-        if (passive->Passive != PassiveEffect::Bloodied || passive->Stat != statId)
-            continue;
-        bonus += BloodlustBonus(passive->Amount, passive->StepPercent, passive->Max, user.Hp,
-                                user.MaxHp);
+    for (const SkillDef* skill : granted) {
+        for (const EffectDef& effect : skill->Effects) {
+            if (effect.Trigger != EffectTrigger::Always || effect.Op != EffectOp::StatPerMissingHp)
+                continue;
+            if (!effect.Stat.has_value() || *effect.Stat != statId)
+                continue;
+            bonus += MissingHpBonus(effect.Amount.value_or(0), effect.Per.value_or(0),
+                                    effect.Max.value_or(0), user.Hp, user.MaxHp);
+        }
     }
     return bonus;
 }
@@ -434,19 +487,106 @@ i32 Battle::DefenseOf(const CombatantState& who) const
     return ClampPool(defense);
 }
 
-i32 Battle::PlayerPower(const SkillDef& skill) const
+i32 Battle::RankedPower(const SkillDef& skill, i32 base) const
 {
     i32 rank = 1;
     for (const SkillRank& row : m_PlayerRanks) {
         if (row.Id == skill.Id && row.Rank > rank)
             rank = row.Rank;
     }
-    i64 power = static_cast<i64>(skill.Power) + static_cast<i64>(rank - 1) * m_PowerPerRank;
+    i64 power = static_cast<i64>(base) + static_cast<i64>(rank - 1) * m_PowerPerRank;
     if (power < 0)
         power = 0;
     if (power > 9999)
         power = 9999;
     return static_cast<i32>(power);
+}
+
+bool Battle::DealsDamage(const SkillDef& skill) const
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Damage)
+            return true;
+    }
+    return false;
+}
+
+i32 Battle::SkillScore(const SkillDef& skill) const
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Damage)
+            return effect.Power.value_or(0);
+    }
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Power.has_value())
+            return *effect.Power;
+        if (effect.Amount.has_value())
+            return *effect.Amount;
+    }
+    return 0;
+}
+
+const SkillDef* Battle::PlayerSkill(std::string_view skillId) const
+{
+    if (m_Data == nullptr)
+        return nullptr;
+    const ClassDef* klass = m_Data->FindClass(m_ClassId);
+    if (klass == nullptr)
+        return nullptr;
+    for (const SkillDef* skill : m_Data->ActiveSkills(*klass)) {
+        if (skill->Id == skillId)
+            return skill;
+    }
+    return nullptr;
+}
+
+const SkillDef* Battle::EnemySkill(std::string_view skillId) const
+{
+    if (m_Data == nullptr)
+        return nullptr;
+    const EnemyDef* enemy = m_Data->FindEnemy(m_EnemyId);
+    if (enemy == nullptr)
+        return nullptr;
+    for (const SkillGrant& grant : enemy->Skills) {
+        if (grant.Id == skillId)
+            return &grant.Resolved;
+    }
+    return nullptr;
+}
+
+Battle::HitLanded Battle::LandHit(CombatantState& attacker, CombatantState& defender, i32 raw)
+{
+    HitLanded landed;
+    const std::span<const StatusDef> catalog =
+        m_Data != nullptr ? m_Data->GetStatuses() : std::span<const StatusDef>{};
+    i32 taken = GuardedDamage(raw, defender.GuardPercent);
+    const i32 blocked = raw > taken ? raw - taken : 0;
+    if (blocked > 0 && defender.ReflectPercent > 0) {
+        landed.Reflected = ReflectedDamage(blocked, defender.ReflectPercent, defender.ReflectFlat);
+        const i32 back = StatusTakenPercent(attacker, catalog);
+        if (back != 0)
+            landed.Reflected = ScalePercent(landed.Reflected, 100 + back);
+        attacker.Hp -= landed.Reflected;
+        if (attacker.Hp < 0)
+            attacker.Hp = 0;
+    }
+    if (blocked > 0)
+        RunTrigger(defender, EffectTrigger::OnBlock);
+    defender.GuardPercent = 0;
+    defender.ReflectPercent = 0;
+    defender.ReflectFlat = 0;
+    const i32 takenPct = StatusTakenPercent(defender, catalog);
+    if (takenPct != 0)
+        taken = ScalePercent(taken, 100 + takenPct);
+    defender.Hp -= taken;
+    if (defender.Hp < 0)
+        defender.Hp = 0;
+    landed.Taken = taken;
+    if (taken > 0)
+        RunTrigger(defender, EffectTrigger::OnDamaged);
+    if (landed.Reflected > 0)
+        RunTrigger(attacker, EffectTrigger::OnDamaged);
+    return landed;
 }
 
 i32 Battle::NoteSkillUse(CombatantState& who, const std::string& skillId)
@@ -545,6 +685,7 @@ Battle::TurnOpen Battle::PrepareTurn(CombatantState& user)
         AdvanceTurn();
         return open;
     }
+    RunTrigger(user, EffectTrigger::OnTurnStart);
     if (&user == &m_Player)
         GrantFocus(user, m_Rules.FocusPerTurn);
     return open;
@@ -559,6 +700,12 @@ void Battle::SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks)
 void Battle::SetGear(StatBlock gear)
 {
     m_Gear = gear;
+}
+
+void Battle::SetBaseStats(StatBlock stats)
+{
+    m_BaseStats = stats;
+    m_HasBaseStats = true;
 }
 
 ActionResult Battle::UseItem(const ItemDef& item)
@@ -662,123 +809,181 @@ ActionResult Battle::Resolve(CombatantState& user, CombatantState& other, const 
     result.Accepted = true;
     result.SkillId = skill.Id;
     const bool hero = &user == &m_Player;
-    const bool ranked = skill.Effect == SkillEffect::Damage || skill.Effect == SkillEffect::Heal ||
-                        skill.Effect == SkillEffect::Riposte;
-    const i32 power = hero && ranked ? PlayerPower(skill) : skill.Power;
     const std::span<const StatusDef> catalog =
         m_Data != nullptr ? m_Data->GetStatuses() : std::span<const StatusDef>{};
 
-    if (skill.Effect == SkillEffect::Damage) {
-        StrikeQuery hit;
-        hit.Power = power;
-        if (!skill.Scaling.empty()) {
-            if (skill.Scaling == "defense")
-                hit.ScalingStat = DefenseOf(user);
-            else
-                hit.ScalingStat = user.Stats.Get(skill.Scaling);
-            hit.ScalingStat += BloodlustFor(user, skill.Scaling);
+    bool damageRan = false;
+    i32 taken = 0;
+    i32 reflected = 0;
+    bool sawGuard = false;
+    i32 guardAmount = 0;
+    bool sawReflect = false;
+    i32 reflectPercent = 0;
+    bool sawHeal = false;
+    bool sawEmpower = false;
+    bool sawHarden = false;
+    i32 hardenAmount = 0;
+    bool noted = false;
+    i32 notedUses = 0;
+    std::string extra;
+    auto countUse = [&]() {
+        if (!noted) {
+            notedUses = NoteSkillUse(user, skill.Id);
+            noted = true;
         }
-        hit.Defense = DefenseOf(other);
-        hit.EmpowerPercent = user.EmpowerPercent;
-        user.EmpowerPercent = 0;
-        i32 damage = StrikeDamage(hit, m_Rules);
-        const i32 dealt = StatusDealtPercent(user, catalog);
-        if (dealt != 0)
-            damage = ScalePercent(damage, 100 + dealt);
-        const i32 raw = damage;
-        i32 taken = GuardedDamage(raw, other.GuardPercent);
-        const i32 blocked = raw > taken ? raw - taken : 0;
-        i32 reflected = 0;
-        if (blocked > 0 && other.ReflectPercent > 0) {
-            reflected = ReflectedDamage(blocked, other.ReflectPercent, other.ReflectFlat);
-            const i32 back = StatusTakenPercent(user, catalog);
-            if (back != 0)
-                reflected = ScalePercent(reflected, 100 + back);
-            user.Hp -= reflected;
-            if (user.Hp < 0)
-                user.Hp = 0;
+        return notedUses;
+    };
+
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger != EffectTrigger::OnUse)
+            continue;
+        if (effect.Op == EffectOp::Damage) {
+            const i32 base = effect.Power.value_or(0);
+            const i32 power = hero ? RankedPower(skill, base) : base;
+            i32 scalingStat = 0;
+            if (effect.Scaling.has_value()) {
+                if (*effect.Scaling == "defense")
+                    scalingStat = DefenseOf(user);
+                else
+                    scalingStat = user.Stats.Get(*effect.Scaling);
+                scalingStat += MissingFor(user, *effect.Scaling);
+            }
+            StrikeQuery hit;
+            hit.Power = power;
+            hit.ScalingStat = scalingStat;
+            hit.Defense = DefenseOf(other);
+            hit.EmpowerPercent = user.EmpowerPercent;
+            user.EmpowerPercent = 0;
+            i32 raw = StrikeDamage(hit, m_Rules);
+            const i32 dealt = StatusDealtPercent(user, catalog);
+            if (dealt != 0)
+                raw = ScalePercent(raw, 100 + dealt);
+            const HitLanded landed = LandHit(user, other, raw);
+            taken += landed.Taken;
+            reflected += landed.Reflected;
+            damageRan = true;
+        } else if (effect.Op == EffectOp::Guard) {
+            user.GuardPercent = effect.Amount.value_or(0);
+            user.ReflectPercent = 0;
+            user.ReflectFlat = 0;
+            guardAmount = user.GuardPercent;
+            sawGuard = true;
+            sawReflect = false;
+        } else if (effect.Op == EffectOp::Reflect) {
+            user.ReflectPercent = effect.Percent.value_or(0);
+            i32 scaling = 0;
+            if (effect.Scaling.has_value()) {
+                if (*effect.Scaling == "defense")
+                    scaling = DefenseOf(user);
+                else
+                    scaling = user.Stats.Get(*effect.Scaling);
+            }
+            const i32 flatBase = effect.Power.value_or(0);
+            const i32 flatPower = hero ? RankedPower(skill, flatBase) : flatBase;
+            user.ReflectFlat =
+                flatPower + Scaled(scaling, m_Rules.AttackNumerator, m_Rules.AttackDenominator);
+            reflectPercent = user.ReflectPercent;
+            sawReflect = true;
+        } else if (effect.Op == EffectOp::Heal) {
+            const i32 base = effect.Power.value_or(0);
+            const i32 power = hero ? RankedPower(skill, base) : base;
+            i32 scaling = 0;
+            if (effect.Scaling.has_value())
+                scaling = user.Stats.Get(*effect.Scaling);
+            const i32 amount = HealAmount(power, scaling, m_Rules);
+            const i32 before = user.Hp;
+            const i32 room = user.MaxHp - user.Hp;
+            user.Hp = before + (amount < room ? amount : room);
+            result.Healing = user.Hp - before;
+            sawHeal = true;
+        } else if (effect.Op == EffectOp::Empower) {
+            user.EmpowerPercent = effect.Amount.value_or(0);
+            sawEmpower = true;
+        } else if (effect.Op == EffectOp::Harden) {
+            user.BonusDefense = effect.Amount.value_or(0);
+            user.BonusDefenseTurns = effect.Turns.value_or(1);
+            hardenAmount = user.BonusDefense;
+            sawHarden = true;
+        } else if (effect.Op == EffectOp::GrantFocus) {
+            GrantFocus(user, effect.Amount.value_or(0));
+        } else if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value() &&
+                   m_Data != nullptr) {
+            const i32 every = effect.Every.value_or(1);
+            const i32 uses = countUse();
+            if (every <= 1 || uses % every == 0) {
+                const StatusDef* inflicted = m_Data->FindStatus(*effect.Status);
+                if (inflicted != nullptr) {
+                    CombatantState& afflicted = skill.Target == SkillTarget::Self ? user : other;
+                    ApplyStatus(afflicted, *inflicted);
+                    extra += " ";
+                    extra += inflicted->Name;
+                    extra += ".";
+                }
+            }
         }
-        if (blocked > 0 && other.BulwarkFocus > 0)
-            GrantFocus(other, other.BulwarkFocus);
-        other.GuardPercent = 0;
-        other.ReflectPercent = 0;
-        other.ReflectFlat = 0;
-        const i32 takenPct = StatusTakenPercent(other, catalog);
-        if (takenPct != 0)
-            taken = ScalePercent(taken, 100 + takenPct);
-        other.Hp -= taken;
-        if (other.Hp < 0)
-            other.Hp = 0;
+    }
+
+    if (damageRan) {
+        for (const EffectDef& follow : skill.Effects) {
+            if (follow.Trigger != EffectTrigger::OnHit)
+                continue;
+            if (follow.Op == EffectOp::StunIfWindingUp && !other.WindupSkill.empty()) {
+                if (follow.Status.has_value() && m_Data != nullptr) {
+                    const StatusDef* stun = m_Data->FindStatus(*follow.Status);
+                    if (stun != nullptr) {
+                        ApplyStatus(other, *stun);
+                        extra += " ";
+                        extra += other.Name;
+                        extra += " is stunned.";
+                    }
+                }
+                other.WindupSkill.clear();
+                other.WindupLeft = 0;
+                other.WindupTotal = 0;
+            } else if (follow.Op == EffectOp::ApplyStatus && follow.Status.has_value() &&
+                       m_Data != nullptr) {
+                const i32 every = follow.Every.value_or(1);
+                const i32 uses = countUse();
+                if (every <= 1 || uses % every == 0) {
+                    const StatusDef* inflicted = m_Data->FindStatus(*follow.Status);
+                    if (inflicted != nullptr) {
+                        ApplyStatus(other, *inflicted);
+                        extra += " ";
+                        extra += inflicted->Name;
+                        extra += ".";
+                    }
+                }
+            }
+        }
+    }
+
+    if (damageRan) {
         result.Damage = taken;
         result.Text = user.Name + " uses " + skill.Name + " for " + std::to_string(taken) + ".";
         if (reflected > 0)
             result.Text += " " + std::to_string(reflected) + " returns.";
-        if (!skill.StunWindup.empty() && !other.WindupSkill.empty()) {
-            const StatusDef* stun =
-                m_Data != nullptr ? m_Data->FindStatus(skill.StunWindup) : nullptr;
-            if (stun != nullptr) {
-                ApplyStatus(other, *stun);
-                result.Text += " " + other.Name + " is stunned.";
-            }
-            other.WindupSkill.clear();
-            other.WindupLeft = 0;
-            other.WindupTotal = 0;
-        }
-        if (!skill.Status.empty()) {
-            const i32 uses = NoteSkillUse(user, skill.Id);
-            const bool due = skill.StatusEvery <= 1 || uses % skill.StatusEvery == 0;
-            if (due && m_Data != nullptr) {
-                const StatusDef* inflicted = m_Data->FindStatus(skill.Status);
-                if (inflicted != nullptr) {
-                    ApplyStatus(other, *inflicted);
-                    result.Text += " " + inflicted->Name + ".";
-                }
-            }
-        }
-    } else if (skill.Effect == SkillEffect::Guard) {
-        user.GuardPercent = skill.Power;
-        user.ReflectPercent = 0;
-        user.ReflectFlat = 0;
+    } else if (sawGuard && sawReflect) {
+        result.Text = user.Name + " uses " + skill.Name + ". The next hit loses " +
+                      std::to_string(guardAmount) + " percent, and " +
+                      std::to_string(reflectPercent) + " percent of what it stops returns.";
+    } else if (sawGuard) {
         result.Text = user.Name + " uses " + skill.Name + ". The next hit is reduced by " +
-                      std::to_string(skill.Power) + " percent.";
-    } else if (skill.Effect == SkillEffect::Heal) {
-        i32 scaling = 0;
-        if (!skill.Scaling.empty())
-            scaling = user.Stats.Get(skill.Scaling);
-        const i32 amount = HealAmount(power, scaling, m_Rules);
-        const i32 before = user.Hp;
-        const i32 room = user.MaxHp - user.Hp;
-        user.Hp = before + (amount < room ? amount : room);
-        result.Healing = user.Hp - before;
+                      std::to_string(guardAmount) + " percent.";
+    } else if (sawHeal) {
         if (result.Healing == 0)
             result.Text = user.Name + " uses " + skill.Name + " but is already at full health.";
         else
             result.Text = user.Name + " uses " + skill.Name + " and heals " +
                           std::to_string(result.Healing) + ".";
-    } else if (skill.Effect == SkillEffect::Empower) {
-        user.EmpowerPercent = skill.Power;
+    } else if (sawEmpower) {
         result.Text = user.Name + " uses " + skill.Name + ". The next blow hits harder.";
-    } else if (skill.Effect == SkillEffect::Riposte) {
-        user.GuardPercent = skill.Guard;
-        user.ReflectPercent = skill.Reflect;
-        i32 scaling = 0;
-        if (skill.Scaling == "defense")
-            scaling = DefenseOf(user);
-        else if (!skill.Scaling.empty())
-            scaling = user.Stats.Get(skill.Scaling);
-        user.ReflectFlat =
-            power + Scaled(scaling, m_Rules.AttackNumerator, m_Rules.AttackDenominator);
-        result.Text = user.Name + " uses " + skill.Name + ". The next hit loses " +
-                      std::to_string(skill.Guard) + " percent, and " +
-                      std::to_string(skill.Reflect) + " percent of what it stops returns.";
-    } else if (skill.Effect == SkillEffect::Harden) {
-        user.BonusDefense = skill.Power;
-        user.BonusDefenseTurns = skill.Duration;
+    } else if (sawHarden) {
         result.Text =
-            user.Name + " uses " + skill.Name + ". Defense +" + std::to_string(skill.Power) + ".";
+            user.Name + " uses " + skill.Name + ". Defense +" + std::to_string(hardenAmount) + ".";
     } else {
         result.Text = user.Name + " uses " + skill.Name + ".";
     }
+    result.Text += extra;
 
     EnterPhase(result.Text);
     FinishIfDead();
@@ -797,38 +1002,14 @@ ActionResult Battle::ResolveShard()
 {
     const EnemyDef* enemy = m_Data != nullptr ? m_Data->FindEnemy(m_EnemyId) : nullptr;
     const i32 raw = enemy != nullptr && enemy->ShardDamage > 0 ? enemy->ShardDamage : 0;
-    const std::span<const StatusDef> catalog =
-        m_Data != nullptr ? m_Data->GetStatuses() : std::span<const StatusDef>{};
     ActionResult result;
     result.Accepted = true;
     result.SkillId = "rubble";
-    i32 taken = GuardedDamage(raw, m_Player.GuardPercent);
-    const i32 blocked = raw > taken ? raw - taken : 0;
-    i32 reflected = 0;
-    if (blocked > 0 && m_Player.ReflectPercent > 0) {
-        reflected = ReflectedDamage(blocked, m_Player.ReflectPercent, m_Player.ReflectFlat);
-        const i32 back = StatusTakenPercent(m_Enemy, catalog);
-        if (back != 0)
-            reflected = ScalePercent(reflected, 100 + back);
-        m_Enemy.Hp -= reflected;
-        if (m_Enemy.Hp < 0)
-            m_Enemy.Hp = 0;
-    }
-    if (blocked > 0 && m_Player.BulwarkFocus > 0)
-        GrantFocus(m_Player, m_Player.BulwarkFocus);
-    m_Player.GuardPercent = 0;
-    m_Player.ReflectPercent = 0;
-    m_Player.ReflectFlat = 0;
-    const i32 takenPct = StatusTakenPercent(m_Player, catalog);
-    if (takenPct != 0)
-        taken = ScalePercent(taken, 100 + takenPct);
-    m_Player.Hp -= taken;
-    if (m_Player.Hp < 0)
-        m_Player.Hp = 0;
-    result.Damage = taken;
-    result.Text = "Rubble hits " + m_Player.Name + " for " + std::to_string(taken) + ".";
-    if (reflected > 0)
-        result.Text += " " + std::to_string(reflected) + " returns.";
+    const HitLanded landed = LandHit(m_Enemy, m_Player, raw);
+    result.Damage = landed.Taken;
+    result.Text = "Rubble hits " + m_Player.Name + " for " + std::to_string(landed.Taken) + ".";
+    if (landed.Reflected > 0)
+        result.Text += " " + std::to_string(landed.Reflected) + " returns.";
     EnterPhase(result.Text);
     FinishIfDead();
     PrefixOpening(result);
@@ -851,7 +1032,7 @@ const SkillDef* Battle::TakeEnemySkill()
         const i32 count = static_cast<i32>(enemy->Pattern.size());
         for (i32 step = 0; step < count; ++step) {
             const i32 index = (m_Enemy.PatternStep + step) % count;
-            const SkillDef* skill = m_Data->FindSkill(enemy->Pattern[static_cast<usize>(index)]);
+            const SkillDef* skill = EnemySkill(enemy->Pattern[static_cast<usize>(index)]);
             if (skill == nullptr || skill->Kind != SkillKind::Active)
                 continue;
             if (skill->FocusCost > m_Enemy.Focus)
@@ -864,7 +1045,7 @@ const SkillDef* Battle::TakeEnemySkill()
 
     const SkillDef* best = nullptr;
     for (const std::string& id : m_EnemySkills) {
-        const SkillDef* skill = m_Data->FindSkill(id);
+        const SkillDef* skill = EnemySkill(id);
         if (skill == nullptr || skill->Kind != SkillKind::Active)
             continue;
         if (skill->FocusCost > m_Enemy.Focus)
@@ -873,11 +1054,11 @@ const SkillDef* Battle::TakeEnemySkill()
             best = skill;
             continue;
         }
-        const bool bestHits = best->Effect == SkillEffect::Damage;
-        const bool hits = skill->Effect == SkillEffect::Damage;
+        const bool bestHits = DealsDamage(*best);
+        const bool hits = DealsDamage(*skill);
         if (hits && !bestHits)
             best = skill;
-        else if (hits == bestHits && skill->Power > best->Power)
+        else if (hits == bestHits && SkillScore(*skill) > SkillScore(*best))
             best = skill;
     }
     return best;
@@ -896,12 +1077,7 @@ ActionResult Battle::UseSkill(std::string_view skillId)
     if (!open.Continue)
         return open.Result;
 
-    bool known = false;
-    for (const std::string& id : m_PlayerSkills) {
-        if (id == skillId)
-            known = true;
-    }
-    const SkillDef* skill = known && m_Data != nullptr ? m_Data->FindSkill(skillId) : nullptr;
+    const SkillDef* skill = PlayerSkill(skillId);
     if (skill == nullptr || skill->Kind != SkillKind::Active)
         return Reject("You do not know that skill.");
     return Resolve(m_Player, m_Enemy, *skill);
@@ -951,7 +1127,7 @@ ActionResult Battle::EnemyAct()
     }
 
     if (!m_Enemy.WindupSkill.empty() && m_Data != nullptr) {
-        const SkillDef* winding = m_Data->FindSkill(m_Enemy.WindupSkill);
+        const SkillDef* winding = EnemySkill(m_Enemy.WindupSkill);
         if (winding == nullptr) {
             m_Enemy.WindupSkill.clear();
             m_Enemy.WindupLeft = 0;

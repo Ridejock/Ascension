@@ -4,6 +4,7 @@
       "id": "fighter",
       "name": "Fighter",
       "description": "A front-line combatant. At level 5, a Fighter becomes a Berserker or a Guardian.",
+      "starter": true,
       "stats": {
         "vitality": 18,
         "strength": 8,

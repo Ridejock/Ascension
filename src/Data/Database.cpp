@@ -19,8 +19,8 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json", "skills.json", "statuses.json", "classes.json",  "enemies.json",
-    "items.json", "shop.json",   "combat.json",   "progress.json",
+    "stats.json",   "effects.json", "skills.json", "statuses.json", "classes.json",
+    "enemies.json", "items.json",   "shop.json",   "combat.json",   "progress.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -285,6 +285,7 @@ bool ReadIdList(const Json& object, const char* key, std::vector<std::string>& o
 
 struct Parsed {
     std::vector<StatDef> Stats;
+    std::vector<EffectDef> Effects;
     std::vector<SkillDef> Skills;
     std::vector<StatusDef> Statuses;
     std::vector<ClassDef> Classes;
@@ -294,25 +295,6 @@ struct Parsed {
     CombatRules Rules;
     ProgressRules Progress;
 };
-
-bool ParseEffect(std::string_view text, SkillEffect& out)
-{
-    if (text == "damage")
-        out = SkillEffect::Damage;
-    else if (text == "guard")
-        out = SkillEffect::Guard;
-    else if (text == "heal")
-        out = SkillEffect::Heal;
-    else if (text == "empower")
-        out = SkillEffect::Empower;
-    else if (text == "riposte")
-        out = SkillEffect::Riposte;
-    else if (text == "harden")
-        out = SkillEffect::Harden;
-    else
-        return false;
-    return true;
-}
 
 template <typename T> const T* FindId(const std::vector<T>& items, std::string_view id)
 {
@@ -379,6 +361,509 @@ bool LoadStats(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool ParseTrigger(std::string_view text, EffectTrigger& out)
+{
+    if (text == "always")
+        out = EffectTrigger::Always;
+    else if (text == "onUse")
+        out = EffectTrigger::OnUse;
+    else if (text == "onHit")
+        out = EffectTrigger::OnHit;
+    else if (text == "onBlock")
+        out = EffectTrigger::OnBlock;
+    else if (text == "onTurnStart")
+        out = EffectTrigger::OnTurnStart;
+    else if (text == "onDamaged")
+        out = EffectTrigger::OnDamaged;
+    else
+        return false;
+    return true;
+}
+
+bool ParseOp(std::string_view text, EffectOp& out)
+{
+    if (text == "damage")
+        out = EffectOp::Damage;
+    else if (text == "heal")
+        out = EffectOp::Heal;
+    else if (text == "guard")
+        out = EffectOp::Guard;
+    else if (text == "reflect")
+        out = EffectOp::Reflect;
+    else if (text == "empower")
+        out = EffectOp::Empower;
+    else if (text == "harden")
+        out = EffectOp::Harden;
+    else if (text == "stat")
+        out = EffectOp::Stat;
+    else if (text == "statPerMissingHp")
+        out = EffectOp::StatPerMissingHp;
+    else if (text == "grantFocus")
+        out = EffectOp::GrantFocus;
+    else if (text == "applyStatus")
+        out = EffectOp::ApplyStatus;
+    else if (text == "stunIfWindingUp")
+        out = EffectOp::StunIfWindingUp;
+    else
+        return false;
+    return true;
+}
+
+bool TriggerAllows(EffectTrigger trigger, EffectOp op)
+{
+    if (op == EffectOp::Stat || op == EffectOp::StatPerMissingHp)
+        return trigger == EffectTrigger::Always;
+    if (op == EffectOp::Damage || op == EffectOp::Guard || op == EffectOp::Reflect ||
+        op == EffectOp::Empower || op == EffectOp::Harden)
+        return trigger == EffectTrigger::OnUse;
+    if (op == EffectOp::Heal)
+        return trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnTurnStart;
+    if (op == EffectOp::GrantFocus)
+        return trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnBlock ||
+               trigger == EffectTrigger::OnTurnStart || trigger == EffectTrigger::OnDamaged;
+    if (op == EffectOp::ApplyStatus)
+        return trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnHit ||
+               trigger == EffectTrigger::OnDamaged;
+    return trigger == EffectTrigger::OnHit;
+}
+
+bool EffectKeysOk(const Json& object, EffectOp op, std::string& unknown)
+{
+    if (op == EffectOp::Stat)
+        return AllowKeys(object, {"id", "trigger", "op", "stat", "amount"}, unknown);
+    if (op == EffectOp::StatPerMissingHp)
+        return AllowKeys(object, {"id", "trigger", "op", "stat", "amount", "per", "max"}, unknown);
+    if (op == EffectOp::GrantFocus || op == EffectOp::Empower)
+        return AllowKeys(object, {"id", "trigger", "op", "amount"}, unknown);
+    if (op == EffectOp::Damage || op == EffectOp::Heal)
+        return AllowKeys(object, {"id", "trigger", "op", "power", "scaling"}, unknown);
+    if (op == EffectOp::Guard)
+        return AllowKeys(object, {"id", "trigger", "op", "amount"}, unknown);
+    if (op == EffectOp::Reflect)
+        return AllowKeys(object, {"id", "trigger", "op", "percent", "power", "scaling"}, unknown);
+    if (op == EffectOp::Harden)
+        return AllowKeys(object, {"id", "trigger", "op", "amount", "turns"}, unknown);
+    if (op == EffectOp::ApplyStatus)
+        return AllowKeys(object, {"id", "trigger", "op", "status", "every"}, unknown);
+    return AllowKeys(object, {"id", "trigger", "op", "status"}, unknown);
+}
+
+bool KnownEffectField(std::string_view key)
+{
+    return key == "power" || key == "amount" || key == "percent" || key == "per" || key == "max" ||
+           key == "turns" || key == "every" || key == "stat" || key == "scaling" || key == "status";
+}
+
+bool HasEffectField(const EffectDef& effect, std::string_view key)
+{
+    if (key == "power")
+        return effect.Power.has_value();
+    if (key == "amount")
+        return effect.Amount.has_value();
+    if (key == "percent")
+        return effect.Percent.has_value();
+    if (key == "per")
+        return effect.Per.has_value();
+    if (key == "max")
+        return effect.Max.has_value();
+    if (key == "turns")
+        return effect.Turns.has_value();
+    if (key == "every")
+        return effect.Every.has_value();
+    if (key == "stat")
+        return effect.Stat.has_value();
+    if (key == "scaling")
+        return effect.Scaling.has_value();
+    return key == "status" && effect.Status.has_value();
+}
+
+bool FieldBounds(EffectOp op, std::string_view key, i32& min, i32& max)
+{
+    if (key == "power") {
+        min = 0;
+        max = 9999;
+        return true;
+    }
+    if (key == "amount") {
+        if (op == EffectOp::Stat) {
+            min = -999;
+            max = 999;
+        } else if (op == EffectOp::Guard) {
+            min = 0;
+            max = 100;
+        } else if (op == EffectOp::GrantFocus || op == EffectOp::StatPerMissingHp) {
+            min = 0;
+            max = 99;
+        } else if (op == EffectOp::Harden) {
+            min = 0;
+            max = 999;
+        } else {
+            min = 0;
+            max = 9999;
+        }
+        return true;
+    }
+    if (key == "percent") {
+        min = 0;
+        max = 100;
+        return true;
+    }
+    if (key == "per") {
+        min = 1;
+        max = 100;
+        return true;
+    }
+    if (key == "max") {
+        min = 0;
+        max = 99;
+        return true;
+    }
+    if (key == "turns") {
+        min = 1;
+        max = 99;
+        return true;
+    }
+    if (key == "every") {
+        min = 1;
+        max = 99;
+        return true;
+    }
+    return false;
+}
+
+bool AssignEffectField(EffectDef& effect, const std::string& key, const Json& fieldValue,
+                       std::string& error)
+{
+    if (key == "stat" || key == "scaling" || key == "status") {
+        if (!fieldValue.is_string()) {
+            error = "'" + key + "' must be text";
+            return false;
+        }
+        const std::string text = fieldValue.get<std::string>();
+        if (key == "status") {
+            if (!IsId(text)) {
+                error = "'status' must be an id";
+                return false;
+            }
+            effect.Status = text;
+            return true;
+        }
+        if (FindStatValue(StatBlock{}, text) == nullptr) {
+            error = "'" + key + "' " + Quote(text) + " does not exist";
+            return false;
+        }
+        if (key == "stat")
+            effect.Stat = text;
+        else
+            effect.Scaling = text;
+        return true;
+    }
+    i32 min = 0;
+    i32 max = 0;
+    if (!FieldBounds(effect.Op, key, min, max)) {
+        error = "unknown field " + Quote(key);
+        return false;
+    }
+    i32 number = 0;
+    std::string why;
+    if (!ReadInt(fieldValue, min, max, number, why)) {
+        if (effect.Op == EffectOp::Guard && key == "amount")
+            error = "'amount' for a guard must be between 0 and 100";
+        else
+            error = "'" + key + "' " + why;
+        return false;
+    }
+    if (key == "power")
+        effect.Power = number;
+    else if (key == "amount")
+        effect.Amount = number;
+    else if (key == "percent")
+        effect.Percent = number;
+    else if (key == "per")
+        effect.Per = number;
+    else if (key == "max")
+        effect.Max = number;
+    else if (key == "turns")
+        effect.Turns = number;
+    else
+        effect.Every = number;
+    return true;
+}
+
+bool RequireEffectFields(const EffectDef& effect, std::string& error)
+{
+    auto need = [&](bool present, const char* key) {
+        if (present)
+            return true;
+        error = std::string("'") + key + "' is required";
+        return false;
+    };
+    if (effect.Op == EffectOp::Stat)
+        return need(effect.Stat.has_value(), "stat") && need(effect.Amount.has_value(), "amount");
+    if (effect.Op == EffectOp::StatPerMissingHp)
+        return need(effect.Stat.has_value(), "stat") && need(effect.Amount.has_value(), "amount") &&
+               need(effect.Per.has_value(), "per") && need(effect.Max.has_value(), "max");
+    if (effect.Op == EffectOp::GrantFocus || effect.Op == EffectOp::Empower ||
+        effect.Op == EffectOp::Guard)
+        return need(effect.Amount.has_value(), "amount");
+    if (effect.Op == EffectOp::Damage || effect.Op == EffectOp::Heal)
+        return need(effect.Power.has_value(), "power");
+    if (effect.Op == EffectOp::Reflect)
+        return need(effect.Percent.has_value(), "percent") &&
+               need(effect.Power.has_value(), "power");
+    if (effect.Op == EffectOp::Harden)
+        return need(effect.Amount.has_value(), "amount") && need(effect.Turns.has_value(), "turns");
+    return need(effect.Status.has_value(), "status");
+}
+
+// A complete effect object: the recipe in effects.json, or an inline effect on a skill.
+bool ParseEffectBody(const Json& entry, EffectDef& effect, std::string& error)
+{
+    if (!entry.is_object()) {
+        error = "effect entries must be objects";
+        return false;
+    }
+    if (!RequireString(entry, "id", effect.Id, error))
+        return false;
+    if (!IsId(effect.Id)) {
+        error = "id must be letters, digits and _, starting with a letter";
+        return false;
+    }
+    std::string triggerText;
+    std::string opText;
+    if (!RequireString(entry, "trigger", triggerText, error))
+        return false;
+    if (!ParseTrigger(triggerText, effect.Trigger)) {
+        error = "unknown trigger " + Quote(triggerText);
+        return false;
+    }
+    if (!RequireString(entry, "op", opText, error))
+        return false;
+    if (!ParseOp(opText, effect.Op)) {
+        error = "unknown op " + Quote(opText);
+        return false;
+    }
+    if (!TriggerAllows(effect.Trigger, effect.Op)) {
+        error = std::string("trigger ") + Quote(triggerText) + " does not use op " + Quote(opText);
+        return false;
+    }
+    std::string unknown;
+    if (!EffectKeysOk(entry, effect.Op, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    for (auto it = entry.begin(); it != entry.end(); ++it) {
+        if (it.key() == "id" || it.key() == "trigger" || it.key() == "op")
+            continue;
+        if (!AssignEffectField(effect, it.key(), it.value(), error))
+            return false;
+    }
+    return RequireEffectFields(effect, error);
+}
+
+bool ReadSkillEffect(const Json& entry, const std::vector<EffectDef>& recipes, EffectDef& out,
+                     std::string& error)
+{
+    if (!entry.is_object()) {
+        error = "effect entries must be objects";
+        return false;
+    }
+    if (entry.contains("recipe")) {
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "recipe"}, unknown)) {
+            error = "unknown field " + Quote(unknown);
+            return false;
+        }
+        std::string localId;
+        std::string recipeId;
+        if (!RequireString(entry, "id", localId, error) ||
+            !RequireString(entry, "recipe", recipeId, error))
+            return false;
+        if (!IsId(localId)) {
+            error = "'id' must be an id";
+            return false;
+        }
+        const EffectDef* recipe = FindId(recipes, recipeId);
+        if (recipe == nullptr) {
+            error = "effect recipe " + Quote(recipeId) + " does not exist";
+            return false;
+        }
+        out = *recipe;
+        out.Id = localId;
+        return true;
+    }
+    std::string why;
+    if (!ParseEffectBody(entry, out, why)) {
+        if (out.Id.empty())
+            error = std::move(why);
+        else
+            error = "effect " + Quote(out.Id) + ": " + why;
+        return false;
+    }
+    return true;
+}
+
+// Layer 2 (a skill) or layer 3 (a grant). Only fields the effect already has can be set.
+bool ApplyTune(SkillDef& skill, const Json& tune, std::string& error)
+{
+    if (!tune.is_object()) {
+        error = "'tune' must be an object of effect ids";
+        return false;
+    }
+    for (auto it = tune.begin(); it != tune.end(); ++it) {
+        const std::string effectId = it.key();
+        EffectDef* effect = nullptr;
+        for (EffectDef& candidate : skill.Effects) {
+            if (candidate.Id == effectId)
+                effect = &candidate;
+        }
+        if (effect == nullptr) {
+            error = "tune effect " + Quote(effectId) + " does not exist";
+            return false;
+        }
+        if (!it->is_object()) {
+            error = "tune effect " + Quote(effectId) + " must be an object";
+            return false;
+        }
+        for (auto field = it->begin(); field != it->end(); ++field) {
+            const std::string fieldName = field.key();
+            if (!KnownEffectField(fieldName) || !HasEffectField(*effect, fieldName)) {
+                error = "tune effect " + Quote(effectId) + ": unknown field " + Quote(fieldName);
+                return false;
+            }
+            std::string why;
+            if (!AssignEffectField(*effect, fieldName, field.value(), why)) {
+                error = "tune effect " + Quote(effectId) + ": " + why;
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool IsSelfOp(EffectOp op)
+{
+    return op == EffectOp::Guard || op == EffectOp::Heal || op == EffectOp::Empower ||
+           op == EffectOp::Reflect || op == EffectOp::Harden;
+}
+
+bool IsFoeOp(EffectOp op)
+{
+    return op == EffectOp::Damage || op == EffectOp::StunIfWindingUp;
+}
+
+bool HasOp(const SkillDef& skill, EffectOp op)
+{
+    for (const EffectDef& effect : skill.Effects)
+        if (effect.Op == op)
+            return true;
+    return false;
+}
+
+bool ReadOneGrant(const Parsed& parsed, const Json& entry, SkillKind expected, bool checkKind,
+                  SkillGrant& out, std::string& error)
+{
+    std::string skillId;
+    const Json* tune = nullptr;
+    if (entry.is_string()) {
+        skillId = entry.get<std::string>();
+        if (!IsId(skillId)) {
+            error =
+                Quote(skillId) + " is not an id (letters, digits and _, starting with a letter)";
+            return false;
+        }
+    } else if (entry.is_object()) {
+        std::string unknown;
+        if (!AllowKeys(entry, {"skill", "tune"}, unknown)) {
+            error = "unknown field " + Quote(unknown);
+            return false;
+        }
+        if (!RequireString(entry, "skill", skillId, error))
+            return false;
+        if (!IsId(skillId)) {
+            error = "'skill' must be an id";
+            return false;
+        }
+        const auto found = entry.find("tune");
+        if (found != entry.end())
+            tune = &(*found);
+    } else {
+        error = "a grant must be a skill id or an object";
+        return false;
+    }
+    const SkillDef* catalog = FindId(parsed.Skills, skillId);
+    if (catalog == nullptr) {
+        error = "skill " + Quote(skillId) + " does not exist";
+        return false;
+    }
+    if (checkKind && catalog->Kind != expected) {
+        error = "skill " + Quote(skillId) + " is " + ToString(catalog->Kind) + "; list it under " +
+                (expected == SkillKind::Active ? "skills" : "passives");
+        return false;
+    }
+    out.Id = catalog->Id;
+    out.Resolved = *catalog;
+    if (tune != nullptr && !ApplyTune(out.Resolved, *tune, error))
+        return false;
+    return true;
+}
+
+bool ReadGrantList(const Parsed& parsed, const Json& object, const char* key, SkillKind expected,
+                   bool required, bool checkKind, std::vector<SkillGrant>& out, std::string& error)
+{
+    const auto list = object.find(key);
+    if (list == object.end()) {
+        if (!required)
+            return true;
+        error = std::string("'") + key + "' is required";
+        return false;
+    }
+    if (!list->is_array()) {
+        error = std::string("'") + key + "' must be a list";
+        return false;
+    }
+    out.clear();
+    for (const Json& grantEntry : *list) {
+        SkillGrant grant;
+        if (!ReadOneGrant(parsed, grantEntry, expected, checkKind, grant, error))
+            return false;
+        for (const SkillGrant& existing : out) {
+            if (existing.Id == grant.Id) {
+                error = Quote(grant.Id) + " is listed twice";
+                return false;
+            }
+        }
+        out.push_back(std::move(grant));
+    }
+    return true;
+}
+
+bool LoadEffects(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("effects");
+    if (list == root.end() || !list->is_array()) {
+        error = "'effects' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        EffectDef effect;
+        std::string why;
+        if (!ParseEffectBody(entry, effect, why)) {
+            if (effect.Id.empty())
+                error = std::move(why);
+            else
+                error = "effect " + Quote(effect.Id) + ": " + why;
+            return false;
+        }
+        if (FindId(parsed.Effects, effect.Id) != nullptr) {
+            error = "effect " + Quote(effect.Id) + ": there is another effect with this id";
+            return false;
+        }
+        parsed.Effects.push_back(std::move(effect));
+    }
+    return true;
+}
+
 bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("skills");
@@ -417,17 +902,10 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (skill.Kind == SkillKind::Active) {
             if (!AllowKeys(entry,
-                           {"id", "name", "description", "kind", "effect", "target", "power",
-                            "focusCost", "scaling", "guard", "reflect", "windup", "duration",
-                            "status", "statusEvery", "stunWindup"},
+                           {"id", "name", "description", "kind", "target", "focusCost", "windup",
+                            "effects", "tune"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
-            std::string effect;
-            if (!RequireString(entry, "effect", effect, error))
-                return fail(error);
-            if (!ParseEffect(effect, skill.Effect))
-                return fail("'effect' must be \"damage\", \"guard\", \"heal\", \"empower\", "
-                            "\"riposte\" or \"harden\"");
             std::string target;
             if (!RequireString(entry, "target", target, error))
                 return fail(error);
@@ -439,122 +917,55 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 skill.Target = SkillTarget::AllEnemies;
             else
                 return fail("'target' must be \"self\", \"enemy\" or \"allEnemies\"");
-            const bool selfEffect =
-                skill.Effect == SkillEffect::Guard || skill.Effect == SkillEffect::Heal ||
-                skill.Effect == SkillEffect::Empower || skill.Effect == SkillEffect::Riposte ||
-                skill.Effect == SkillEffect::Harden;
-            if (selfEffect && skill.Target != SkillTarget::Self)
-                return fail(std::string("'target' for ") + ToString(skill.Effect) +
-                            " must be \"self\"");
-            if (!selfEffect && skill.Target == SkillTarget::Self)
-                return fail(std::string("'target' for ") + ToString(skill.Effect) +
-                            " must be \"enemy\" or \"allEnemies\"");
-            if (!RequireInt(entry, "power", 0, 9999, skill.Power, error) ||
-                !RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
+            if (!RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
                 return fail(error);
-            if (skill.Effect == SkillEffect::Guard && skill.Power > 100)
-                return fail("'power' for a guard is a percent from 0 to 100");
-            if (skill.Effect == SkillEffect::Riposte) {
-                if (!RequireInt(entry, "guard", 0, 100, skill.Guard, error) ||
-                    !RequireInt(entry, "reflect", 0, 100, skill.Reflect, error))
-                    return fail(error);
-                if (!Absent(entry, "windup", "a riposte", error) ||
-                    !Absent(entry, "duration", "a riposte", error) ||
-                    !Absent(entry, "status", "a riposte", error) ||
-                    !Absent(entry, "statusEvery", "a riposte", error) ||
-                    !Absent(entry, "stunWindup", "a riposte", error))
-                    return fail(error);
-            } else if (skill.Effect == SkillEffect::Harden) {
-                if (!RequireInt(entry, "duration", 1, 99, skill.Duration, error))
-                    return fail(error);
-                if (!Absent(entry, "guard", "harden", error) ||
-                    !Absent(entry, "reflect", "harden", error) ||
-                    !Absent(entry, "scaling", "harden", error) ||
-                    !Absent(entry, "windup", "harden", error) ||
-                    !Absent(entry, "status", "harden", error) ||
-                    !Absent(entry, "statusEvery", "harden", error) ||
-                    !Absent(entry, "stunWindup", "harden", error))
-                    return fail(error);
-            } else if (skill.Effect == SkillEffect::Damage) {
-                if (!OptionalInt(entry, "windup", 1, 9, skill.Windup, error) ||
-                    !OptionalId(entry, "status", skill.Status, error) ||
-                    !OptionalId(entry, "stunWindup", skill.StunWindup, error))
-                    return fail(error);
-                if (entry.contains("statusEvery")) {
-                    if (skill.Status.empty())
-                        return fail("'statusEvery' needs a 'status'");
-                    if (!RequireInt(entry, "statusEvery", 1, 99, skill.StatusEvery, error))
-                        return fail(error);
-                }
-                if (!Absent(entry, "guard", "a damage skill", error) ||
-                    !Absent(entry, "reflect", "a damage skill", error) ||
-                    !Absent(entry, "duration", "a damage skill", error))
-                    return fail(error);
-            } else {
-                if (!Absent(entry, "guard", ToString(skill.Effect), error) ||
-                    !Absent(entry, "reflect", ToString(skill.Effect), error) ||
-                    !Absent(entry, "windup", ToString(skill.Effect), error) ||
-                    !Absent(entry, "duration", ToString(skill.Effect), error) ||
-                    !Absent(entry, "status", ToString(skill.Effect), error) ||
-                    !Absent(entry, "statusEvery", ToString(skill.Effect), error) ||
-                    !Absent(entry, "stunWindup", ToString(skill.Effect), error))
-                    return fail(error);
-            }
-            const auto scaling = entry.find("scaling");
-            if (scaling != entry.end()) {
-                if (!scaling->is_string())
-                    return fail("'scaling' must be a stat id");
-                skill.Scaling = scaling->get<std::string>();
-                if (FindStatValue(StatBlock{}, skill.Scaling) == nullptr)
-                    return fail("scaling stat " + Quote(skill.Scaling) + " does not exist");
-            }
-        } else {
-            if (!AllowKeys(entry,
-                           {"id", "name", "description", "kind", "effect", "stat", "amount",
-                            "stepPercent", "max", "focus"},
-                           unknown))
-                return fail("unknown field " + Quote(unknown));
-            std::string effect;
-            if (!RequireString(entry, "effect", effect, error))
+            if (!OptionalInt(entry, "windup", 1, 9, skill.Windup, error))
                 return fail(error);
-            if (effect == "stat") {
-                skill.Passive = PassiveEffect::Stat;
-                if (entry.contains("stepPercent") || entry.contains("max") ||
-                    entry.contains("focus"))
-                    return fail("a stat passive uses stat and amount");
-                if (!RequireString(entry, "stat", skill.Stat, error))
-                    return fail(error);
-                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
-                    return fail("stat " + Quote(skill.Stat) + " does not exist");
-                if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error))
-                    return fail(error);
-            } else if (effect == "bloodied") {
-                skill.Passive = PassiveEffect::Bloodied;
-                if (entry.contains("focus"))
-                    return fail("bloodied uses stat, amount, stepPercent and max");
-                if (!RequireString(entry, "stat", skill.Stat, error))
-                    return fail(error);
-                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
-                    return fail("stat " + Quote(skill.Stat) + " does not exist");
-                if (!RequireInt(entry, "amount", 0, 99, skill.Amount, error) ||
-                    !RequireInt(entry, "stepPercent", 1, 100, skill.StepPercent, error) ||
-                    !RequireInt(entry, "max", 0, 99, skill.Max, error))
-                    return fail(error);
-            } else if (effect == "bulwark") {
-                skill.Passive = PassiveEffect::Bulwark;
-                if (entry.contains("stepPercent") || entry.contains("max"))
-                    return fail("bulwark uses stat, amount and focus");
-                if (!RequireString(entry, "stat", skill.Stat, error))
-                    return fail(error);
-                if (FindStatValue(StatBlock{}, skill.Stat) == nullptr)
-                    return fail("stat " + Quote(skill.Stat) + " does not exist");
-                if (!RequireInt(entry, "amount", -999, 999, skill.Amount, error) ||
-                    !RequireInt(entry, "focus", 0, 99, skill.FocusGain, error))
-                    return fail(error);
-            } else {
-                return fail("'effect' must be \"stat\", \"bloodied\" or \"bulwark\"");
-            }
+        } else if (!AllowKeys(entry, {"id", "name", "description", "kind", "effects", "tune"},
+                              unknown)) {
+            return fail("unknown field " + Quote(unknown));
         }
+
+        const auto effects = entry.find("effects");
+        if (effects == entry.end() || !effects->is_array() || effects->empty())
+            return fail("'effects' must list at least one effect");
+        for (const Json& effectEntry : *effects) {
+            EffectDef effect;
+            std::string why;
+            if (!ReadSkillEffect(effectEntry, parsed.Effects, effect, why))
+                return fail(why);
+            for (const EffectDef& existing : skill.Effects) {
+                if (existing.Id == effect.Id)
+                    return fail("effect " + Quote(effect.Id) + " is listed twice");
+            }
+            skill.Effects.push_back(std::move(effect));
+        }
+        const auto tune = entry.find("tune");
+        if (tune != entry.end()) {
+            std::string why;
+            if (!ApplyTune(skill, *tune, why))
+                return fail(why);
+        }
+
+        if (skill.Kind == SkillKind::Active) {
+            bool selfOp = false;
+            bool foeOp = false;
+            for (const EffectDef& effect : skill.Effects) {
+                if (IsSelfOp(effect.Op))
+                    selfOp = true;
+                if (IsFoeOp(effect.Op))
+                    foeOp = true;
+            }
+            if (selfOp && foeOp)
+                return fail("a skill cannot both guard itself and hit a foe");
+            if (selfOp && skill.Target != SkillTarget::Self)
+                return fail("'target' must be \"self\"");
+            if (foeOp && skill.Target == SkillTarget::Self)
+                return fail("'target' must be \"enemy\" or \"allEnemies\"");
+            if (skill.Windup > 0 && !HasOp(skill, EffectOp::Damage))
+                return fail("'windup' needs a damage effect");
+        }
+
         if (!RequireString(entry, "name", skill.Name, error) ||
             !RequireString(entry, "description", skill.Description, error))
             return fail(error);
@@ -599,7 +1010,7 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
         if (evolution) {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "evolvesFrom", "evolveLevel", "bonus",
-                            "growth", "skills", "passives"},
+                            "growth", "skills", "passives", "starter"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             if (!RequireString(entry, "evolvesFrom", klass.EvolvesFrom, error))
@@ -616,7 +1027,8 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
             }
         } else {
             if (!AllowKeys(entry,
-                           {"id", "name", "description", "stats", "growth", "skills", "passives"},
+                           {"id", "name", "description", "stats", "growth", "skills", "passives",
+                            "starter"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string why;
@@ -627,6 +1039,15 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
                 if (klass.Stats.Get(id) < 0)
                     return fail(std::string(id) + " must be zero or more on a base class");
             }
+        }
+
+        const auto starterFlag = entry.find("starter");
+        if (starterFlag != entry.end()) {
+            if (!starterFlag->is_boolean())
+                return fail("'starter' must be true or false");
+            if (starterFlag->get<bool>() && evolution)
+                return fail("an evolution cannot be a starter");
+            klass.Starter = starterFlag->get<bool>();
         }
 
         const auto growth = entry.find("growth");
@@ -640,9 +1061,11 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
                 return fail("growth " + std::string(id) + " must be zero or more");
         }
 
-        if (!ReadIdList(entry, "skills", klass.Skills, why))
+        if (!ReadGrantList(parsed, entry, "skills", SkillKind::Active, true, true, klass.Skills,
+                           why))
             return fail(why);
-        if (!ReadIdList(entry, "passives", klass.Passives, why))
+        if (!ReadGrantList(parsed, entry, "passives", SkillKind::Passive, true, true,
+                           klass.Passives, why))
             return fail(why);
         if (evolution && klass.Skills.empty())
             return fail("an evolution must add at least one skill");
@@ -700,7 +1123,8 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
             if (enemy.Stats.Get(id) < 0)
                 return fail(std::string(id) + " must be zero or more");
         }
-        if (!ReadIdList(entry, "skills", enemy.Skills, why))
+        if (!ReadGrantList(parsed, entry, "skills", SkillKind::Active, true, true, enemy.Skills,
+                           why))
             return fail(why);
         if (!RequireInt(entry, "experience", 0, 999999, enemy.Experience, error) ||
             !RequireInt(entry, "gold", 0, 999999, enemy.Gold, error))
@@ -771,7 +1195,7 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "slot", "bonus", "value", "twoHanded", "heal",
-                        "focus"},
+                        "focus", "grants"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         std::string slot;
@@ -822,6 +1246,10 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         }
         if (!RequireInt(entry, "value", 0, 999999, item.Value, error))
             return fail(error);
+        std::string grantError;
+        if (!ReadGrantList(parsed, entry, "grants", SkillKind::Active, false, false, item.Grants,
+                           grantError))
+            return fail(grantError);
         if (!RequireString(entry, "name", item.Name, error) ||
             !RequireString(entry, "description", item.Description, error))
             return fail(error);
@@ -1039,91 +1467,113 @@ bool LoadStatuses(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
-bool SkillRefs(const Parsed& parsed, const std::vector<std::string>& ids, SkillKind kind,
-               const std::string& where, std::string& error)
+bool StatusesExist(const Parsed& parsed, const std::vector<EffectDef>& effects,
+                   const std::string& where, std::string& error)
 {
-    for (const std::string& id : ids) {
-        const SkillDef* skill = FindId(parsed.Skills, id);
-        if (skill == nullptr) {
-            error = where + ": skill " + Quote(id) + " does not exist";
-            return false;
-        }
-        if (skill->Kind != kind) {
-            error = where + ": skill " + Quote(id) + " is " + ToString(skill->Kind) +
-                    "; list it under " + (kind == SkillKind::Active ? "skills" : "passives");
+    for (const EffectDef& effect : effects) {
+        if (!effect.Status.has_value())
+            continue;
+        if (FindId(parsed.Statuses, *effect.Status) == nullptr) {
+            error = where + ": status " + Quote(*effect.Status) + " does not exist";
             return false;
         }
     }
     return true;
 }
 
+bool GrantsKnown(const Parsed& parsed, const std::vector<SkillGrant>& grants,
+                 const std::string& where, std::string& error)
+{
+    for (const SkillGrant& grant : grants) {
+        if (!StatusesExist(parsed, grant.Resolved.Effects, where, error))
+            return false;
+    }
+    return true;
+}
+
 bool CrossCheck(const Parsed& parsed, std::string& error)
 {
-    for (const ClassDef& klass : parsed.Classes) {
-        const std::string where = "class " + Quote(klass.Id);
-        if (!SkillRefs(parsed, klass.Skills, SkillKind::Active, where, error))
+    for (const EffectDef& recipe : parsed.Effects) {
+        if (!recipe.Status.has_value())
+            continue;
+        if (FindId(parsed.Statuses, *recipe.Status) == nullptr) {
+            error = "effect " + Quote(recipe.Id) + ": status " + Quote(*recipe.Status) +
+                    " does not exist";
             return false;
-        if (!SkillRefs(parsed, klass.Passives, SkillKind::Passive, where, error))
+        }
+    }
+    for (const SkillDef& skill : parsed.Skills) {
+        if (!StatusesExist(parsed, skill.Effects, "skill " + Quote(skill.Id), error))
+            return false;
+    }
+    for (const ClassDef& klass : parsed.Classes) {
+        const std::string classWhere = "class " + Quote(klass.Id);
+        if (!GrantsKnown(parsed, klass.Skills, classWhere, error) ||
+            !GrantsKnown(parsed, klass.Passives, classWhere, error))
             return false;
         if (!klass.IsEvolution())
             continue;
         const ClassDef* parent = FindId(parsed.Classes, klass.EvolvesFrom);
         if (parent == nullptr) {
-            error = where + ": evolvesFrom " + Quote(klass.EvolvesFrom) + " does not exist";
+            error = classWhere + ": evolvesFrom " + Quote(klass.EvolvesFrom) + " does not exist";
             return false;
         }
         if (parent->IsEvolution()) {
-            error = where + ": evolvesFrom " + Quote(klass.EvolvesFrom) +
+            error = classWhere + ": evolvesFrom " + Quote(klass.EvolvesFrom) +
                     " is an evolution; evolve from the base class";
             return false;
         }
-        for (const std::string& id : klass.Skills) {
-            for (const std::string& parentId : parent->Skills) {
-                if (id == parentId) {
-                    error = where + ": " + Quote(parent->Id) + " already has skill " + Quote(id);
+        for (const SkillGrant& grant : klass.Skills) {
+            for (const SkillGrant& parentGrant : parent->Skills) {
+                if (grant.Id == parentGrant.Id) {
+                    error = classWhere + ": " + Quote(parent->Id) + " already has skill " +
+                            Quote(grant.Id);
                     return false;
                 }
             }
         }
-        for (const std::string& id : klass.Passives) {
-            for (const std::string& parentId : parent->Passives) {
-                if (id == parentId) {
-                    error = where + ": " + Quote(parent->Id) + " already has passive " + Quote(id);
+        for (const SkillGrant& grant : klass.Passives) {
+            for (const SkillGrant& parentGrant : parent->Passives) {
+                if (grant.Id == parentGrant.Id) {
+                    error = classWhere + ": " + Quote(parent->Id) + " already has passive " +
+                            Quote(grant.Id);
                     return false;
                 }
             }
         }
     }
-    for (const SkillDef& skill : parsed.Skills) {
-        const std::string where = "skill " + Quote(skill.Id);
-        if (!skill.Status.empty() && FindId(parsed.Statuses, skill.Status) == nullptr) {
-            error = where + ": status " + Quote(skill.Status) + " does not exist";
-            return false;
-        }
-        if (!skill.StunWindup.empty() && FindId(parsed.Statuses, skill.StunWindup) == nullptr) {
-            error = where + ": status " + Quote(skill.StunWindup) + " does not exist";
-            return false;
-        }
+    bool anyStarter = false;
+    for (const ClassDef& base : parsed.Classes) {
+        if (base.Starter)
+            anyStarter = true;
+    }
+    if (!anyStarter) {
+        error = "needs a starter class";
+        return false;
     }
     for (const EnemyDef& enemy : parsed.Enemies) {
-        const std::string where = "enemy " + Quote(enemy.Id);
-        if (!SkillRefs(parsed, enemy.Skills, SkillKind::Active, where, error))
+        const std::string enemyWhere = "enemy " + Quote(enemy.Id);
+        if (!GrantsKnown(parsed, enemy.Skills, enemyWhere, error))
             return false;
-        for (const std::string& id : enemy.Pattern) {
+        for (const std::string& patternId : enemy.Pattern) {
             bool listed = false;
-            for (const std::string& known : enemy.Skills) {
-                if (known == id)
+            for (const SkillGrant& grant : enemy.Skills) {
+                if (grant.Id == patternId)
                     listed = true;
             }
             if (!listed) {
-                error = where + ": pattern skill " + Quote(id) + " is not in skills";
+                error = enemyWhere + ": pattern skill " + Quote(patternId) + " is not in skills";
                 return false;
             }
         }
         if (!enemy.PhaseStatus.empty() && FindId(parsed.Statuses, enemy.PhaseStatus) == nullptr) {
-            error = where + ": status " + Quote(enemy.PhaseStatus) + " does not exist";
+            error = enemyWhere + ": status " + Quote(enemy.PhaseStatus) + " does not exist";
             return false;
         }
+    }
+    for (const ItemDef& item : parsed.Items) {
+        if (!GrantsKnown(parsed, item.Grants, "item " + Quote(item.Id), error))
+            return false;
     }
     for (const std::string& stocked : parsed.Shop.Stock) {
         if (FindId(parsed.Items, stocked) == nullptr) {
@@ -1144,11 +1594,11 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats, LoadSkills, LoadStatuses, LoadClasses, LoadEnemies,
-                              LoadItems, LoadShop,   LoadCombat,   LoadProgress};
-    const char* names[] = {"stats.json",   "skills.json",  "statuses.json",
-                           "classes.json", "enemies.json", "items.json",
-                           "shop.json",    "combat.json",  "progress.json"};
+    const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills, LoadStatuses, LoadClasses,
+                              LoadEnemies, LoadItems,   LoadShop,   LoadCombat,   LoadProgress};
+    const char* names[] = {"stats.json",   "effects.json", "skills.json", "statuses.json",
+                           "classes.json", "enemies.json", "items.json",  "shop.json",
+                           "combat.json",  "progress.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -1163,8 +1613,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats", "skills", "statuses", "classes", "enemies",
-                                    "items", "shop",   "combat",   "progress"};
+        const char* allowedTop[] = {"stats",   "effects", "skills", "statuses", "classes",
+                                    "enemies", "items",   "shop",   "combat",   "progress"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
@@ -1181,6 +1631,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             file = "enemies.json";
         else if (why.compare(0, 6, "skill ") == 0)
             file = "skills.json";
+        else if (why.compare(0, 7, "effect ") == 0)
+            file = "effects.json";
+        else if (why.compare(0, 5, "item ") == 0)
+            file = "items.json";
         else if (why.compare(0, 5, "shop ") == 0)
             file = "shop.json";
         error = Err(file, {}, why);
@@ -1334,6 +1788,16 @@ std::vector<const ClassDef*> Database::EvolutionsOf(std::string_view baseId) con
     return out;
 }
 
+std::vector<const ClassDef*> Database::Starters() const
+{
+    std::vector<const ClassDef*> out;
+    for (const ClassDef& klass : m_Classes) {
+        if (klass.Starter)
+            out.push_back(&klass);
+    }
+    return out;
+}
+
 void CollectSkills(const Database& database, const ClassDef& klass, bool passives,
                    std::vector<const SkillDef*>& out)
 {
@@ -1341,11 +1805,9 @@ void CollectSkills(const Database& database, const ClassDef& klass, bool passive
         if (const ClassDef* parent = database.FindClass(klass.EvolvesFrom))
             CollectSkills(database, *parent, passives, out);
     }
-    const std::vector<std::string>& ids = passives ? klass.Passives : klass.Skills;
-    for (const std::string& id : ids) {
-        if (const SkillDef* skill = database.FindSkill(id))
-            out.push_back(skill);
-    }
+    const std::vector<SkillGrant>& grants = passives ? klass.Passives : klass.Skills;
+    for (const SkillGrant& grant : grants)
+        out.push_back(&grant.Resolved);
 }
 
 std::vector<const SkillDef*> Database::ActiveSkills(const ClassDef& klass) const

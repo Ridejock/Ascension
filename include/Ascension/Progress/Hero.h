@@ -17,9 +17,22 @@ struct XpGrant {
     bool ChoiceOpened = false;
 };
 
+// One class's attribute grant, as it sits on the character. Id is the class that gave it.
+// A reset returns every one of these to the unspent class-point pool.
+struct AttributeSource {
+    std::string Id;
+    StatBlock Points;
+};
+
 // The Fighter's career: XP, level, skill uses, and the evolution they picked. Skill ids and the
 // class id are stored, not pointers, so a reload of the database does not dangle. Rank and level
 // are computed from the current progress.json whenever they are read.
+//
+// Attribute points come from two places. Level points are the growth earned on the way up, and
+// a reset leaves them where they are. Class points are the grants in the class JSON (a base
+// class's stats, an evolution's bonus), remembered per class. A reset, offered only while an
+// evolution choice is open, returns those grants to one pool. The player then picks any starter
+// class and spends the pool. The total does not change.
 class Hero {
 public:
     // Starts as the level-1 fighter with no XP. Fails if that class is not in `data`.
@@ -55,13 +68,46 @@ public:
     [[nodiscard]] std::vector<std::string> ChoiceIds() const;
 
     // Become that evolution. The skills already practiced keep their uses. Fails if no choice
-    // is open or `evolutionId` is not one of them.
+    // is open, a starter is still being picked, or `evolutionId` is not one of the choices.
+    // The evolution's bonus is recorded as its own attribute source.
     bool Choose(std::string_view evolutionId, std::string& error);
 
-    // Clears practiced skill uses, which is what ranks are computed from. Succeeds only while
-    // an evolution choice is open, and that screen is the only place it is offered. The class,
-    // the XP, and the level stay. Nothing else clears these uses.
+    // Clears practiced skill uses and returns every class attribute grant to the unspent pool.
+    // Level, XP, and the points earned by leveling stay. Succeeds only while an evolution
+    // choice is open. The player then picks a starter with ChooseStarter and spends the pool
+    // with SpendClassPoint. Nothing else clears skill uses.
     bool ResetBuild(std::string& error);
+
+    // True after a reset, until a starter class is picked.
+    [[nodiscard]] bool ChoosingStarter() const { return m_ChoosingStarter; }
+
+    // Starter classes from the data, in file order.
+    [[nodiscard]] std::vector<std::string> StarterIds() const;
+
+    // Become that starter. The pooled class points are not replaced by its grant.
+    bool ChooseStarter(std::string_view classId, std::string& error);
+
+    // Moves one pooled class point onto `statId` (vitality, strength, defense, agility, focus).
+    bool SpendClassPoint(std::string_view statId, std::string& error);
+
+    // Points earned by leveling. Kept across a reset.
+    [[nodiscard]] i32 LevelPoints() const;
+
+    // Class grants still allocated, plus the unspent pool.
+    [[nodiscard]] i32 ClassPoints() const;
+
+    // Level points plus class points. A reset does not change this.
+    [[nodiscard]] i32 AttributePoints() const;
+
+    // Class points waiting to be spent. Zero until a reset.
+    [[nodiscard]] i32 ClassPool() const { return m_ClassPool; }
+
+    // The class grants currently allocated. Empty once a reset has pooled them.
+    [[nodiscard]] std::vector<AttributeSource> ClassSources() const;
+
+    // The stats those points buy: level growth plus spent class grants. The pool is not
+    // included until it is spent. Gear and passives are applied later, by the battle.
+    [[nodiscard]] StatBlock Attributes() const;
 
     // The line to show when the next fight must wait for an evolution choice. Null when a
     // fight may start.
@@ -75,11 +121,24 @@ public:
     XpGrant GrantXp(i32 amount);
 
 private:
+    void NoteLevelSteps();
+    [[nodiscard]] StatBlock GrowthForStep(const ClassDef& klass, i32 step) const;
+    [[nodiscard]] std::vector<StatBlock> LevelSteps() const;
+    [[nodiscard]] std::vector<AttributeSource> DerivedSources() const;
+
     const Database* m_Data = nullptr;
     std::string m_ClassId;
     i32 m_Xp = 0;
     std::vector<std::string> m_Practiced;
     std::vector<i32> m_Uses;
+    // Set by a reset. Level steps and class sources are then remembered here instead of being
+    // derived from the class formula, so a new starter does not rewrite the points already earned.
+    bool m_Custom = false;
+    bool m_ChoosingStarter = false;
+    i32 m_ClassPool = 0;
+    std::string m_SpendId;
+    std::vector<StatBlock> m_LevelSteps;
+    std::vector<AttributeSource> m_ClassSources;
 };
 
 } // namespace Ascension

@@ -185,17 +185,26 @@ void TestRanksAndEvolution()
 
     Battle rage(data, std::make_unique<AgilityRoundModel>());
     Check(rage.Start(hero.ClassId(), hero.Level(), "wolf", why), "a berserker fight starts");
-    Check(rage.Player().Stats.Strength == 20 && rage.Player().MaxHp == 144 &&
-              rage.Player().BulwarkFocus == 0,
+    Check(rage.Player().Stats.Strength == 20 && rage.Player().MaxHp == 144,
           "berserker health is vitality times 4, and bloodlust is not flat strength");
+    const ClassDef* berserkerClass = data.FindClass(hero.ClassId());
+    const StatBlock berserkerLine =
+        berserkerClass != nullptr ? data.StatsAt(*berserkerClass, hero.Level()) : StatBlock{};
+    Check(hero.ClassSources().size() == 2 && hero.ClassSources()[0].Id == "fighter" &&
+              hero.ClassSources()[1].Id == "berserker" &&
+              hero.Attributes().Strength == berserkerLine.Strength &&
+              hero.AttributePoints() == StatTotal(berserkerLine),
+          "fighter and berserker grants plus level growth match the class line");
+    rage.SetPlayerRanks(data.GetProgress().PowerPerRank, RanksOf(hero));
+    Check(rage.UseSkill("strike").Damage == 30,
+          "a kept rank-2 strike still adds its power after evolving");
 
     Hero guard = StartHero(data);
     guard.GrantXp(60);
     Check(guard.Choose("guardian", why), "guardian is the second path");
     Battle wall(data, std::make_unique<AgilityRoundModel>());
     Check(wall.Start(guard.ClassId(), guard.Level(), "wolf", why), "a guardian fight starts");
-    Check(wall.Player().Stats.Defense == 18 && wall.Player().MaxHp == 148 &&
-              wall.Player().BulwarkFocus == 1,
+    Check(wall.Player().Stats.Defense == 18 && wall.Player().MaxHp == 148,
           "bulwark adds 3 defense, and health follows the guardian's vitality");
 }
 
@@ -327,15 +336,21 @@ void TestChoiceBlocksTheNextFight()
           "the next fight waits until a path is chosen");
     Check(hero.ResetBuild(why) && why.empty(), "the open choice can reset the build");
     Check(hero.UsesOf("strike") == 0 && hero.RankOf("strike") == 1 && hero.Xp() == 60 &&
-              hero.Level() == 5 && hero.ClassId() == "fighter" && hero.ChoicePending(),
-          "the reset clears ranks and leaves the level, the class, and the choice");
+              hero.Level() == 5 && hero.ChoosingStarter() && hero.ChoicePending(),
+          "the reset clears ranks, keeps the level, and asks for a starter class");
 
     Check(hero.GrantXp(30).LevelAfter == 6 && hero.ClassId() == "fighter" && hero.ChoicePending() &&
               hero.NextFightBlock() != nullptr,
           "level 6 without a path is still blocked");
     hero.NoteUse("strike");
-    Check(hero.ResetBuild(why) && hero.UsesOf("strike") == 0 && hero.ChoicePending(),
+    Check(hero.ResetBuild(why) && hero.UsesOf("strike") == 0 && hero.ChoicePending() &&
+              hero.ChoosingStarter(),
           "the choice still open at level 6 can reset again");
+    Check(hero.ChooseStarter("fighter", why), "the fighter is a starter");
+    bool spent = true;
+    while (hero.ClassPool() > 0 && spent)
+        spent = hero.SpendClassPoint("strength", why);
+    Check(spent && hero.ClassPool() == 0, "the pooled class points can be spent");
 
     Check(hero.Choose("guardian", why), "guardian is chosen from the open choice");
     hero.NoteUse("strike");
@@ -345,6 +360,93 @@ void TestChoiceBlocksTheNextFight()
     Check(hero.UsesOf("strike") == 1 && hero.NextFightBlock() == nullptr &&
               hero.ClassId() == "guardian",
           "the use after the choice stays, and the next fight is allowed");
+}
+
+bool SpendPool(Hero& hero, std::string_view statId, std::string& error)
+{
+    bool spent = true;
+    while (hero.ClassPool() > 0 && spent)
+        spent = hero.SpendClassPoint(statId, error);
+    return spent && hero.ClassPool() == 0;
+}
+
+void TestResetKeepsPoints()
+{
+    TempCopy copy;
+    ReplaceInFile(
+        copy.Path / "classes.json", "      \"passives\": [\"bulwark\"]\n    }\n  ]\n}",
+        "      \"passives\": [\"bulwark\"]\n    },\n    {\n      \"id\": \"ranger\",\n   "
+        "   \"name\": \"Ranger\",\n      \"description\": \"A second starter.\",\n      "
+        "\"starter\": true,\n      \"stats\": {\"vitality\": 1, \"strength\": 1, "
+        "\"defense\": 1, \"agility\": 1, \"focus\": 1},\n      \"growth\": {\"vitality\": "
+        "1, \"strength\": 1, \"defense\": 1, \"agility\": 1, \"focus\": 1},\n      "
+        "\"skills\": [\"strike\"],\n      \"passives\": []\n    },\n    {\n      \"id\": "
+        "\"adept\",\n      \"name\": \"Adept\",\n      \"description\": \"Not a "
+        "starter.\",\n      \"stats\": {\"vitality\": 1, \"strength\": 1, \"defense\": "
+        "1, \"agility\": 1, \"focus\": 1},\n      \"growth\": {\"vitality\": 1, "
+        "\"strength\": 1, \"defense\": 1, \"agility\": 1, \"focus\": 1},\n      "
+        "\"skills\": [\"strike\"],\n      \"passives\": []\n    }\n  ]\n}");
+    Database data(copy.Path);
+    Check(data.Load(), "a roster with two starters loads");
+    const std::vector<const ClassDef*> starters = data.Starters();
+    Check(starters.size() == 2 && starters[0]->Id == "fighter" && starters[1]->Id == "ranger",
+          "starters are read from the class data, in file order");
+    bool adeptListed = false;
+    bool berserkerListed = false;
+    for (const ClassDef* starter : starters) {
+        if (starter->Id == "adept")
+            adeptListed = true;
+        if (starter->Id == "berserker")
+            berserkerListed = true;
+    }
+    Check(!adeptListed && !berserkerListed, "a base class without the flag is not a starter");
+
+    Hero hero = StartHero(data);
+    hero.GrantXp(60);
+    const i32 level = hero.Level();
+    const i32 xp = hero.Xp();
+    const i32 levelPoints = hero.LevelPoints();
+    const i32 classPoints = hero.ClassPoints();
+    const i32 total = hero.AttributePoints();
+    const ClassDef* fighter = data.FindClass("fighter");
+    const StatBlock line = fighter != nullptr ? data.StatsAt(*fighter, level) : StatBlock{};
+    Check(level == 5 && fighter != nullptr && hero.ClassSources().size() == 1 &&
+              hero.ClassSources()[0].Id == "fighter" && total == StatTotal(line) &&
+              classPoints == StatTotal(fighter->Stats) && levelPoints + classPoints == total,
+          "level growth and the fighter grant add up to the class line");
+
+    std::string why;
+    Check(!hero.ChooseStarter("ranger", why), "a starter is picked only after a reset");
+    Check(hero.ResetBuild(why) && why.empty(), "the level-5 choice can reset the build");
+    Check(hero.Level() == level && hero.Xp() == xp && hero.LevelPoints() == levelPoints &&
+              hero.ClassPool() == classPoints && hero.ClassPoints() == classPoints &&
+              hero.AttributePoints() == total && hero.ClassSources().empty(),
+          "a reset keeps the level and the level points, and pools the class points");
+
+    Check(!hero.ChooseStarter("adept", why), "adept is not offered");
+    CheckHas(why, "not a starter", "the refusal says it is not a starter");
+    Check(!hero.ChooseStarter("berserker", why), "an evolution is not a starter");
+    Check(hero.ChooseStarter("ranger", why) && hero.ClassId() == "ranger" &&
+              !hero.ChoosingStarter() && hero.Level() == level &&
+              hero.LevelPoints() == levelPoints && hero.ClassPool() == classPoints &&
+              hero.AttributePoints() == total,
+          "any starter can be picked, and the pooled points stay the same size");
+
+    const i32 levelDefense = hero.Attributes().Defense;
+    Check(SpendPool(hero, "defense", why) && hero.ClassPool() == 0 && hero.Level() == level &&
+              hero.LevelPoints() == levelPoints && hero.AttributePoints() == total &&
+              hero.Attributes().Defense == levelDefense + classPoints,
+          "spending the pool changes where the class points sit, not how many there are");
+    Check(hero.ClassSources().size() == 1 && hero.ClassSources()[0].Id == "ranger" &&
+              StatTotal(hero.ClassSources()[0].Points) == classPoints,
+          "the spent points are remembered on the class that was picked");
+
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    battle.SetBaseStats(hero.Attributes());
+    Check(battle.Start("ranger", hero.Level(), "wolf", why) &&
+              battle.Player().Stats.Defense == levelDefense + classPoints &&
+              battle.Player().MaxHp == hero.Attributes().Vitality * 4,
+          "the next fight uses the redistributed attributes");
 }
 
 void TestNextFoeStaysWhileChoosing()
@@ -391,6 +493,7 @@ int main()
     TestRankLandsOnTheBlow();
     TestHotReload();
     TestChoiceBlocksTheNextFight();
+    TestResetKeepsPoints();
     TestNextFoeStaysWhileChoosing();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
