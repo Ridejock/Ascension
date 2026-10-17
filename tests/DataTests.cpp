@@ -683,6 +683,133 @@ void TestLayers()
     Check(still != nullptr && still->Power == 10, "the previous strike power stays");
 }
 
+void ExpectUnused(const fs::path& dir, const char* file, const char* skill, const char* effect,
+                  const char* field, const char* what)
+{
+    Database data(dir);
+    DataError error;
+    Check(!data.Load(&error), what);
+    Check(!data.IsLoaded(), "a rejected directory is not loaded");
+    CheckHas(error.Message, file, "the error names the file");
+    CheckHas(error.Message, skill, "the error names the skill");
+    CheckHas(error.Message, effect, "the error names the effect");
+    CheckHas(error.Message, field, "the error names the unused field");
+}
+
+void TestUnusedFields()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, "
+            "\"scaling\": \"vitality\" },\n        { \"id\": \"mark\", \"trigger\": "
+            "\"onUse\", \"op\": \"applyStatus\", \"status\": \"bleed\", \"every\": 2 }");
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 }",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 },\n        { \"id\": \"cut\", \"trigger\": \"onDamaged\", "
+                      "\"op\": \"applyStatus\", \"status\": \"bleed\" },\n        { \"id\": "
+                      "\"rest\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", \"power\": 4 },\n "
+                      "       { \"id\": \"pulse\", \"trigger\": \"onTurnStart\", \"op\": "
+                      "\"grantFocus\", \"amount\": 1 },\n        { \"id\": \"sting\", \"trigger\": "
+                      "\"onDamaged\", \"op\": \"grantFocus\", \"amount\": 2 }");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "fields a trigger and op actually read still load");
+        const EffectDef* mend = EffectOf(data.FindSkill("second_wind"), "mend");
+        const EffectDef* mark = EffectOf(data.FindSkill("second_wind"), "mark");
+        const EffectDef* cut = EffectOf(data.FindSkill("bulwark"), "cut");
+        const EffectDef* rest = EffectOf(data.FindSkill("bulwark"), "rest");
+        const EffectDef* pulse = EffectOf(data.FindSkill("bulwark"), "pulse");
+        const EffectDef* sting = EffectOf(data.FindSkill("bulwark"), "sting");
+        Check(mend != nullptr && mend->Scaling == "vitality" && mark != nullptr &&
+                  mark->Every == 2 && cut != nullptr && cut->Status == "bleed" &&
+                  !cut->Every.has_value() && rest != nullptr && rest->Power == 4 &&
+                  !rest->Scaling.has_value() && pulse != nullptr && pulse->Amount == 1 &&
+                  sting != nullptr && sting->Amount == 2,
+              "onUse keeps scaling and every; onTurnStart heal and onDamaged status do not");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", "
+            "\"power\": 8, \"scaling\": \"vitality\" }");
+        ExpectUnused(copy.Path, "skills.json", "second_wind", "mend", "scaling",
+                     "onTurnStart heal does not use scaling");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onHit\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onDamaged\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }");
+        ExpectUnused(copy.Path, "skills.json", "slash", "bleed", "every",
+                     "onDamaged status does not use every");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"stun\", \"trigger\": \"onHit\", \"op\": \"stunIfWindingUp\", "
+                      "\"status\": \"stunned\" }",
+                      "{ \"id\": \"stun\", \"trigger\": \"onHit\", \"op\": \"stunIfWindingUp\", "
+                      "\"status\": \"stunned\", \"every\": 2 }");
+        ExpectUnused(copy.Path, "skills.json", "heavy_blow", "stun", "every",
+                     "stunIfWindingUp does not use every");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 }",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1, \"turns\": 2 }");
+        ExpectUnused(copy.Path, "skills.json", "bulwark", "focus", "turns",
+                     "grantFocus does not use turns");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "effects.json",
+                      "\"id\": \"heal\",\n      \"trigger\": \"onUse\",\n      \"op\": \"heal\",\n "
+                      "     \"power\": 0",
+                      "\"id\": \"heal\",\n      \"trigger\": \"onTurnStart\",\n      \"op\": "
+                      "\"heal\",\n      \"power\": 0,\n      \"scaling\": \"strength\"");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "a recipe rejects a field its trigger does not read");
+        CheckHas(error.Message, "effects.json", "the recipe error names the file");
+        CheckHas(error.Message, "heal", "the recipe error names the effect");
+        CheckHas(error.Message, "scaling", "the recipe error names the field");
+    }
+    {
+        TempCopy copy;
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "the sample loads before a bad field edit");
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onHit\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onDamaged\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }");
+        Check(data.CheckForChanges(&error) == 0, "an unused field waits a check");
+        Check(data.CheckForChanges(&error) == 0, "an unused field does not replace the data");
+        CheckHas(data.GetLastError(), "skills.json", "the reload error names the file");
+        CheckHas(data.GetLastError(), "slash", "the reload error names the skill");
+        CheckHas(data.GetLastError(), "bleed", "the reload error names the effect");
+        CheckHas(data.GetLastError(), "every", "the reload error names the field");
+        const EffectDef* strike = EffectOf(data.FindSkill("strike"), "hit");
+        const EffectDef* bleed = EffectOf(data.FindSkill("slash"), "bleed");
+        Check(data.GetRevision() == 1 && strike != nullptr && strike->Power == 10 &&
+                  bleed != nullptr && bleed->Trigger == EffectTrigger::OnHit && bleed->Every == 3,
+              "the previous skills stay after the rejected reload");
+    }
+}
+
 } // namespace
 
 int main()
@@ -691,6 +818,7 @@ int main()
     TestHotReload();
     TestValidation();
     TestLayers();
+    TestUnusedFields();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

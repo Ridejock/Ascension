@@ -427,25 +427,53 @@ bool TriggerAllows(EffectTrigger trigger, EffectOp op)
     return trigger == EffectTrigger::OnHit;
 }
 
-bool EffectKeysOk(const Json& object, EffectOp op, std::string& unknown)
+// Fields a fight actually reads for this pair. A field some other pair uses is still rejected
+// here: onTurnStart heal ignores scaling, and onDamaged applyStatus ignores every.
+bool FieldUsed(EffectTrigger trigger, EffectOp op, std::string_view key)
 {
-    if (op == EffectOp::Stat)
-        return AllowKeys(object, {"id", "trigger", "op", "stat", "amount"}, unknown);
-    if (op == EffectOp::StatPerMissingHp)
-        return AllowKeys(object, {"id", "trigger", "op", "stat", "amount", "per", "max"}, unknown);
-    if (op == EffectOp::GrantFocus || op == EffectOp::Empower)
-        return AllowKeys(object, {"id", "trigger", "op", "amount"}, unknown);
-    if (op == EffectOp::Damage || op == EffectOp::Heal)
-        return AllowKeys(object, {"id", "trigger", "op", "power", "scaling"}, unknown);
-    if (op == EffectOp::Guard)
-        return AllowKeys(object, {"id", "trigger", "op", "amount"}, unknown);
-    if (op == EffectOp::Reflect)
-        return AllowKeys(object, {"id", "trigger", "op", "percent", "power", "scaling"}, unknown);
-    if (op == EffectOp::Harden)
-        return AllowKeys(object, {"id", "trigger", "op", "amount", "turns"}, unknown);
-    if (op == EffectOp::ApplyStatus)
-        return AllowKeys(object, {"id", "trigger", "op", "status", "every"}, unknown);
-    return AllowKeys(object, {"id", "trigger", "op", "status"}, unknown);
+    if (trigger == EffectTrigger::Always && op == EffectOp::Stat)
+        return key == "stat" || key == "amount";
+    if (trigger == EffectTrigger::Always && op == EffectOp::StatPerMissingHp)
+        return key == "stat" || key == "amount" || key == "per" || key == "max";
+    if (trigger == EffectTrigger::OnUse && op == EffectOp::Damage)
+        return key == "power" || key == "scaling";
+    if (trigger == EffectTrigger::OnUse && op == EffectOp::Heal)
+        return key == "power" || key == "scaling";
+    if (trigger == EffectTrigger::OnTurnStart && op == EffectOp::Heal)
+        return key == "power";
+    if (trigger == EffectTrigger::OnUse && op == EffectOp::Guard)
+        return key == "amount";
+    if (trigger == EffectTrigger::OnUse && op == EffectOp::Reflect)
+        return key == "percent" || key == "power" || key == "scaling";
+    if (trigger == EffectTrigger::OnUse && op == EffectOp::Empower)
+        return key == "amount";
+    if (trigger == EffectTrigger::OnUse && op == EffectOp::Harden)
+        return key == "amount" || key == "turns";
+    if (op == EffectOp::GrantFocus &&
+        (trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnBlock ||
+         trigger == EffectTrigger::OnTurnStart || trigger == EffectTrigger::OnDamaged))
+        return key == "amount";
+    if (op == EffectOp::ApplyStatus &&
+        (trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnHit))
+        return key == "status" || key == "every";
+    if (trigger == EffectTrigger::OnDamaged && op == EffectOp::ApplyStatus)
+        return key == "status";
+    if (trigger == EffectTrigger::OnHit && op == EffectOp::StunIfWindingUp)
+        return key == "status";
+    return false;
+}
+
+bool EffectKeysOk(const Json& object, EffectTrigger trigger, EffectOp op, std::string& unknown)
+{
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        if (it.key() == "id" || it.key() == "trigger" || it.key() == "op")
+            continue;
+        if (!FieldUsed(trigger, op, it.key())) {
+            unknown = it.key();
+            return false;
+        }
+    }
+    return true;
 }
 
 bool KnownEffectField(std::string_view key)
@@ -648,7 +676,7 @@ bool ParseEffectBody(const Json& entry, EffectDef& effect, std::string& error)
         return false;
     }
     std::string unknown;
-    if (!EffectKeysOk(entry, effect.Op, unknown)) {
+    if (!EffectKeysOk(entry, effect.Trigger, effect.Op, unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
@@ -727,7 +755,8 @@ bool ApplyTune(SkillDef& skill, const Json& tune, std::string& error)
         }
         for (auto field = it->begin(); field != it->end(); ++field) {
             const std::string fieldName = field.key();
-            if (!KnownEffectField(fieldName) || !HasEffectField(*effect, fieldName)) {
+            if (!KnownEffectField(fieldName) || !HasEffectField(*effect, fieldName) ||
+                !FieldUsed(effect->Trigger, effect->Op, fieldName)) {
                 error = "tune effect " + Quote(effectId) + ": unknown field " + Quote(fieldName);
                 return false;
             }
