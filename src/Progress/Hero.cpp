@@ -158,6 +158,32 @@ bool Hero::Choose(std::string_view evolutionId, std::string& error)
     return true;
 }
 
+bool Hero::ResetBuild(std::string& error)
+{
+    if (!ChoicePending()) {
+        error = "a build resets only when a path is offered";
+        return false;
+    }
+    m_Practiced.clear();
+    m_Uses.clear();
+    error.clear();
+    return true;
+}
+
+const char* Hero::NextFightBlock() const
+{
+    if (!ChoicePending())
+        return nullptr;
+    return "Choose a path before the next fight.";
+}
+
+i32 Hero::IndexAfterNextFoe(i32 index, i32 count) const
+{
+    if (NextFightBlock() != nullptr || count <= 0)
+        return index;
+    return (index + 1) % count;
+}
+
 XpGrant Hero::GrantXp(i32 amount)
 {
     XpGrant grant;

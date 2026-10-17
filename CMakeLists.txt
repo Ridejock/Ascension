@@ -79,7 +79,9 @@ emerald_set_warnings(AscensionCombat)
 # ---------------------------------------------------------------------------
 add_library(AscensionProgress STATIC
     src/Progress/Hero.cpp
+    src/Progress/Inventory.cpp
     include/Ascension/Progress/Hero.h
+    include/Ascension/Progress/Inventory.h
 )
 target_link_libraries(AscensionProgress PUBLIC AscensionData)
 emerald_set_warnings(AscensionProgress)
@@ -140,6 +142,13 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionProgressTests)
     add_test(NAME Progress COMMAND AscensionProgressTests)
+
+    add_executable(AscensionInventoryTests tests/InventoryTests.cpp tests/Check.h)
+    target_link_libraries(AscensionInventoryTests PRIVATE AscensionProgress)
+    target_compile_definitions(AscensionInventoryTests PRIVATE
+        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionInventoryTests)
+    add_test(NAME Inventory COMMAND AscensionInventoryTests)
 endif()
 
 # ---------------------------------------------------------------------------

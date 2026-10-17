@@ -228,7 +228,7 @@ struct EnemyDef {
     i32 ShardEvery = 0;               // enemy actions in phase 2 between shard telegraphs
 };
 
-enum class GearSlot : u8 { Weapon, Armor, Accessory };
+enum class GearSlot : u8 { Weapon, Offhand, Armor, Accessory, Consumable };
 
 struct ItemDef {
     std::string Id;
@@ -236,8 +236,35 @@ struct ItemDef {
     std::string Description;
     GearSlot Slot = GearSlot::Weapon;
     StatBlock Bonus;
-    i32 Value = 0; // gold
+    i32 Value = 0;          // gold to buy one
+    bool TwoHanded = false; // weapons only; fills the offhand as well
+    i32 Heal = 0;           // consumable: flat health, not the skill formula
+    i32 Focus = 0;          // consumable: flat focus, capped at the fighter's pool
 };
+
+// Old Pell's Provisions, and the bag it sells into. BagSlots is how many stacks the hero can
+// carry. StackSize is the most of one item a single stack holds. Selling pays
+// value * SellNumerator / SellDenominator, rounded down.
+struct ShopDef {
+    std::string Id;
+    std::string Name;
+    std::string Keeper;
+    i32 BagSlots = 0;
+    i32 StackSize = 1;
+    i32 SellNumerator = 1;
+    i32 SellDenominator = 1;
+    std::vector<std::string> Stock;
+};
+
+[[nodiscard]] inline i32 SellPrice(const ShopDef& shop, i32 value)
+{
+    if (value <= 0 || shop.SellNumerator <= 0 || shop.SellDenominator <= 0)
+        return 0;
+    const i64 price = static_cast<i64>(value) * shop.SellNumerator / shop.SellDenominator;
+    if (price > 999999)
+        return 999999;
+    return static_cast<i32>(price);
+}
 
 [[nodiscard]] const char* ToString(SkillKind kind);
 [[nodiscard]] const char* ToString(SkillTarget target);
@@ -337,10 +364,14 @@ inline const char* ToString(PassiveEffect effect)
 
 inline const char* ToString(GearSlot slot)
 {
+    if (slot == GearSlot::Offhand)
+        return "offhand";
     if (slot == GearSlot::Armor)
         return "armor";
     if (slot == GearSlot::Accessory)
         return "accessory";
+    if (slot == GearSlot::Consumable)
+        return "consumable";
     return "weapon";
 }
 

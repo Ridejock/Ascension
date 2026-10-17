@@ -162,6 +162,15 @@ public:
     // what the combat tests use. The sandbox passes the hero's ranks before each blow.
     void SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks);
 
+    // Worn gear, added to the class stats before passives. Call it before Start, and again
+    // before ApplyData when a reload changes a worn piece. Zero leaves the class line alone.
+    void SetGear(StatBlock gear);
+
+    // Drinks a consumable on the player's turn. Accepted with SkillId set means the drink
+    // landed and the bag should drop one. A stun spends the turn and leaves SkillId empty,
+    // so the bottle stays in the bag.
+    ActionResult UseItem(const ItemDef& item);
+
     // Clamps to 1..MaxHp. The sandbox never calls this; tests place a wound so a passive that
     // reads health can be checked at a known total.
     void SetPlayerHp(i32 hp);
@@ -213,6 +222,7 @@ private:
     CombatRules m_Rules;
     std::vector<SkillRank> m_PlayerRanks;
     i32 m_PowerPerRank = 0;
+    StatBlock m_Gear;
     BattleResult m_Result = BattleResult::Ongoing;
     bool m_Started = false;
     bool m_UpkeepDone = false;

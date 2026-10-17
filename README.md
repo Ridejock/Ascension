@@ -58,7 +58,7 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ctest --test-dir build/debug --output-on-failure
 ```
 
-`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. None of them open a window.
+`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and Pell's shop. None of them open a window.
 
 ## Data
 
@@ -71,13 +71,14 @@ ctest --test-dir build/debug --output-on-failure
 | `statuses.json` | Bleed, Exposed, Enraged, and Stunned |
 | `classes.json` | Fighter, and the level-5 evolutions Berserker and Guardian |
 | `enemies.json` | The roster (level, stats, skills, experience, gold) and which one is the boss |
-| `items.json` | Gear (weapon, armor, accessory) and the stats it adds |
+| `items.json` | Gear (weapon, offhand, armor, accessory) and consumables |
+| `shop.json` | Old Pell's Provisions: the bag, stack size, sell rate, and Pell's stock |
 | `combat.json` | Health per vitality, minimum damage, the attack and defense divisors, and focus regen |
 | `progress.json` | Total XP to reach each level, uses per skill rank, and power added per rank |
 
-Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. The choice opens when the hero's level reaches an evolution's `evolveLevel` (5 in the sample), and the number keys follow the order of those evolutions in `classes.json`.
+Fighter is the base class. At level 1 the sandbox gives them four skills: Strike, Brace, Heavy Blow, and Second Wind. Berserker and Guardian each set `evolvesFrom` to `fighter` and `evolveLevel` to 5, and each **adds two active skills and one passive**. An evolution's stats are the parent's stats at that level, plus `bonus`, and then its own `growth` for later levels. The choice opens when the hero's level reaches an evolution's `evolveLevel` (5 in the sample), and it stays open until a path is picked, including if the Fighter is already past that level. The next fight will not start until then. The number keys follow the order of those evolutions in `classes.json`, and the next number is Reset build. That is the only place skill ranks are cleared. Ranks are the practiced uses stored on the hero by skill id. A reload does not clear them.
 
-`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` once. In roster order that is Wolf 8, Bandit 18, Tomb Moth 14 (level 4, 40 XP), and Bone Archer 22 (level 5, 62 XP), which opens the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
+`progress.json` lists the total XP required to be at each level. The first entry is 0. In the sample, 8 XP is level 2, 20 is level 3, 40 is level 4, and 60 is level 5. A win grants the enemy's `experience` and `gold` once. Gold is spent at Old Pell's Provisions between fights. The hub itself is a later slice: `I` opens Pell's screen after a victory or a defeat. In roster order that is Wolf 8, Bandit 18, Tomb Moth 14 (level 4, 40 XP), and Bone Archer 22 (level 5, 62 XP), which opens the choice. Leveling does not heal the fight that just ended. The next fight uses the new level and, after a choice, the new class.
 
 A skill starts at rank 1. `usesPerRank` is either one integer (a flat step, `rank = 1 + uses / step`) or a list of the total uses required to reach rank 2, rank 3, and so on. The sample is `[3, 6, 10, 15]`, so the third use is rank 2 and the fifteenth is rank 5, capped by `maxSkillRank`. Each rank above 1 adds `powerPerRank` (2 in the sample) to that skill's damage, healing, and a riposte's flat reflect, including the blow that crosses the rank. A guard's percent is unchanged. The number in parentheses on the skill line is the rank. Enemy skills stay at rank 1.
 
@@ -87,7 +88,11 @@ A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. T
 
 `statuses.json` defines Bleed (3 health at the start of each of the afflicted unit's turns, for 3 turns, stacking to 2), Exposed (+25 percent damage taken, 2 turns), Enraged (+30 percent dealt and +15 percent taken; the sample keeps it up for a fight), and Stunned (skips the next action). The Bandit's Slash bleeds on every third use. Heavy Blow stuns a foe who is winding up and cancels that wind-up. The foe's panel shows the telegraph (`AIMED SHOT 1/2`, then `INCOMING`) and any statuses.
 
-The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, and the hero's career. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
+`items.json` is the gear and the drinks. A weapon may set `twoHanded`, which fills the offhand as well. Oak Shield is an offhand. Consumables are not worn: `heal` is flat health and `focus` is flat focus, spent as a turn in a fight. The sample is Rusty Sword (strength +1, 12 gold), Notched Greataxe (strength +6, defense -2, two-handed, 60 gold), Oak Shield (defense +2, 15 gold), Oathkeeper's Plate (defense +6, agility -1, 55 gold), Wolfhide Charm (agility +2, 35 gold), Minor Potion (heal 30, 10 gold), and Focus Tonic (focus +4, 15 gold). The sword, the axe, and the plate prices are the ones chosen for this slice. Selling pays half the buy price, rounded down (`sellNumerator` 1, `sellDenominator` 2).
+
+`shop.json` is Pell Harrow's shop, Old Pell's Provisions. `bagSlots` is 12 and `stackSize` is 5, so a sixth potion of the same kind opens another slot and sixty potions fill the bag. Worn gear is added to the class stats before passives. A two-handed weapon sends the offhand piece back to the bag, and a shield cannot be worn until that weapon comes off. If a reload makes the worn weapon two-handed while a shield is still in the offhand, the shield's defense stops immediately and the shield is moved into the bag. A full bag sets the last stack down to make that slot. The offhand can always be taken off. The fight starts with an empty bag and no gold. Number keys stop at 8, so `C` opens every consumable stack during the player's turn. Drinking still spends the turn. Keys are fixed in the app; the data has no binding table.
+
+The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, the hero's career, and the bag. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
 
 While the game is running it checks the data files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay and the error is shown. The revision in the corner goes up on every successful reload. The fight keeps its wounds and whose turn it is. XP and skill uses are kept too: editing the curve or `usesPerRank` updates the level and the ranks on the next successful reload, and class growth applies on the next fight. Edit Strike's `power` in `data/skills.json`, or `hpPerVitality` in `data/combat.json`, save, and the next blow uses the new numbers.
 
@@ -98,15 +103,23 @@ Run the game. The Wolf is faster, so it bites first. Then:
 | Key | Action |
 |---|---|
 | `1` `2` `3` `4` | Strike, Brace, Heavy Blow, Second Wind (up to `6` after evolving) |
-| `5` `6` | After evolving: Berserker Rage and Cleave, or Guardian Shield Wall and Riposte |
+| `5` `6` | After evolving: Berserker Rage and Cleave, or Guardian Shield Wall and Riposte. Before that, the first consumables in the bag |
+| The next free number, through `8` | Drink a consumable stack. It spends the turn. A stun keeps the bottle |
+| `C` | During your turn, open or close the drink list. Up and Down move. `E` drinks the marked row. `1`–`8` drink that row. Any drink spends the turn |
 | Space | Wait. Also gains 2 focus on top of the 1 gained at the start of the turn |
-| `R` | Fight this enemy again. Level, XP, and skill ranks stay |
-| `N` | The next enemy in `enemies.json` |
+| `I` | Between fights, open or close Old Pell's Provisions. During a fight, Pell is not there |
+| Up Down | In the shop, move through the bag or the stock |
+| Left Right | In the shop, switch between the bag and the stock |
+| `E` | In the shop, equip the highlighted bag item, take off the highlighted worn piece, or buy the highlighted stock |
+| `X` | In the shop, sell one of the highlighted stack |
+| `U` | In the shop, take off the highlighted worn piece |
+| `R` | Fight this enemy again. Level, XP, gold, gear, and skill ranks stay. Refused while a path is still open |
+| `N` | The next enemy in `enemies.json`. While a path is open the fight does not start and the roster stays on this foe |
 | Escape | Quit |
 
 The roster, in order, is Wolf, Bandit, Tomb Moth, Bone Archer, Barrow Sentry, and the boss, Oathkeeper Varn. The corner of the foe's name shows the place in that list, and Varn is marked BOSS. Fights are still one enemy at a time. Varn's rubble is a timed hit for 10 in phase 2 (telegraphed as RUBBLE), standing in for a later multi-enemy shard fight.
 
-After a win that reaches level 5 the skill list is replaced by the choice. `1` is Berserker. `2` is Guardian. The new skills show immediately. `R` or `N` starts the next fight as that class. Wolf, Bandit, Tomb Moth, and Bone Archer are 8 + 18 + 14 + 22 XP, which is level 5. The Barrow Sentry is the next fight (its 40 XP reaches level 6). Varn is the level-6 boss.
+After a win that reaches level 5 the skill list is replaced by the choice, and the next fight waits. `1` is Berserker. `2` is Guardian. `3` is Reset build, which clears skill ranks and leaves the choice open. It is not offered anywhere else. The new skills show once a path is picked. `R` then fights the same foe again, and `N` is what moves on. Pressing `N` before the choice does not skip ahead. Wolf, Bandit, Tomb Moth, and Bone Archer are 8 + 18 + 14 + 22 XP, which is level 5. The Barrow Sentry is the next fight (its 40 XP reaches level 6). Varn is the level-6 boss.
 
 Varn's pattern is Maul Swing, then Crushing Slam (telegraphed, then it lands), then Stone Skin. Phase 2 starts at half health: Varn becomes Enraged, and every few turns the barrow throws rubble. Heavy Blow (`3`) stuns a wind-up and cancels it, which is the Berserker's answer. Riposte (`6`) or Shield Wall (`5`) is the Guardian's answer to a telegraph or to RUBBLE. The Bone Archer's Aimed Shot is the same kind of telegraph, two turns long, so it can be practiced before the boss.
 

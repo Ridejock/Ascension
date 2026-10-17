@@ -255,6 +255,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     player.Id = klass->Id;
     player.Name = klass->Name;
     player.Stats = m_Data->StatsAt(*klass, m_Level);
+    player.Stats += m_Gear;
     ApplyPassives(player);
     player.MaxHp = ClampPool(static_cast<i64>(player.Stats.Vitality) * rules.HpPerVitality);
     // The hero's pool is the focus stat plus focusBase. Enemies spend only the focus on
@@ -553,6 +554,58 @@ void Battle::SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks)
 {
     m_PowerPerRank = powerPerRank > 0 ? powerPerRank : 0;
     m_PlayerRanks = std::move(ranks);
+}
+
+void Battle::SetGear(StatBlock gear)
+{
+    m_Gear = gear;
+}
+
+ActionResult Battle::UseItem(const ItemDef& item)
+{
+    if (!m_Started)
+        return Reject("There is no fight.");
+    if (m_Result != BattleResult::Ongoing)
+        return Reject("The fight is over.");
+    if (Actor() != CombatantSide::Player)
+        return Reject("It is not your turn.");
+    if (item.Slot != GearSlot::Consumable || (item.Heal <= 0 && item.Focus <= 0))
+        return Reject("That cannot be used in a fight.");
+
+    const TurnOpen open = PrepareTurn(m_Player);
+    if (!open.Continue)
+        return open.Result;
+
+    const i32 healthBefore = m_Player.Hp;
+    const i32 focusBefore = m_Player.Focus;
+    if (item.Heal > 0) {
+        i64 healed = static_cast<i64>(m_Player.Hp) + item.Heal;
+        if (healed > m_Player.MaxHp)
+            healed = m_Player.MaxHp;
+        m_Player.Hp = static_cast<i32>(healed);
+    }
+    if (item.Focus > 0)
+        GrantFocus(m_Player, item.Focus);
+
+    ActionResult result;
+    result.Accepted = true;
+    result.SkillId = item.Id;
+    const i32 healthGained = m_Player.Hp - healthBefore;
+    const i32 focusGained = m_Player.Focus - focusBefore;
+    result.Healing = healthGained;
+    result.Text = m_Player.Name + " uses " + item.Name;
+    if (healthGained > 0)
+        result.Text += " and heals " + std::to_string(healthGained);
+    if (focusGained > 0)
+        result.Text += ". Focus +" + std::to_string(focusGained);
+    if (healthGained <= 0 && focusGained <= 0)
+        result.Text += " but nothing changes";
+    result.Text += ".";
+    PrefixOpening(result);
+    result.Result = m_Result;
+    if (m_Result == BattleResult::Ongoing)
+        AdvanceTurn();
+    return result;
 }
 
 void Battle::SetPlayerHp(i32 hp)

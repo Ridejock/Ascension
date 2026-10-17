@@ -58,6 +58,19 @@ public:
     // is open or `evolutionId` is not one of them.
     bool Choose(std::string_view evolutionId, std::string& error);
 
+    // Clears practiced skill uses, which is what ranks are computed from. Succeeds only while
+    // an evolution choice is open, and that screen is the only place it is offered. The class,
+    // the XP, and the level stay. Nothing else clears these uses.
+    bool ResetBuild(std::string& error);
+
+    // The line to show when the next fight must wait for an evolution choice. Null when a
+    // fight may start.
+    [[nodiscard]] const char* NextFightBlock() const;
+
+    // Roster slot after the next-foe key. `count` is the roster length. While an evolution
+    // choice blocks the next fight, `index` is returned unchanged, including across a wrap.
+    [[nodiscard]] i32 IndexAfterNextFoe(i32 index, i32 count) const;
+
     // Adds XP (negative amounts are ignored) and may cross several levels at once.
     XpGrant GrantXp(i32 amount);
 
