@@ -681,13 +681,13 @@ void TestWolfPack()
               reflect.Enemies()[1].Hp == 12 && reflect.Enemies()[0].Hp == 12,
           "a second riposte returns the next bite to wolf 2");
 
-    Battle bleeding(data, std::make_unique<ScriptedTurns>(
-                             std::vector<TurnSeat>{TurnSeat{}, EnemySeat(1)}));
+    Battle bleeding(
+        data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{TurnSeat{}, EnemySeat(1)}));
     Check(bleeding.Start("fighter", 1, "wolf_pack", error), "another pack, for bleed");
     Check(bleeding.SetTarget(1) && bleeding.Inflict(CombatantSide::Enemy, "bleed", error),
           "bleed is applied to wolf 2");
-    Check(bleeding.UseSkill("strike").Accepted && bleeding.EnemyAct().Text.find("bleeds") !=
-                                                     std::string::npos,
+    Check(bleeding.UseSkill("strike").Accepted &&
+              bleeding.EnemyAct().Text.find("bleeds") != std::string::npos,
           "wolf 2's turn opens with its own bleed");
     Check(bleeding.Enemies()[1].Hp == 21 && bleeding.Enemies()[0].Hp == 40 &&
               bleeding.Enemies()[2].Hp == 40,
@@ -761,16 +761,14 @@ void TestSummonSeats()
               boss.Result() == BattleResult::Ongoing,
           "both shards are down and still listed");
 
-    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0 &&
-                       boss.Result() == BattleResult::Ongoing;
-         ++step)
+    for (i32 step = 0;
+         step < 8 && ShardSlot(boss, true) < 0 && boss.Result() == BattleResult::Ongoing; ++step)
         joined = DriveVarn(boss);
     Check(joined.Text.find("joins") != std::string::npos &&
               joined.Text.find("already") == std::string::npos && ShardSlot(boss, true) >= 0 &&
               boss.Enemies().size() == 3,
           "a corpse does not fill the fight, so the next shard takes its seat");
-    Check(boss.TargetIndex() >= 0 &&
-              boss.Enemies()[static_cast<usize>(boss.TargetIndex())].Alive(),
+    Check(boss.TargetIndex() >= 0 && boss.Enemies()[static_cast<usize>(boss.TargetIndex())].Alive(),
           "the marker is on a living enemy");
     const i32 marked = boss.TargetIndex();
     boss.CycleTarget(1);
@@ -792,7 +790,8 @@ void TestPackAim()
                   "\"scaling\": \"strength\", \"target\": \"randomEnemy\" }");
     Check(data.CheckForChanges(&reload) == 0, "the aim edit waits a check");
     Check(data.CheckForChanges(&reload) == 1, "the aim edit reloads");
-    Battle random(data, Sides({CombatantSide::Player, CombatantSide::Player, CombatantSide::Player}));
+    Battle random(data,
+                  Sides({CombatantSide::Player, CombatantSide::Player, CombatantSide::Player}));
     Check(random.Start("fighter", 1, "wolf_pack", error), "the pack waits on the fighter");
     const ActionResult first = random.UseSkill("strike");
     const ActionResult second = random.UseSkill("strike");
@@ -990,6 +989,114 @@ void TestGrantCopies()
           "the wolf's tuned bite deals 8, and an item grant does not change the fighter");
 }
 
+void TestStunResist()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "statuses.json", "\"damageTakenPercent\": 15,",
+                  "\"damageTakenPercent\": 15, \"resists\": [\"stunned\"],");
+    Database data(copy.Path);
+    Check(data.Load(), "the copy with a stun resist loads");
+    Battle resist(data, Sides({CombatantSide::Enemy, CombatantSide::Player, CombatantSide::Enemy,
+                               CombatantSide::Enemy}));
+    std::string error;
+    Check(resist.Start("fighter", 1, "bone_archer", error), "the archer draws");
+    Check(resist.Inflict(CombatantSide::Enemy, "enraged", error), "the archer is enraged");
+    Check(ResistsStatus(resist.Enemy(), "stunned", data.GetStatuses()), "enraged resists stunned");
+    Check(resist.EnemyAct().Damage == 0 && !resist.Enemy().WindupSkill.empty(),
+          "the archer starts the draw");
+    const ActionResult heavy = resist.UseSkill("heavy_blow");
+    Check(heavy.Accepted && heavy.Damage > 0 && !resist.Enemy().WindupSkill.empty() &&
+              heavy.Text.find("shrugs off the stun") != std::string::npos,
+          "a resisted stun still hits but leaves the wind-up running");
+    Check(resist.Enemy().Statuses.size() == 1, "only enraged is up");
+}
+
+void TestSummonFallback()
+{
+    const char* const kSummon = "\"summon\": { \"enemy\": \"rubble_shard\", \"every\": 3 },";
+    {
+        TempCopy bad;
+        ReplaceInFile(
+            bad.Path / "enemies.json", kSummon,
+            "\"summon\": { \"enemy\": \"rubble_shard\", \"every\": 3, \"ifBlocked\": \"nap\" },");
+        Database data(bad.Path);
+        DataError error;
+        Check(!data.Load(&error), "ifBlocked rejects an unknown mode");
+        CheckHas(error.Message, "enemies.json", "the ifBlocked error names the file");
+        CheckHas(error.Message, "oathkeeper_varn", "the ifBlocked error names the enemy");
+        CheckHas(error.Message, "ifBlocked", "the ifBlocked error names the field");
+    }
+
+    auto driveBlocked = [&](std::string_view mode, ActionResult& blocked, bool& joined) {
+        TempCopy copy;
+        const std::string summon =
+            std::string(
+                "\"summon\": { \"enemy\": \"rubble_shard\", \"every\": 3, \"ifBlocked\": \"") +
+            std::string(mode) + "\" },";
+        ReplaceInFile(copy.Path / "enemies.json", kSummon, summon);
+        Database data(copy.Path);
+        Check(data.Load(), "the summon mode loads");
+        const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");
+        const bool act = mode == "act";
+        Check(varn != nullptr &&
+                  varn->IfBlocked == (act ? BlockedSummon::Act : BlockedSummon::Fizzle),
+              "ifBlocked is read");
+        std::string error;
+        std::vector<CombatantSide> turns(16, CombatantSide::Enemy);
+        Battle boss(data, Sides(std::move(turns)));
+        Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can be driven to a summon");
+        boss.SetEnemyHp(120);
+        std::vector<ActionResult> acts;
+        for (i32 step = 0; step < 7 && boss.Result() == BattleResult::Ongoing; ++step)
+            acts.push_back(DriveVarn(boss));
+        joined = acts.size() == 7 && acts[3].Text.find("joins") != std::string::npos &&
+                 ShardSlot(boss, true) >= 0;
+        if (acts.size() == 7)
+            blocked = acts[6];
+    };
+
+    ActionResult fizzled;
+    bool fizzleJoined = false;
+    driveBlocked("fizzle", fizzled, fizzleJoined);
+    Check(fizzleJoined, "the first shard still joins when a later summon would be blocked");
+    Check(fizzled.Text.find("already in the fight") != std::string::npos,
+          "ifBlocked fizzle spends the turn on the refusal");
+
+    ActionResult acted;
+    bool actJoined = false;
+    driveBlocked("act", acted, actJoined);
+    Check(actJoined, "the first shard joins before the fallback");
+    Check(acted.Text.find("already") == std::string::npos &&
+              acted.Text.find("joins") == std::string::npos && acted.SkillId != "rubble_shard" &&
+              !acted.SkillId.empty(),
+          "a blocked summon falls through to the ordinary action");
+
+    TempCopy follow;
+    ReplaceInFile(
+        follow.Path / "enemies.json", kSummon,
+        "\"summon\": { \"enemy\": \"rubble_shard\", \"every\": 3, \"ifBlocked\": \"act\" },");
+    Database data(follow.Path);
+    Check(data.Load(), "the fallback copy loads");
+    std::string error;
+    std::vector<CombatantSide> turns(20, CombatantSide::Enemy);
+    Battle boss(data, Sides(std::move(turns)));
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can summon after a corpse");
+    boss.SetEnemyHp(120);
+    for (i32 step = 0; step < 7 && boss.Result() == BattleResult::Ongoing; ++step)
+        DriveVarn(boss);
+    const i32 living = ShardSlot(boss, true);
+    Check(living >= 0 && boss.SetTarget(living), "the living shard can be marked");
+    boss.SetEnemyHp(0);
+    ActionResult next;
+    for (i32 step = 0; step < 6 && boss.Result() == BattleResult::Ongoing; ++step) {
+        next = DriveVarn(boss);
+        if (next.Text.find("joins") != std::string::npos)
+            break;
+    }
+    Check(next.Text.find("joins") != std::string::npos && ShardSlot(boss, true) >= 0,
+          "a free seat still summons on the next call");
+}
+
 } // namespace
 
 int main()
@@ -1013,6 +1120,8 @@ int main()
     TestGearAndConsumables();
     TestBossPlans();
     TestGrantCopies();
+    TestStunResist();
+    TestSummonFallback();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

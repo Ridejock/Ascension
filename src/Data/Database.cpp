@@ -19,9 +19,9 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json",    "effects.json", "skills.json", "statuses.json", "classes.json",
-    "enemies.json",  "encounters.json", "items.json", "shop.json",   "combat.json",
-    "progress.json",
+    "stats.json",   "effects.json", "skills.json",     "statuses.json",
+    "classes.json", "enemies.json", "encounters.json", "items.json",
+    "shop.json",    "combat.json",  "progress.json",
 };
 
 constexpr i32 kMinLevel = 1;
@@ -1212,7 +1212,7 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
             if (!summon->is_object())
                 return fail("'summon' must be an object");
             std::string summonUnknown;
-            if (!AllowKeys(*summon, {"enemy", "every"}, summonUnknown))
+            if (!AllowKeys(*summon, {"enemy", "every", "ifBlocked"}, summonUnknown))
                 return fail("'summon' unknown field " + Quote(summonUnknown));
             if (!RequireString(*summon, "enemy", enemy.SummonId, error))
                 return fail(error);
@@ -1224,6 +1224,18 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
                 return fail(error);
             if (enemy.PhaseAtPercent <= 0)
                 return fail("'summon' needs 'phaseAtPercent'");
+            const auto blocked = summon->find("ifBlocked");
+            if (blocked != summon->end()) {
+                if (!blocked->is_string())
+                    return fail("'ifBlocked' must be \"act\" or \"fizzle\"");
+                const std::string mode = blocked->get<std::string>();
+                if (mode == "act")
+                    enemy.IfBlocked = BlockedSummon::Act;
+                else if (mode == "fizzle")
+                    enemy.IfBlocked = BlockedSummon::Fizzle;
+                else
+                    return fail("'ifBlocked' must be \"act\" or \"fizzle\"");
+            }
         }
         if (!RequireString(entry, "name", enemy.Name, error) ||
             !RequireString(entry, "description", enemy.Description, error))
@@ -1560,7 +1572,7 @@ bool LoadStatuses(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "damagePerTurn", "turns", "maxStacks",
-                        "damageTakenPercent", "damageDealtPercent", "skipAction"},
+                        "damageTakenPercent", "damageDealtPercent", "skipAction", "resists"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!OptionalInt(entry, "damagePerTurn", 0, 999, status.DamagePerTurn, error) ||
@@ -1575,13 +1587,37 @@ bool LoadStatuses(const Json& root, Parsed& parsed, std::string& error)
                 return fail("'skipAction' must be true or false");
             status.SkipAction = skip->get<bool>();
         }
+        const auto resists = entry.find("resists");
+        if (resists != entry.end()) {
+            if (!resists->is_array())
+                return fail("'resists' must be a list of status ids");
+            for (const Json& resisted : *resists) {
+                if (!resisted.is_string() || !IsId(resisted.get<std::string>()))
+                    return fail("'resists' must be a list of status ids");
+                status.Resists.push_back(resisted.get<std::string>());
+            }
+        }
         if (status.DamagePerTurn <= 0 && status.DamageTakenPercent <= 0 &&
-            status.DamageDealtPercent <= 0 && !status.SkipAction)
-            return fail("needs damage, a percent, or skipAction");
+            status.DamageDealtPercent <= 0 && !status.SkipAction && status.Resists.empty())
+            return fail("needs damage, a percent, skipAction, or resists");
         if (!RequireString(entry, "name", status.Name, error) ||
             !RequireString(entry, "description", status.Description, error))
             return fail(error);
         parsed.Statuses.push_back(std::move(status));
+    }
+    // Every status can be resisted, so the ids are checked once the whole file is read.
+    for (const StatusDef& loaded : parsed.Statuses) {
+        for (const std::string& blockedId : loaded.Resists) {
+            if (blockedId == loaded.Id) {
+                error = "status " + Quote(loaded.Id) + ": 'resists' cannot list the status itself";
+                return false;
+            }
+            if (FindId(parsed.Statuses, blockedId) == nullptr) {
+                error = "status " + Quote(loaded.Id) + ": 'resists' " + Quote(blockedId) +
+                        ", which does not exist";
+                return false;
+            }
+        }
     }
     return true;
 }
@@ -1717,12 +1753,12 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         times[i] = ReadStamp(files[i]);
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats,     LoadEffects, LoadSkills,   LoadStatuses, LoadClasses,
-                              LoadEnemies,  LoadEncounters, LoadItems, LoadShop,     LoadCombat,
-                              LoadProgress};
-    const char* names[] = {"stats.json",     "effects.json", "skills.json", "statuses.json",
-                           "classes.json",   "enemies.json", "encounters.json", "items.json",
-                           "shop.json",      "combat.json",  "progress.json"};
+    const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
+                              LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
+                              LoadShop,    LoadCombat,  LoadProgress};
+    const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
+                           "classes.json", "enemies.json", "encounters.json", "items.json",
+                           "shop.json",    "combat.json",  "progress.json"};
 
     for (usize i = 0; i < files.size(); ++i) {
         std::string text;
@@ -1737,9 +1773,9 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats",    "effects", "skills", "statuses", "classes",
-                                    "enemies", "encounters", "items", "shop",     "combat",
-                                    "progress"};
+        const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
+                                    "classes", "enemies", "encounters", "items",
+                                    "shop",    "combat",  "progress"};
         if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;

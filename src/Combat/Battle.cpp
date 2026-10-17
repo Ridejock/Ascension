@@ -203,6 +203,21 @@ void ApplyStatus(CombatantState& who, const StatusDef& status)
     who.Statuses.push_back(std::move(added));
 }
 
+bool ResistsStatus(const CombatantState& who, std::string_view statusId,
+                   std::span<const StatusDef> catalog)
+{
+    for (const StatusInstance& have : who.Statuses) {
+        const StatusDef* def = FindStatusDef(catalog, have.Id);
+        if (def == nullptr)
+            continue;
+        for (const std::string& blocked : def->Resists) {
+            if (blocked == statusId)
+                return true;
+        }
+    }
+    return false;
+}
+
 StatusTick TickStatuses(CombatantState& who, std::span<const StatusDef> catalog)
 {
     StatusTick tick;
@@ -665,6 +680,14 @@ void Battle::GrantFocus(CombatantState& who, i32 amount) const
     who.Focus = static_cast<i32>(focus);
 }
 
+bool Battle::Afflict(CombatantState& who, const StatusDef& status) const
+{
+    if (m_Data != nullptr && ResistsStatus(who, status.Id, m_Data->GetStatuses()))
+        return false;
+    ApplyStatus(who, status);
+    return true;
+}
+
 void Battle::CollectGranted(bool hero, std::string_view enemyId,
                             std::vector<const SkillDef*>& out) const
 {
@@ -727,7 +750,7 @@ void Battle::RunTrigger(CombatantState& who, EffectTrigger trigger) const
             } else if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value()) {
                 const StatusDef* status = m_Data->FindStatus(*effect.Status);
                 if (status != nullptr)
-                    ApplyStatus(who, *status);
+                    Afflict(who, *status);
             }
         }
     }
@@ -890,7 +913,7 @@ void Battle::EnterPhase(i32 index, std::string& note)
     if (!enemy->PhaseStatus.empty()) {
         const StatusDef* status = m_Data->FindStatus(enemy->PhaseStatus);
         if (status != nullptr)
-            ApplyStatus(foe, *status);
+            Afflict(foe, *status);
     }
     if (!note.empty())
         note += " ";
@@ -1079,13 +1102,13 @@ bool Battle::Inflict(CombatantSide side, std::string_view statusId, std::string&
         return false;
     }
     if (side == CombatantSide::Player) {
-        ApplyStatus(m_Player, *status);
+        Afflict(m_Player, *status);
     } else {
         if (m_Target < 0 || m_Target >= static_cast<i32>(m_Enemies.size())) {
             error = "there is no enemy to afflict";
             return false;
         }
-        ApplyStatus(m_Enemies[static_cast<usize>(m_Target)], *status);
+        Afflict(m_Enemies[static_cast<usize>(m_Target)], *status);
     }
     error.clear();
     return true;
@@ -1125,7 +1148,8 @@ void Battle::CollectAims(const CombatantState& user, EffectAim aim, std::vector<
 
     if (aim == EffectAim::Target) {
         if (&user == &m_Player) {
-            if (m_Target >= 0 && m_Target < count && m_Enemies[static_cast<usize>(m_Target)].Alive()) {
+            if (m_Target >= 0 && m_Target < count &&
+                m_Enemies[static_cast<usize>(m_Target)].Alive()) {
                 AimRef foe;
                 foe.Index = m_Target;
                 out.push_back(foe);
@@ -1324,7 +1348,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     std::vector<AimRef> aims;
                     CollectAims(user, AimOf(skill, effect), aims);
                     for (const AimRef& aim : aims) {
-                        ApplyStatus(Aimed(aim), *inflicted);
+                        if (!Afflict(Aimed(aim), *inflicted))
+                            continue;
                         extra += " ";
                         extra += inflicted->Name;
                         extra += ".";
@@ -1348,7 +1373,13 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     if (follow.Status.has_value() && m_Data != nullptr) {
                         const StatusDef* stun = m_Data->FindStatus(*follow.Status);
                         if (stun != nullptr) {
-                            ApplyStatus(foe, *stun);
+                            if (!Afflict(foe, *stun)) {
+                                // A resisted stun leaves the wind-up running.
+                                extra += " ";
+                                extra += foe.Name;
+                                extra += " shrugs off the stun.";
+                                continue;
+                            }
                             extra += " ";
                             extra += foe.Name;
                             extra += " is stunned.";
@@ -1368,7 +1399,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 if (inflicted == nullptr)
                     continue;
                 for (const AimRef& aim : aims) {
-                    ApplyStatus(Aimed(aim), *inflicted);
+                    if (!Afflict(Aimed(aim), *inflicted))
+                        continue;
                     extra += " ";
                     extra += inflicted->Name;
                     extra += ".";
@@ -1433,47 +1465,66 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
     return result;
 }
 
+Battle::SummonSpot Battle::FindSummonSpot(i32 index) const
+{
+    SummonSpot spot;
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    if (index >= 0 && index < count)
+        spot.HostName = m_Enemies[static_cast<usize>(index)].Name;
+    else
+        spot.HostName = "The foe";
+    const EnemyDef* host = m_Data != nullptr && index >= 0 && index < count
+                               ? m_Data->FindEnemy(m_Enemies[static_cast<usize>(index)].Id)
+                               : nullptr;
+    spot.Add = host != nullptr && m_Data != nullptr ? m_Data->FindEnemy(host->SummonId) : nullptr;
+    for (i32 body = 0; body < count; ++body) {
+        const CombatantState& present = m_Enemies[static_cast<usize>(body)];
+        if (!present.Alive()) {
+            if (spot.OpenSlot < 0)
+                spot.OpenSlot = body;
+            continue;
+        }
+        ++spot.Living;
+        if (spot.Add != nullptr && present.Id == spot.Add->Id)
+            spot.Already = true;
+    }
+    return spot;
+}
+
+bool Battle::SummonTakesTurn(i32 index) const
+{
+    const SummonSpot spot = FindSummonSpot(index);
+    if (spot.Add != nullptr && !spot.Already && spot.Living < kMaxCombatants)
+        return true;
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    const EnemyDef* host = m_Data != nullptr && index >= 0 && index < count
+                               ? m_Data->FindEnemy(m_Enemies[static_cast<usize>(index)].Id)
+                               : nullptr;
+    // A missing definition still reports the refusal. Act falls through to the pattern.
+    if (host == nullptr)
+        return true;
+    return host->IfBlocked != BlockedSummon::Act;
+}
+
 ActionResult Battle::ResolveSummon(i32 index)
 {
     ActionResult result;
     result.Accepted = true;
+    const SummonSpot spot = FindSummonSpot(index);
+    result.SkillId = spot.Add != nullptr ? spot.Add->Id : "";
     const i32 count = static_cast<i32>(m_Enemies.size());
-    const EnemyDef* host =
-        m_Data != nullptr && index >= 0 && index < count
-            ? m_Data->FindEnemy(m_Enemies[static_cast<usize>(index)].Id)
-            : nullptr;
-    const EnemyDef* add =
-        host != nullptr && m_Data != nullptr ? m_Data->FindEnemy(host->SummonId) : nullptr;
-    result.SkillId = add != nullptr ? add->Id : "";
-    const std::string hostName =
-        index >= 0 && index < count ? m_Enemies[static_cast<usize>(index)].Name
-                                    : std::string("The foe");
-    bool already = false;
-    i32 living = 0;
-    i32 openSlot = -1;
-    for (i32 body = 0; body < count; ++body) {
-        const CombatantState& present = m_Enemies[static_cast<usize>(body)];
-        if (!present.Alive()) {
-            if (openSlot < 0)
-                openSlot = body;
-            continue;
-        }
-        ++living;
-        if (add != nullptr && present.Id == add->Id)
-            already = true;
-    }
-    if (add == nullptr) {
-        result.Text = hostName + " calls, and nothing answers.";
-    } else if (already || living >= kMaxCombatants) {
-        result.Text = add->Name + " is already in the fight.";
+    if (spot.Add == nullptr) {
+        result.Text = spot.HostName + " calls, and nothing answers.";
+    } else if (spot.Already || spot.Living >= kMaxCombatants) {
+        result.Text = spot.Add->Name + " is already in the fight.";
     } else {
-        CombatantState shard;
-        MakeFoe(*add, shard);
-        i32 joined = openSlot;
-        if (count >= kMaxCombatants && openSlot >= 0) {
-            m_Enemies[static_cast<usize>(openSlot)] = std::move(shard);
+        CombatantState added;
+        MakeFoe(*spot.Add, added);
+        i32 joined = spot.OpenSlot;
+        if (count >= kMaxCombatants && spot.OpenSlot >= 0) {
+            m_Enemies[static_cast<usize>(spot.OpenSlot)] = std::move(added);
         } else {
-            m_Enemies.push_back(std::move(shard));
+            m_Enemies.push_back(std::move(added));
             joined = static_cast<i32>(m_Enemies.size()) - 1;
         }
         NameCombatants(m_Data, m_Enemies);
@@ -1500,7 +1551,8 @@ const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
         const i32 count = static_cast<i32>(enemy->Pattern.size());
         for (i32 step = 0; step < count; ++step) {
             const i32 patternIndex = (who.PatternStep + step) % count;
-            const SkillDef* skill = EnemySkill(who, enemy->Pattern[static_cast<usize>(patternIndex)]);
+            const SkillDef* skill =
+                EnemySkill(who, enemy->Pattern[static_cast<usize>(patternIndex)]);
             if (skill == nullptr || skill->Kind != SkillKind::Active)
                 continue;
             if (skill->FocusCost > who.Focus)
@@ -1598,15 +1650,16 @@ ActionResult Battle::EnemyAct()
 
     if (m_Enemies[static_cast<usize>(foeIndex)].ShardDue) {
         m_Enemies[static_cast<usize>(foeIndex)].ShardDue = false;
-        ActionResult summoned = ResolveSummon(foeIndex);
-        ArmSummon(foeIndex, summoned.Text);
-        return summoned;
+        if (SummonTakesTurn(foeIndex)) {
+            ActionResult summoned = ResolveSummon(foeIndex);
+            ArmSummon(foeIndex, summoned.Text);
+            return summoned;
+        }
     }
 
     if (!m_Enemies[static_cast<usize>(foeIndex)].WindupSkill.empty() && m_Data != nullptr) {
-        const SkillDef* winding =
-            EnemySkill(m_Enemies[static_cast<usize>(foeIndex)],
-                       m_Enemies[static_cast<usize>(foeIndex)].WindupSkill);
+        const SkillDef* winding = EnemySkill(m_Enemies[static_cast<usize>(foeIndex)],
+                                             m_Enemies[static_cast<usize>(foeIndex)].WindupSkill);
         if (winding == nullptr) {
             m_Enemies[static_cast<usize>(foeIndex)].WindupSkill.clear();
             m_Enemies[static_cast<usize>(foeIndex)].WindupLeft = 0;
@@ -1631,8 +1684,7 @@ ActionResult Battle::EnemyAct()
             m_Enemies[static_cast<usize>(foeIndex)].WindupSkill.clear();
             m_Enemies[static_cast<usize>(foeIndex)].WindupLeft = 0;
             m_Enemies[static_cast<usize>(foeIndex)].WindupTotal = 0;
-            ActionResult fired =
-                Resolve(m_Enemies[static_cast<usize>(foeIndex)], firing);
+            ActionResult fired = Resolve(m_Enemies[static_cast<usize>(foeIndex)], firing);
             ArmSummon(foeIndex, fired.Text);
             return fired;
         }

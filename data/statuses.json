@@ -19,9 +19,10 @@
     {
       "id": "enraged",
       "name": "Enraged",
-      "description": "Deals 30 percent more damage and takes 15 percent more. The sample applies it for the rest of a fight.",
+      "description": "Deals 30 percent more damage and takes 15 percent more. Cannot be stunned. The sample applies it for the rest of a fight.",
       "damageDealtPercent": 30,
       "damageTakenPercent": 15,
+      "resists": ["stunned"],
       "turns": 99,
       "maxStacks": 1
     },
@@ -31,6 +32,14 @@
       "description": "Skips their next action.",
       "skipAction": true,
       "turns": 1,
+      "maxStacks": 1
+    },
+    {
+      "id": "fury",
+      "name": "Fury",
+      "description": "Deals 50 percent more damage. Lasts three turns.",
+      "damageDealtPercent": 50,
+      "turns": 4,
       "maxStacks": 1
     }
   ]
