@@ -7,7 +7,7 @@
       "level": 1,
       "stats": {
         "vitality": 10,
-        "strength": 5,
+        "strength": 6,
         "defense": 2,
         "agility": 7,
         "focus": 0
@@ -22,8 +22,8 @@
       "description": "A road thief with a nicked blade. Every few cuts, the wound stays open.",
       "level": 3,
       "stats": {
-        "vitality": 16,
-        "strength": 7,
+        "vitality": 18,
+        "strength": 8,
         "defense": 4,
         "agility": 6,
         "focus": 2
@@ -38,8 +38,8 @@
       "description": "A pale moth from the Stillbarrow tombs. The dust on its wings sticks.",
       "level": 4,
       "stats": {
-        "vitality": 12,
-        "strength": 6,
+        "vitality": 14,
+        "strength": 10,
         "defense": 2,
         "agility": 9,
         "focus": 0
@@ -54,8 +54,8 @@
       "description": "A barrow archer who draws on the dead. The shot is obvious before it lands.",
       "level": 5,
       "stats": {
-        "vitality": 16,
-        "strength": 8,
+        "vitality": 26,
+        "strength": 12,
         "defense": 3,
         "agility": 4,
         "focus": 0
@@ -65,13 +65,29 @@
       "gold": 8
     },
     {
+      "id": "dire_wolf",
+      "name": "Dire Wolf",
+      "description": "PLACEHOLDER: A barrow-fed wolf that runs at the front of the pack. Bigger, and slower to fall.",
+      "level": 5,
+      "stats": {
+        "vitality": 16,
+        "strength": 10,
+        "defense": 3,
+        "agility": 8,
+        "focus": 0
+      },
+      "skills": ["bite"],
+      "experience": 8,
+      "gold": 3
+    },
+    {
       "id": "barrow_sentry",
       "name": "Barrow Sentry",
       "description": "Stone set to watch the Stillbarrow door. It hardens when the barrow is pressed.",
       "level": 6,
       "stats": {
-        "vitality": 32,
-        "strength": 10,
+        "vitality": 40,
+        "strength": 16,
         "defense": 8,
         "agility": 3,
         "focus": 0
@@ -84,21 +100,21 @@
     {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
-      "description": "Oathkeeper Varn keeps the Stillbarrow. Below half health the barrow throws a rubble shard into the fight.",
+      "description": "Oathkeeper Varn keeps the Stillbarrow. Once he is worn down, the barrow throws rubble shards into the fight.",
       "level": 8,
       "boss": true,
       "stats": {
-        "vitality": 60,
-        "strength": 14,
+        "vitality": 100,
+        "strength": 20,
         "defense": 12,
         "agility": 3,
         "focus": 0
       },
       "skills": ["maul_swing", "crushing_slam", "stone_skin"],
       "pattern": ["maul_swing", "crushing_slam", "stone_skin"],
-      "phaseAtPercent": 50,
+      "phaseAtPercent": 60,
       "phaseStatus": "enraged",
-      "summon": { "enemy": "rubble_shard", "every": 3 },
+      "summon": { "enemy": "rubble_shard", "every": 2 },
       "experience": 80,
       "gold": 40
     },
@@ -108,7 +124,7 @@
       "description": "A stone the barrow threw. It falls until it breaks.",
       "level": 1,
       "stats": {
-        "vitality": 6,
+        "vitality": 8,
         "strength": 0,
         "defense": 0,
         "agility": 1,

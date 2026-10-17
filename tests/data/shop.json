@@ -1,0 +1,20 @@
+{
+  "shop": {
+    "id": "pells_provisions",
+    "name": "Old Pell's Provisions",
+    "keeper": "Pell Harrow",
+    "bagSlots": 12,
+    "stackSize": 5,
+    "sellNumerator": 1,
+    "sellDenominator": 2,
+    "stock": [
+      "rusty_sword",
+      "notched_greataxe",
+      "oak_shield",
+      "oathkeepers_plate",
+      "wolfhide_charm",
+      "minor_potion",
+      "focus_tonic"
+    ]
+  }
+}

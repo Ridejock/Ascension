@@ -23,7 +23,7 @@
     {
       "id": "wolf_pack",
       "name": "Wolf Pack",
-      "enemies": ["wolf", "wolf", "wolf"]
+      "enemies": ["dire_wolf", "dire_wolf", "dire_wolf"]
     },
     {
       "id": "barrow_sentry",
