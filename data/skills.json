@@ -28,7 +28,7 @@
       "description": "A committed swing. It stuns a foe who is winding up.",
       "kind": "active",
       "target": "enemy",
-      "focusCost": 2,
+      "focusCost": 3,
       "effects": [
         { "id": "hit", "trigger": "onUse", "op": "damage", "power": 18, "scaling": "strength" },
         { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
@@ -48,12 +48,12 @@
     {
       "id": "rage",
       "name": "Rage",
-      "description": "Spend focus to hit harder for a short while.",
+      "description": "Spend focus to hit harder for your next three turns.",
       "kind": "active",
       "target": "self",
       "focusCost": 3,
       "effects": [
-        { "id": "fury", "trigger": "onUse", "op": "empower", "amount": 50 }
+        { "id": "fury", "trigger": "onUse", "op": "applyStatus", "status": "fury" }
       ]
     },
     {

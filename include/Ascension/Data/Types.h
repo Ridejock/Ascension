@@ -138,6 +138,8 @@ struct StatusDef {
     i32 DamageTakenPercent = 0;
     i32 DamageDealtPercent = 0;
     bool SkipAction = false;
+    // Status ids this one blocks while it is up. An enraged boss can list "stunned".
+    std::vector<std::string> Resists;
 };
 
 // The integers from combat.json. Damage, before a guard, is
@@ -251,6 +253,11 @@ struct ClassDef {
     [[nodiscard]] bool IsEvolution() const { return !EvolvesFrom.empty(); }
 };
 
+// What an enemy does when its summon cannot join (a copy is already standing, or the
+// fight has no seat). Act spends the turn on the ordinary pattern. Fizzle spends it on
+// the refusal.
+enum class BlockedSummon : u8 { Act, Fizzle };
+
 struct EnemyDef {
     std::string Id;
     std::string Name;
@@ -262,13 +269,16 @@ struct EnemyDef {
     i32 Gold = 0;
     bool Boss = false;                // the roster has one boss, last in the sample
     std::vector<std::string> Pattern; // repeating skill ids; empty picks the strongest hit
-    i32 PhaseAtPercent = 0;  // 0 means one phase. Otherwise phase 2 begins at this health
-    std::string PhaseStatus; // applied once when phase 2 begins
+    i32 PhaseAtPercent = 0;           // 0 means one phase. Otherwise phase 2 begins at this health
+    std::string PhaseStatus;          // applied once when phase 2 begins
     // In phase 2, every SummonEvery actions, this enemy calls SummonId into the fight.
     // Empty SummonId means no add. A second copy is not called while one is still standing.
-    // A corpse does not count as standing and does not hold a seat.
+    // A corpse does not count as standing and does not hold a seat. IfBlocked is what
+    // happens on the turn that cannot place the add. Fizzle is the refusal; act is the
+    // ordinary pattern action for that turn.
     std::string SummonId;
     i32 SummonEvery = 0;
+    BlockedSummon IfBlocked = BlockedSummon::Fizzle;
 };
 
 // A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack).

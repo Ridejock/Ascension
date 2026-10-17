@@ -98,6 +98,10 @@ struct StrikeQuery {
 // Reapply refreshes the duration and adds a stack up to MaxStacks.
 void ApplyStatus(CombatantState& who, const StatusDef& status);
 
+// True when a status `who` has up lists `statusId` in its resists.
+[[nodiscard]] bool ResistsStatus(const CombatantState& who, std::string_view statusId,
+                                 std::span<const StatusDef> catalog);
+
 struct StatusTick {
     i32 Bleed = 0;
     bool Skip = false;
@@ -236,6 +240,17 @@ private:
     };
 
     ActionResult Resolve(CombatantState& user, const SkillDef& skill);
+    struct SummonSpot {
+        const EnemyDef* Add = nullptr;
+        std::string HostName;
+        bool Already = false;
+        i32 Living = 0;
+        i32 OpenSlot = -1;
+    };
+    [[nodiscard]] SummonSpot FindSummonSpot(i32 index) const;
+    // False when the add cannot join and this enemy's ifBlocked is act, so the caller
+    // spends the turn on the ordinary pattern instead.
+    [[nodiscard]] bool SummonTakesTurn(i32 index) const;
     ActionResult ResolveSummon(i32 index);
     void MakeFoe(const EnemyDef& def, CombatantState& foe) const;
     void CollectAims(const CombatantState& user, EffectAim aim, std::vector<AimRef>& out);
@@ -248,7 +263,8 @@ private:
     const SkillDef* TakeEnemySkill(CombatantState& who);
     const SkillDef* PlayerSkill(std::string_view skillId) const;
     const SkillDef* EnemySkill(const CombatantState& who, std::string_view skillId) const;
-    void CollectGranted(bool hero, std::string_view enemyId, std::vector<const SkillDef*>& out) const;
+    void CollectGranted(bool hero, std::string_view enemyId,
+                        std::vector<const SkillDef*>& out) const;
     void ApplyAlways(CombatantState& who, bool hero) const;
     void RunTrigger(CombatantState& who, EffectTrigger trigger) const;
     void ArmSummon(i32 index, std::string& note);
@@ -261,6 +277,8 @@ private:
     HitLanded LandHit(CombatantState& attacker, CombatantState& defender, i32 raw);
     i32 NoteSkillUse(CombatantState& who, const std::string& skillId);
     void GrantFocus(CombatantState& who, i32 amount) const;
+    // ApplyStatus unless a status `who` has up resists it. False when it was resisted.
+    bool Afflict(CombatantState& who, const StatusDef& status) const;
 
     const Database* m_Data = nullptr;
     std::unique_ptr<TurnModel> m_Turns;

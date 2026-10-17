@@ -574,8 +574,10 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "skills.json", "\"target\": \"target\"", "\"target\": \"sideways\"");
-        TestRejected(copy.Path, "skills.json", "randomEnemy", "an effect target must be a known aim");
+        ReplaceInFile(copy.Path / "skills.json", "\"target\": \"target\"",
+                      "\"target\": \"sideways\"");
+        TestRejected(copy.Path, "skills.json", "randomEnemy",
+                     "an effect target must be a known aim");
     }
     {
         TempCopy copy;
@@ -814,10 +816,11 @@ void TestUnusedFields()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "skills.json",
-                      "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": 50 }",
-                      "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": 50, "
-                      "\"target\": \"self\" }");
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": 50 }",
+            "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": 50, "
+            "\"target\": \"self\" }");
         ExpectUnused(copy.Path, "skills.json", "brace", "ward", "target",
                      "a guard does not read target");
     }
@@ -859,6 +862,47 @@ void TestUnusedFields()
     }
 }
 
+void TestResists()
+{
+    const char* const kEnraged = "\"damageTakenPercent\": 15,";
+    {
+        TempCopy unknown;
+        ReplaceInFile(unknown.Path / "statuses.json", kEnraged,
+                      "\"damageTakenPercent\": 15, \"resists\": [\"dazed\"],");
+        Database data(unknown.Path);
+        DataError error;
+        Check(!data.Load(&error), "a status cannot resist an id that does not exist");
+        CheckHas(error.Message, "statuses.json", "the error names the file");
+        CheckHas(error.Message, "enraged", "the error names the status");
+        CheckHas(error.Message, "resists", "the error names the field");
+        CheckHas(error.Message, "dazed", "the error names the missing status");
+    }
+    {
+        TempCopy self;
+        ReplaceInFile(self.Path / "statuses.json", kEnraged,
+                      "\"damageTakenPercent\": 15, \"resists\": [\"enraged\"],");
+        Database data(self.Path);
+        DataError error;
+        Check(!data.Load(&error), "a status cannot resist itself");
+        CheckHas(error.Message, "statuses.json", "the error names the file");
+        CheckHas(error.Message, "enraged", "the error names the status");
+        CheckHas(error.Message, "resists", "the error names the field");
+        CheckHas(error.Message, "itself", "the error says why");
+    }
+    {
+        TempCopy good;
+        ReplaceInFile(good.Path / "statuses.json", kEnraged,
+                      "\"damageTakenPercent\": 15, \"resists\": [\"stunned\"],");
+        Database data(good.Path);
+        DataError error;
+        Check(data.Load(&error), "enraged may resist stunned");
+        const StatusDef* enraged = data.FindStatus("enraged");
+        Check(enraged != nullptr && enraged->Resists.size() == 1 &&
+                  enraged->Resists[0] == "stunned",
+              "the resist list is read");
+    }
+}
+
 } // namespace
 
 int main()
@@ -868,6 +912,7 @@ int main()
     TestValidation();
     TestLayers();
     TestUnusedFields();
+    TestResists();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

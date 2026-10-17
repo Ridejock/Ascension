@@ -100,12 +100,12 @@
     {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
-      "description": "Oathkeeper Varn keeps the Stillbarrow. Once he is worn down, the barrow throws rubble shards into the fight.",
+      "description": "Oathkeeper Varn keeps the Stillbarrow. Once he is worn down, he cannot be stunned, and the barrow throws rubble shards into the fight.",
       "level": 8,
       "boss": true,
       "stats": {
-        "vitality": 100,
-        "strength": 20,
+        "vitality": 83,
+        "strength": 18,
         "defense": 12,
         "agility": 3,
         "focus": 0
@@ -114,7 +114,7 @@
       "pattern": ["maul_swing", "crushing_slam", "stone_skin"],
       "phaseAtPercent": 60,
       "phaseStatus": "enraged",
-      "summon": { "enemy": "rubble_shard", "every": 2 },
+      "summon": { "enemy": "rubble_shard", "every": 2, "ifBlocked": "act" },
       "experience": 80,
       "gold": 40
     },
