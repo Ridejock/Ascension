@@ -89,20 +89,20 @@ std::string PoolText(std::string_view label, i32 current, i32 maximum)
 std::string AddsLine(const Database& data, const ClassDef& evolution)
 {
     std::string line = "Adds";
-    for (const std::string& id : evolution.Skills) {
-        const SkillDef* skill = data.FindSkill(id);
+    for (const SkillGrant& grant : evolution.Skills) {
+        const SkillDef* skill = data.FindSkill(grant.Id);
         line += " ";
-        line += skill != nullptr ? skill->Name : id;
+        line += skill != nullptr ? skill->Name : grant.Id;
     }
     if (!evolution.Passives.empty()) {
         line += " (";
         bool first = true;
-        for (const std::string& id : evolution.Passives) {
+        for (const SkillGrant& grant : evolution.Passives) {
             if (!first)
                 line += " ";
             first = false;
-            const SkillDef* skill = data.FindSkill(id);
-            line += skill != nullptr ? skill->Name : id;
+            const SkillDef* skill = data.FindSkill(grant.Id);
+            line += skill != nullptr ? skill->Name : grant.Id;
         }
         line += ")";
     }
@@ -118,19 +118,39 @@ std::string StatLabel(const Database& data, const std::string& id)
 
 std::string PassiveLine(const Database& data, const SkillDef& passive)
 {
-    const std::string stat = StatLabel(data, passive.Stat);
-    if (passive.Passive == PassiveEffect::Bloodied)
-        return "Passive " + passive.Name + " +" + std::to_string(passive.Amount) + " " + stat +
-               " per " + std::to_string(passive.StepPercent) + " up to +" +
-               std::to_string(passive.Max);
-    if (passive.Passive == PassiveEffect::Bulwark)
-        return "Passive " + passive.Name + " " + stat + " +" + std::to_string(passive.Amount) +
-               "  focus +" + std::to_string(passive.FocusGain) + " on block";
-    std::string line = "Passive " + passive.Name + " " + stat + " ";
-    if (passive.Amount > 0)
-        line += "+";
-    line += std::to_string(passive.Amount);
-    return line;
+    const EffectDef* missing = nullptr;
+    const EffectDef* flat = nullptr;
+    const EffectDef* focus = nullptr;
+    for (const EffectDef& effect : passive.Effects) {
+        if (effect.Trigger == EffectTrigger::Always && effect.Op == EffectOp::StatPerMissingHp)
+            missing = &effect;
+        else if (effect.Trigger == EffectTrigger::Always && effect.Op == EffectOp::Stat)
+            flat = &effect;
+        else if (effect.Op == EffectOp::GrantFocus)
+            focus = &effect;
+    }
+    if (missing != nullptr) {
+        const std::string stat = StatLabel(data, missing->Stat.value_or(""));
+        return "Passive " + passive.Name + " +" + std::to_string(missing->Amount.value_or(0)) +
+               " " + stat + " per " + std::to_string(missing->Per.value_or(0)) + " up to +" +
+               std::to_string(missing->Max.value_or(0));
+    }
+    if (flat != nullptr && focus != nullptr) {
+        const std::string stat = StatLabel(data, flat->Stat.value_or(""));
+        return "Passive " + passive.Name + " " + stat + " +" +
+               std::to_string(flat->Amount.value_or(0)) + "  focus +" +
+               std::to_string(focus->Amount.value_or(0)) + " on block";
+    }
+    if (flat != nullptr) {
+        const std::string stat = StatLabel(data, flat->Stat.value_or(""));
+        std::string line = "Passive " + passive.Name + " " + stat + " ";
+        const i32 amount = flat->Amount.value_or(0);
+        if (amount > 0)
+            line += "+";
+        line += std::to_string(amount);
+        return line;
+    }
+    return "Passive " + passive.Name;
 }
 
 void AppendSigned(std::string& line, const char* label, i32 value)
@@ -322,6 +342,7 @@ void AscensionApp::BeginFight()
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
 
     m_Battle->SetGear(m_Inventory.GearBonus());
+    m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(),
                          enemies[static_cast<usize>(m_EnemyIndex)].Id, error)) {
@@ -406,16 +427,56 @@ void AscensionApp::OnEvent(const SDL_Event& event)
 
     const int digit = static_cast<int>(event.key.scancode) - static_cast<int>(SDL_SCANCODE_1);
     if (m_Battle->Result() != BattleResult::Ongoing) {
-        if (!m_Hero.ChoicePending() || digit < 0 || digit >= kMaxHotkeys)
+        const bool pickingClass = m_Hero.ChoosingStarter();
+        const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
+        const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
+        if (!pickingClass && !spending && !choosingPath)
             return;
-        const std::vector<std::string> choices = m_Hero.ChoiceIds();
+        if (digit < 0 || digit >= kMaxHotkeys)
+            return;
         std::string why;
+        if (pickingClass) {
+            const std::vector<std::string> starters = m_Hero.StarterIds();
+            if (digit >= static_cast<int>(starters.size()))
+                return;
+            if (!m_Hero.ChooseStarter(starters[static_cast<usize>(digit)], why)) {
+                Note(why);
+                return;
+            }
+            const ClassDef* starter = m_Data.FindClass(m_Hero.ClassId());
+            Note(std::string(starter != nullptr ? starter->Name : m_Hero.ClassId()) +
+                 ". Spend the class points.");
+            return;
+        }
+        if (spending) {
+            const char* stats[] = {"vitality", "strength", "defense", "agility", "focus"};
+            const char* labels[] = {"Vitality", "Strength", "Defense", "Agility", "Focus"};
+            if (digit < 5) {
+                if (!m_Hero.SpendClassPoint(stats[digit], why)) {
+                    Note(why);
+                    return;
+                }
+                Note(std::string(labels[digit]) + " +1. " + std::to_string(m_Hero.ClassPool()) +
+                     " class points left.");
+                return;
+            }
+            if (digit == 5 && m_Hero.ChoicePending()) {
+                if (!m_Hero.ResetBuild(why)) {
+                    Note(why);
+                    return;
+                }
+                Note("Build reset. Skill ranks cleared. Pick a starter class.");
+                PushRanks();
+            }
+            return;
+        }
+        const std::vector<std::string> choices = m_Hero.ChoiceIds();
         if (digit == static_cast<int>(choices.size())) {
             if (!m_Hero.ResetBuild(why)) {
                 Note(why);
                 return;
             }
-            Note("Build reset. Skill ranks cleared.");
+            Note("Build reset. Skill ranks cleared. Pick a starter class.");
             PushRanks();
             return;
         }
@@ -515,6 +576,7 @@ void AscensionApp::OnUpdate(f32 dt)
         return;
     }
     m_Battle->SetGear(m_Inventory.GearBonus());
+    m_Battle->SetBaseStats(m_Hero.Attributes());
     if (!m_Battle->ApplyData(why)) {
         Note(why);
         return;
@@ -602,7 +664,9 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     }
 
     const bool fightOver = m_Battle->Result() != BattleResult::Ongoing;
-    const bool choosing = fightOver && m_Hero.ChoicePending();
+    const bool pickingClass = fightOver && m_Hero.ChoosingStarter();
+    const bool spending = fightOver && !pickingClass && m_Hero.ClassPool() > 0;
+    const bool choosing = fightOver && (m_Hero.ChoicePending() || pickingClass || spending);
     y = left.y + 188.0f;
     if (!choosing) {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(WornLine(m_Data, m_Inventory)),
@@ -611,34 +675,77 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     y = left.y + 210.0f;
     int shownSkills = 0;
     if (choosing) {
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "CHOOSE A PATH", kFrame, 2);
+        const char* heading = "CHOOSE A PATH";
+        if (pickingClass)
+            heading = "CHOOSE A CLASS";
+        else if (spending)
+            heading = "SPEND CLASS POINTS";
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, heading, kFrame, 2);
         y += Emerald::DebugTextLineHeight(2) + 2.0f;
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "THE NEXT FIGHT WAITS.", kInk, 1);
         y += Emerald::DebugTextLineHeight(1) + 8.0f;
-        const std::vector<std::string> choices = m_Hero.ChoiceIds();
-        for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-            const ClassDef* evolution = m_Data.FindClass(choices[i]);
-            if (evolution == nullptr)
-                continue;
-            const std::string name =
-                std::to_string(static_cast<int>(i) + 1) + "  " + evolution->Name;
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
-            y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(evolution->Description),
-                                       kDim, 1, leftSize.x - 56.0f);
-            y += 2.0f;
+        if (pickingClass) {
+            const std::vector<std::string> starters = m_Hero.StarterIds();
+            for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* starter = m_Data.FindClass(starters[i]);
+                const std::string name = std::to_string(static_cast<int>(i) + 1) + "  " +
+                                         (starter != nullptr ? starter->Name : starters[i]);
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
+                y += Emerald::DebugTextLineHeight(2) + 2.0f;
+                if (starter != nullptr) {
+                    y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                               Upper(starter->Description), kDim, 1,
+                                               leftSize.x - 56.0f);
+                    y += 8.0f;
+                }
+            }
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                   Upper(AddsLine(m_Data, *evolution)), kInk, 1);
-            y += Emerald::DebugTextLineHeight(1) + 8.0f;
-        }
-        if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
-            const std::string resetName =
-                std::to_string(static_cast<int>(choices.size()) + 1) + "  RESET BUILD";
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, resetName, kInk, 2);
-            y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                   "CLEARS SKILL RANKS. THE PATH STAYS OPEN.", kDim, 1,
+                                   "ANY STARTER. CLASS POINTS STAY IN THE POOL.", kDim, 1,
                                    leftSize.x - 56.0f);
+        } else if (spending) {
+            const char* labels[] = {"VITALITY", "STRENGTH", "DEFENSE", "AGILITY", "FOCUS"};
+            const StatBlock attributes = m_Hero.Attributes();
+            const i32 amounts[] = {attributes.Vitality, attributes.Strength, attributes.Defense,
+                                   attributes.Agility, attributes.Focus};
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                   "POOL " + std::to_string(m_Hero.ClassPool()), kInk, 2);
+            y += Emerald::DebugTextLineHeight(2) + 4.0f;
+            for (int stat = 0; stat < 5; ++stat) {
+                const std::string line = std::to_string(stat + 1) + "  " + labels[stat] + "  " +
+                                         std::to_string(amounts[stat]);
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, kInk, 2);
+                y += Emerald::DebugTextLineHeight(2) + 2.0f;
+            }
+            if (m_Hero.ChoicePending()) {
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "6  RESET BUILD", kDim, 1);
+            }
+        } else {
+            const std::vector<std::string> choices = m_Hero.ChoiceIds();
+            for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* evolution = m_Data.FindClass(choices[i]);
+                if (evolution == nullptr)
+                    continue;
+                const std::string name =
+                    std::to_string(static_cast<int>(i) + 1) + "  " + evolution->Name;
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
+                y += Emerald::DebugTextLineHeight(2) + 2.0f;
+                y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                           Upper(evolution->Description), kDim, 1,
+                                           leftSize.x - 56.0f);
+                y += 2.0f;
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                       Upper(AddsLine(m_Data, *evolution)), kInk, 1);
+                y += Emerald::DebugTextLineHeight(1) + 8.0f;
+            }
+            if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
+                const std::string resetName =
+                    std::to_string(static_cast<int>(choices.size()) + 1) + "  RESET BUILD";
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, resetName, kInk, 2);
+                y += Emerald::DebugTextLineHeight(2) + 2.0f;
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                       "CLEARS SKILL RANKS. CLASS POINTS RETURN TO THE POOL.", kDim,
+                                       1, leftSize.x - 56.0f);
+            }
         }
     } else if (m_Picking) {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "DRINKS", kFrame, 2);
@@ -788,7 +895,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     std::string banner = "YOUR TURN";
     Emerald::Vec4 bannerColor = kFrame;
-    if (choosing) {
+    if (pickingClass) {
+        banner = "CHOOSE A CLASS";
+    } else if (spending) {
+        banner = "SPEND CLASS POINTS";
+    } else if (choosing) {
         banner = "CHOOSE A PATH";
     } else if (m_Picking) {
         banner = "CHOOSE AN ITEM";
@@ -815,6 +926,21 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         std::string help;
         if (m_Picking && !choosing) {
             help = "UP DOWN MOVE    1-8 DRINK    E DRINK    C CLOSE";
+        } else if (pickingClass) {
+            const std::vector<std::string> starters = m_Hero.StarterIds();
+            for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* starter = m_Data.FindClass(starters[i]);
+                if (!help.empty())
+                    help += "    ";
+                help += std::to_string(static_cast<int>(i) + 1) + " ";
+                help += starter != nullptr ? starter->Name : starters[i];
+            }
+            help += "    I PELL    ESC QUIT";
+        } else if (spending) {
+            help = "1 VITALITY    2 STRENGTH    3 DEFENSE    4 AGILITY    5 FOCUS";
+            if (m_Hero.ChoicePending())
+                help += "    6 RESET BUILD";
+            help += "    I PELL    ESC QUIT";
         } else if (choosing) {
             const std::vector<std::string> choices = m_Hero.ChoiceIds();
             for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {

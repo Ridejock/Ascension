@@ -22,11 +22,11 @@ struct StatusInstance {
     i32 TurnsLeft = 0;
 };
 
-// One side of a fight. Stat passives are already in Stats. Guard, riposte, and empower each
+// One side of a fight. Flat stat effects are already in Stats. Guard, reflect, and empower each
 // last for one incoming or outgoing blow. BonusDefense is a harden that ticks down on this
-// unit's turn. BulwarkFocus is paid when a guard reduces a hit. WindupSkill is set while an
-// attack is being telegraphed; WindupLeft is the telegraph actions still owed after the one
-// on screen.
+// unit's turn. WindupSkill is set while an attack is being telegraphed; WindupLeft is the
+// telegraph actions still owed after the one on screen. A block runs the defender's onBlock
+// effects; nothing on this struct is named after a skill.
 struct CombatantState {
     std::string Id;
     std::string Name;
@@ -41,7 +41,6 @@ struct CombatantState {
     i32 ReflectFlat = 0;
     i32 BonusDefense = 0;
     i32 BonusDefenseTurns = 0;
-    i32 BulwarkFocus = 0;
     std::vector<StatusInstance> Statuses;
     std::string WindupSkill;
     i32 WindupLeft = 0;
@@ -66,7 +65,7 @@ struct ActionResult {
 };
 
 // One practiced skill. Rank 1 is untrained. Battle adds (Rank - 1) * powerPerRank to damage,
-// healing, and a riposte's flat reflect for the player only. A guard's percent is left alone.
+// healing, and a reflect's flat power for the player only. A guard's percent is left alone.
 struct SkillRank {
     std::string Id;
     i32 Rank = 1;
@@ -81,9 +80,9 @@ struct StrikeQuery {
     i32 EmpowerPercent = 0;
 };
 
-// +amount strength (or whatever the passive names) per stepPercent of missing health, capped
-// at maxBonus. 0 at full health.
-[[nodiscard]] i32 BloodlustBonus(i32 amount, i32 stepPercent, i32 maxBonus, i32 hp, i32 maxHp);
+// +amount per `stepPercent` of missing health, capped at maxBonus. 0 at full health. This is
+// the statPerMissingHp op.
+[[nodiscard]] i32 MissingHpBonus(i32 amount, i32 stepPercent, i32 maxBonus, i32 hp, i32 maxHp);
 
 // value * percent / 100. A percent of 100 leaves value alone. Negative value becomes 0.
 [[nodiscard]] i32 ScalePercent(i32 value, i32 percent);
@@ -92,7 +91,8 @@ struct StrikeQuery {
 [[nodiscard]] i32 HealAmount(i32 power, i32 scalingStat, const CombatRules& rules);
 [[nodiscard]] i32 GuardedDamage(i32 damage, i32 guardPercent);
 
-// blocked * reflectPercent / 100 + flat. The flat is the riposte's power plus its scaling stat.
+// blocked * reflectPercent / 100 + flat. The flat is the reflect effect's power plus its
+// scaling stat.
 [[nodiscard]] i32 ReflectedDamage(i32 blocked, i32 reflectPercent, i32 flat);
 
 // Reapply refreshes the duration and adds a stack up to MaxStacks.
@@ -166,6 +166,10 @@ public:
     // before ApplyData when a reload changes a worn piece. Zero leaves the class line alone.
     void SetGear(StatBlock gear);
 
+    // Replaces the class stat line (level growth and class grants) before gear and passives.
+    // The sandbox passes the hero's attributes. Leave it unset and Start keeps the class formula.
+    void SetBaseStats(StatBlock stats);
+
     // Drinks a consumable on the player's turn. Accepted with SkillId set means the drink
     // landed and the bag should drop one. A stun spends the turn and leaves SkillId empty,
     // so the bottle stays in the bag.
@@ -200,13 +204,25 @@ private:
     TurnOpen PrepareTurn(CombatantState& user);
     ActionResult Resolve(CombatantState& user, CombatantState& other, const SkillDef& skill);
     ActionResult ResolveShard();
+    struct HitLanded {
+        i32 Taken = 0;
+        i32 Reflected = 0;
+    };
+
     const SkillDef* TakeEnemySkill();
-    void ApplyPassives(CombatantState& player) const;
+    const SkillDef* PlayerSkill(std::string_view skillId) const;
+    const SkillDef* EnemySkill(std::string_view skillId) const;
+    void CollectGranted(bool hero, std::vector<const SkillDef*>& out) const;
+    void ApplyAlways(CombatantState& who, bool hero) const;
+    void RunTrigger(CombatantState& who, EffectTrigger trigger) const;
     void ArmShard(std::string& note);
     void EnterPhase(std::string& note);
-    [[nodiscard]] i32 PlayerPower(const SkillDef& skill) const;
-    [[nodiscard]] i32 BloodlustFor(const CombatantState& user, std::string_view statId) const;
+    [[nodiscard]] i32 RankedPower(const SkillDef& skill, i32 base) const;
+    [[nodiscard]] i32 MissingFor(const CombatantState& user, std::string_view statId) const;
     [[nodiscard]] i32 DefenseOf(const CombatantState& who) const;
+    [[nodiscard]] i32 SkillScore(const SkillDef& skill) const;
+    [[nodiscard]] bool DealsDamage(const SkillDef& skill) const;
+    HitLanded LandHit(CombatantState& attacker, CombatantState& defender, i32 raw);
     i32 NoteSkillUse(CombatantState& who, const std::string& skillId);
     void GrantFocus(CombatantState& who, i32 amount) const;
 
@@ -223,6 +239,8 @@ private:
     std::vector<SkillRank> m_PlayerRanks;
     i32 m_PowerPerRank = 0;
     StatBlock m_Gear;
+    StatBlock m_BaseStats;
+    bool m_HasBaseStats = false;
     BattleResult m_Result = BattleResult::Ongoing;
     bool m_Started = false;
     bool m_UpkeepDone = false;

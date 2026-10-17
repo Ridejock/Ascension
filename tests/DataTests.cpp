@@ -111,7 +111,9 @@ void TestSample()
     if (fighter == nullptr || berserker == nullptr || guardian == nullptr)
         return;
 
-    Check(!fighter->IsEvolution(), "fighter is the base class");
+    Check(!fighter->IsEvolution() && fighter->Starter, "fighter is the base class and a starter");
+    Check(berserker != nullptr && !berserker->Starter && guardian != nullptr && !guardian->Starter,
+          "evolutions are not starters");
     Check(fighter->Stats.Vitality == 18 && fighter->Stats.Strength == 8 &&
               fighter->Stats.Defense == 6 && fighter->Stats.Agility == 5 &&
               fighter->Stats.Focus == 4,
@@ -121,9 +123,11 @@ void TestSample()
               fighterSkills[1]->Id == "brace" && fighterSkills[2]->Id == "heavy_blow" &&
               fighterSkills[3]->Id == "second_wind",
           "fighter has strike, brace, heavy blow and second wind");
-    Check(fighterSkills[0]->Effect == SkillEffect::Damage && fighterSkills[0]->Power == 10,
+    const EffectDef* strikeHit = fighterSkills[0]->FindEffect("hit");
+    const EffectDef* braceWard = fighterSkills[1]->FindEffect("ward");
+    Check(strikeHit != nullptr && strikeHit->Op == EffectOp::Damage && strikeHit->Power == 10,
           "strike is a damage skill");
-    Check(fighterSkills[1]->Effect == SkillEffect::Guard && fighterSkills[1]->Power == 50,
+    Check(braceWard != nullptr && braceWard->Op == EffectOp::Guard && braceWard->Amount == 50,
           "brace guards half of the next hit");
     Check(data.Passives(*fighter).empty(), "fighter has no passive");
 
@@ -146,22 +150,38 @@ void TestSample()
               berserkerSkills[5]->Id == "cleave",
           "berserker keeps fighter's skills and adds rage and cleave");
     const auto berserkerPassives = data.Passives(*berserker);
+    const EffectDef* fury =
+        berserkerPassives.empty() ? nullptr : berserkerPassives[0]->FindEffect("fury");
     Check(berserkerPassives.size() == 1 && berserkerPassives[0]->Id == "bloodlust" &&
-              berserkerPassives[0]->Kind == SkillKind::Passive &&
-              berserkerPassives[0]->Passive == PassiveEffect::Bloodied &&
-              berserkerPassives[0]->Stat == "strength" && berserkerPassives[0]->Amount == 1 &&
-              berserkerPassives[0]->StepPercent == 10 && berserkerPassives[0]->Max == 6,
+              berserkerPassives[0]->Kind == SkillKind::Passive && fury != nullptr &&
+              fury->Op == EffectOp::StatPerMissingHp && fury->Stat == "strength" &&
+              fury->Amount == 1 && fury->Per == 10 && fury->Max == 6,
           "bloodlust is +1 strength per 10 percent missing, up to 6");
     const auto guardianPassives = data.Passives(*guardian);
+    const EffectDef* bulwarkDef =
+        guardianPassives.empty() ? nullptr : guardianPassives[0]->FindEffect("def");
+    const EffectDef* bulwarkFocus =
+        guardianPassives.empty() ? nullptr : guardianPassives[0]->FindEffect("focus");
+    const SkillDef* catalogBulwark = data.FindSkill("bulwark");
     Check(guardianPassives.size() == 1 && guardianPassives[0]->Id == "bulwark" &&
-              guardianPassives[0]->Passive == PassiveEffect::Bulwark &&
-              guardianPassives[0]->Stat == "defense" && guardianPassives[0]->Amount == 3 &&
-              guardianPassives[0]->FocusGain == 1,
+              bulwarkDef != nullptr && bulwarkDef->Op == EffectOp::Stat &&
+              bulwarkDef->Stat == "defense" && bulwarkDef->Amount == 3 && bulwarkFocus != nullptr &&
+              bulwarkFocus->Trigger == EffectTrigger::OnBlock &&
+              bulwarkFocus->Op == EffectOp::GrantFocus && bulwarkFocus->Amount == 1,
           "bulwark is +3 defense and 1 focus when a guard stops a hit");
+    Check(catalogBulwark != nullptr && guardianPassives.size() == 1 &&
+              catalogBulwark != guardianPassives[0] &&
+              catalogBulwark->FindEffect("focus") != nullptr &&
+              catalogBulwark->FindEffect("focus")->Amount == 1,
+          "a string grant is its own copy of the catalog skill");
     const SkillDef* riposte = data.FindSkill("riposte");
-    Check(riposte != nullptr && riposte->Effect == SkillEffect::Riposte && riposte->Power == 10 &&
-              riposte->FocusCost == 2 && riposte->Guard == 50 && riposte->Reflect == 50 &&
-              riposte->Scaling == "defense",
+    const EffectDef* riposteWard = riposte != nullptr ? riposte->FindEffect("ward") : nullptr;
+    const EffectDef* riposteBack = riposte != nullptr ? riposte->FindEffect("back") : nullptr;
+    Check(riposte != nullptr && riposte->FocusCost == 2 && riposteWard != nullptr &&
+              riposteWard->Op == EffectOp::Guard && riposteWard->Amount == 50 &&
+              riposteBack != nullptr && riposteBack->Op == EffectOp::Reflect &&
+              riposteBack->Percent == 50 && riposteBack->Power == 10 &&
+              riposteBack->Scaling == "defense",
           "riposte guards half the next hit and reflects half of what it stopped");
     Check(data.FindSkill("taunt") == nullptr, "taunt is gone");
 
@@ -185,7 +205,7 @@ void TestSample()
 
     const EnemyDef* wolf = data.FindEnemy("wolf");
     Check(wolf != nullptr && wolf->Level == 1 && wolf->Skills.size() == 1 &&
-              wolf->Skills[0] == "bite" && !wolf->Boss,
+              wolf->Skills[0].Id == "bite" && !wolf->Boss,
           "wolf is a level-1 enemy with bite");
     const auto enemies = data.GetEnemies();
     Check(enemies.size() == 6 && enemies[0].Id == "wolf" && enemies[1].Id == "bandit" &&
@@ -195,10 +215,11 @@ void TestSample()
     Check(enemies[2].Level == 4 && enemies[2].Experience == 14 && enemies[2].Gold == 4,
           "the tomb moth pays 14 XP and 4 gold");
     Check(enemies[3].Level == 5 && enemies[3].Experience == 22 && enemies[3].Gold == 8 &&
-              enemies[3].Skills.size() == 1 && enemies[3].Skills[0] == "aimed_shot",
+              enemies[3].Skills.size() == 1 && enemies[3].Skills[0].Id == "aimed_shot",
           "the bone archer pays 22 XP and 8 gold");
     const SkillDef* aimed = data.FindSkill("aimed_shot");
-    Check(aimed != nullptr && aimed->Power == 20 && aimed->Windup == 2,
+    const EffectDef* aimedHit = aimed != nullptr ? aimed->FindEffect("hit") : nullptr;
+    Check(aimed != nullptr && aimedHit != nullptr && aimedHit->Power == 20 && aimed->Windup == 2,
           "aimed shot is power 20 after a 2-turn wind-up");
     Check(enemies[5].Experience == 80 && enemies[5].Boss && enemies[5].Level == 8 &&
               enemies[5].Stats.Vitality == 60 && enemies[5].Stats.Strength == 14 &&
@@ -258,8 +279,9 @@ void TestSample()
     Check(data.FindItem("iron_sword") == nullptr && data.FindItem("warden_forged_plate") == nullptr,
           "the placeholder sword and the old plate name are gone");
     const SkillDef* cleave = data.FindSkill("cleave");
-    Check(cleave != nullptr && cleave->Target == SkillTarget::AllEnemies && cleave->Power == 8 &&
-              cleave->FocusCost == 4 && cleave->Scaling == "strength",
+    const EffectDef* cleaveHit = cleave != nullptr ? cleave->FindEffect("hit") : nullptr;
+    Check(cleave != nullptr && cleave->Target == SkillTarget::AllEnemies && cleaveHit != nullptr &&
+              cleaveHit->Power == 8 && cleave->FocusCost == 4 && cleaveHit->Scaling == "strength",
           "cleave is parsed as an active skill");
 }
 
@@ -429,9 +451,8 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "skills.json", "\"effect\": \"damage\"",
-                      "\"effect\": \"explode\"");
-        TestRejected(copy.Path, "skills.json", "effect", "an unknown skill effect is rejected");
+        ReplaceInFile(copy.Path / "skills.json", "\"op\": \"damage\"", "\"op\": \"explode\"");
+        TestRejected(copy.Path, "skills.json", "explode", "an unknown op is rejected");
     }
     {
         TempCopy copy;
@@ -473,8 +494,8 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "skills.json", "\"guard\": 50", "\"guard\": 101");
-        TestRejected(copy.Path, "skills.json", "guard", "a riposte guard cannot exceed 100");
+        ReplaceInFile(copy.Path / "skills.json", "\"amount\": 50", "\"amount\": 101");
+        TestRejected(copy.Path, "skills.json", "guard", "a guard percent cannot exceed 100");
     }
     {
         TempCopy copy;
@@ -484,9 +505,308 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "skills.json", "\"stunWindup\": \"stunned\"",
-                      "\"stunWindup\": \"missing\"");
+        ReplaceInFile(copy.Path / "skills.json", "\"status\": \"stunned\"",
+                      "\"status\": \"missing\"");
         TestRejected(copy.Path, "skills.json", "does not exist", "a skill status must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "\"trigger\": \"onUse\"",
+                      "\"trigger\": \"whenever\"");
+        TestRejected(copy.Path, "skills.json", "whenever", "an unknown trigger is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "\"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 }\n      ]\n    },",
+                      "\"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 }\n      ],\n      \"tune\": { \"focus\": { \"ammount\": 9 } "
+                      "}\n    },");
+        TestRejected(copy.Path, "skills.json", "ammount",
+                     "a misspelled tune field names the field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "classes.json", "\"passives\": [\"bulwark\"]",
+                      "\"passives\": [{ \"skill\": \"bulwark\", \"tune\": { \"focus\": { "
+                      "\"per\": 2 } } }]");
+        TestRejected(copy.Path, "classes.json", "per",
+                     "a tune cannot add a field the effect does not have");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": "
+                      "10, \"scaling\": \"strength\" }",
+                      "{ \"id\": \"hit\", \"recipe\": \"missing_blow\" }");
+        TestRejected(copy.Path, "skills.json", "missing_blow", "a missing effect recipe is named");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "classes.json", "\"starter\": true", "\"starter\": false");
+        TestRejected(copy.Path, "classes.json", "starter", "a roster needs a starter class");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "classes.json",
+                      "\"id\": \"berserker\",\n      \"name\": \"Berserker\",\n      "
+                      "\"description\": \"Trades caution for blood. Offered when a Fighter "
+                      "reaches level 5.\",\n      \"evolvesFrom\": \"fighter\"",
+                      "\"id\": \"berserker\",\n      \"name\": \"Berserker\",\n      "
+                      "\"description\": \"Trades caution for blood. Offered when a Fighter "
+                      "reaches level 5.\",\n      \"starter\": true,\n      \"evolvesFrom\": "
+                      "\"fighter\"");
+        TestRejected(copy.Path, "classes.json", "starter", "an evolution cannot be a starter");
+    }
+}
+
+const EffectDef* EffectOf(const SkillDef* skill, const char* effectId)
+{
+    return skill != nullptr ? skill->FindEffect(effectId) : nullptr;
+}
+
+void TestLayers()
+{
+    TempCopy copy;
+    ReplaceInFile(
+        copy.Path / "skills.json",
+        "        { \"id\": \"shell\", \"trigger\": \"onUse\", \"op\": \"harden\", "
+        "\"amount\": 6, \"turns\": 2 }\n      ]\n    }\n  ]\n}",
+        "        { \"id\": \"shell\", \"trigger\": \"onUse\", \"op\": \"harden\", "
+        "\"amount\": 6, \"turns\": 2 }\n      ]\n    },\n    {\n      \"id\": \"oath\",\n "
+        "     \"name\": \"Oath\",\n      \"description\": \"A recipe tuned twice.\",\n   "
+        "   \"kind\": \"passive\",\n      \"effects\": [\n        { \"id\": \"def\", "
+        "\"recipe\": \"stat\" },\n        { \"id\": \"focus\", \"recipe\": "
+        "\"grant_focus\" }\n      ],\n      \"tune\": {\n        \"def\": { \"stat\": "
+        "\"defense\", \"amount\": 4 },\n        \"focus\": { \"amount\": 1 }\n      "
+        "}\n    }\n  ]\n}");
+    ReplaceInFile(
+        copy.Path / "classes.json", "      \"passives\": [\"bulwark\"]\n    }\n  ]\n}",
+        "      \"passives\": [\"bulwark\"]\n    },\n    {\n      \"id\": \"paladin\",\n   "
+        "   \"name\": \"Paladin\",\n      \"description\": \"Keeps Bulwark, tuned.\",\n   "
+        "   \"evolvesFrom\": \"fighter\",\n      \"evolveLevel\": 5,\n      \"bonus\": "
+        "{},\n      \"growth\": {},\n      \"skills\": [\"shield_wall\"],\n      "
+        "\"passives\": [\n        { \"skill\": \"bulwark\", \"tune\": { \"focus\": { "
+        "\"amount\": 2 } } },\n        { \"skill\": \"oath\", \"tune\": { \"focus\": { "
+        "\"amount\": 5 } } }\n      ]\n    }\n  ]\n}");
+    ReplaceInFile(copy.Path / "items.json",
+                  "\"id\": \"wolfhide_charm\",\n      \"name\": \"Wolfhide Charm\",\n      "
+                  "\"description\": \"A twist of wolfhide. The step comes easier.\",\n      "
+                  "\"slot\": \"accessory\",\n      \"bonus\": { \"agility\": 2 },\n      "
+                  "\"value\": 35",
+                  "\"id\": \"wolfhide_charm\",\n      \"name\": \"Wolfhide Charm\",\n      "
+                  "\"description\": \"A twist of wolfhide. The step comes easier.\",\n      "
+                  "\"slot\": \"accessory\",\n      \"bonus\": { \"agility\": 2 },\n      "
+                  "\"grants\": [{ \"skill\": \"bulwark\", \"tune\": { \"focus\": { \"amount\": 4 } "
+                  "} }],\n      \"value\": 35");
+    ReplaceInFile(copy.Path / "enemies.json", "\"skills\": [\"bite\"]",
+                  "\"skills\": [{ \"skill\": \"bite\", \"tune\": { \"hit\": { \"power\": 9 } } }]");
+
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "layered grants load");
+    if (!error.Message.empty())
+        std::printf("    message was: %s\n", error.Message.c_str());
+
+    const SkillDef* catalogBulwark = data.FindSkill("bulwark");
+    const SkillDef* catalogOath = data.FindSkill("oath");
+    const ClassDef* guardian = data.FindClass("guardian");
+    const ClassDef* paladin = data.FindClass("paladin");
+    const EffectDef* catalogFocus = EffectOf(catalogBulwark, "focus");
+    const EffectDef* oathDef = EffectOf(catalogOath, "def");
+    const EffectDef* oathFocus = EffectOf(catalogOath, "focus");
+    Check(catalogFocus != nullptr && catalogFocus->Amount == 1,
+          "the catalog bulwark still grants 1 focus");
+    Check(oathDef != nullptr && oathDef->Stat == "defense" && oathDef->Amount == 4 &&
+              oathFocus != nullptr && oathFocus->Amount == 1,
+          "the skill tune replaces the recipe's stat and amount");
+
+    const SkillDef* guardianBulwark = nullptr;
+    const SkillDef* paladinBulwark = nullptr;
+    const SkillDef* paladinOath = nullptr;
+    if (guardian != nullptr) {
+        for (const SkillDef* passive : data.Passives(*guardian)) {
+            if (passive->Id == "bulwark")
+                guardianBulwark = passive;
+        }
+    }
+    if (paladin != nullptr) {
+        for (const SkillDef* passive : data.Passives(*paladin)) {
+            if (passive->Id == "bulwark")
+                paladinBulwark = passive;
+            if (passive->Id == "oath")
+                paladinOath = passive;
+        }
+    }
+    const EffectDef* guardianFocus = EffectOf(guardianBulwark, "focus");
+    const EffectDef* paladinFocus = EffectOf(paladinBulwark, "focus");
+    const EffectDef* paladinDef = EffectOf(paladinBulwark, "def");
+    const EffectDef* grantedOathFocus = EffectOf(paladinOath, "focus");
+    const EffectDef* grantedOathDef = EffectOf(paladinOath, "def");
+    Check(guardianBulwark != nullptr && paladinBulwark != nullptr &&
+              guardianBulwark != paladinBulwark && guardianBulwark != catalogBulwark &&
+              paladinBulwark != catalogBulwark && guardianFocus != nullptr &&
+              guardianFocus->Amount == 1 && paladinFocus != nullptr && paladinFocus->Amount == 2 &&
+              paladinDef != nullptr && paladinDef->Amount == 3,
+          "each class grant is its own copy, and the tune changes only focus");
+    Check(paladinOath != nullptr && paladinOath != catalogOath && grantedOathFocus != nullptr &&
+              grantedOathFocus->Amount == 5 && grantedOathDef != nullptr &&
+              grantedOathDef->Amount == 4 && grantedOathDef->Stat == "defense",
+          "a grant tune overrides the skill tune and leaves the other effect alone");
+
+    const ItemDef* charm = data.FindItem("wolfhide_charm");
+    const EffectDef* charmFocus = charm != nullptr && charm->Grants.size() == 1
+                                      ? EffectOf(&charm->Grants[0].Resolved, "focus")
+                                      : nullptr;
+    Check(charm != nullptr && charm->Grants.size() == 1 &&
+              &charm->Grants[0].Resolved != catalogBulwark && charmFocus != nullptr &&
+              charmFocus->Amount == 4 && catalogFocus != nullptr && catalogFocus->Amount == 1,
+          "an item grant resolves its own tuned copy and leaves the catalog alone");
+
+    const EnemyDef* wolf = data.FindEnemy("wolf");
+    const SkillDef* catalogBite = data.FindSkill("bite");
+    const EffectDef* wolfHit = wolf != nullptr && wolf->Skills.size() == 1
+                                   ? EffectOf(&wolf->Skills[0].Resolved, "hit")
+                                   : nullptr;
+    const EffectDef* catalogHit = EffectOf(catalogBite, "hit");
+    Check(wolfHit != nullptr && wolfHit->Power == 9 && catalogHit != nullptr &&
+              catalogHit->Power == 6 && &wolf->Skills[0].Resolved != catalogBite,
+          "an enemy grant tunes power on its own copy");
+
+    ReplaceInFile(copy.Path / "skills.json", "\"op\": \"damage\"", "\"op\": \"explode\"");
+    Check(data.CheckForChanges(&error) == 0, "a bad op waits a check");
+    Check(data.CheckForChanges(&error) == 0, "a bad op does not replace the data");
+    CheckHas(data.GetLastError(), "skills.json", "the reload error names the file");
+    CheckHas(data.GetLastError(), "explode", "the reload error names the op");
+    const EffectDef* still = EffectOf(data.FindSkill("strike"), "hit");
+    Check(still != nullptr && still->Power == 10, "the previous strike power stays");
+}
+
+void ExpectUnused(const fs::path& dir, const char* file, const char* skill, const char* effect,
+                  const char* field, const char* what)
+{
+    Database data(dir);
+    DataError error;
+    Check(!data.Load(&error), what);
+    Check(!data.IsLoaded(), "a rejected directory is not loaded");
+    CheckHas(error.Message, file, "the error names the file");
+    CheckHas(error.Message, skill, "the error names the skill");
+    CheckHas(error.Message, effect, "the error names the effect");
+    CheckHas(error.Message, field, "the error names the unused field");
+}
+
+void TestUnusedFields()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, "
+            "\"scaling\": \"vitality\" },\n        { \"id\": \"mark\", \"trigger\": "
+            "\"onUse\", \"op\": \"applyStatus\", \"status\": \"bleed\", \"every\": 2 }");
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 }",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 },\n        { \"id\": \"cut\", \"trigger\": \"onDamaged\", "
+                      "\"op\": \"applyStatus\", \"status\": \"bleed\" },\n        { \"id\": "
+                      "\"rest\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", \"power\": 4 },\n "
+                      "       { \"id\": \"pulse\", \"trigger\": \"onTurnStart\", \"op\": "
+                      "\"grantFocus\", \"amount\": 1 },\n        { \"id\": \"sting\", \"trigger\": "
+                      "\"onDamaged\", \"op\": \"grantFocus\", \"amount\": 2 }");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "fields a trigger and op actually read still load");
+        const EffectDef* mend = EffectOf(data.FindSkill("second_wind"), "mend");
+        const EffectDef* mark = EffectOf(data.FindSkill("second_wind"), "mark");
+        const EffectDef* cut = EffectOf(data.FindSkill("bulwark"), "cut");
+        const EffectDef* rest = EffectOf(data.FindSkill("bulwark"), "rest");
+        const EffectDef* pulse = EffectOf(data.FindSkill("bulwark"), "pulse");
+        const EffectDef* sting = EffectOf(data.FindSkill("bulwark"), "sting");
+        Check(mend != nullptr && mend->Scaling == "vitality" && mark != nullptr &&
+                  mark->Every == 2 && cut != nullptr && cut->Status == "bleed" &&
+                  !cut->Every.has_value() && rest != nullptr && rest->Power == 4 &&
+                  !rest->Scaling.has_value() && pulse != nullptr && pulse->Amount == 1 &&
+                  sting != nullptr && sting->Amount == 2,
+              "onUse keeps scaling and every; onTurnStart heal and onDamaged status do not");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", "
+            "\"power\": 8, \"scaling\": \"vitality\" }");
+        ExpectUnused(copy.Path, "skills.json", "second_wind", "mend", "scaling",
+                     "onTurnStart heal does not use scaling");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onHit\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onDamaged\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }");
+        ExpectUnused(copy.Path, "skills.json", "slash", "bleed", "every",
+                     "onDamaged status does not use every");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"stun\", \"trigger\": \"onHit\", \"op\": \"stunIfWindingUp\", "
+                      "\"status\": \"stunned\" }",
+                      "{ \"id\": \"stun\", \"trigger\": \"onHit\", \"op\": \"stunIfWindingUp\", "
+                      "\"status\": \"stunned\", \"every\": 2 }");
+        ExpectUnused(copy.Path, "skills.json", "heavy_blow", "stun", "every",
+                     "stunIfWindingUp does not use every");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1 }",
+                      "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
+                      "\"amount\": 1, \"turns\": 2 }");
+        ExpectUnused(copy.Path, "skills.json", "bulwark", "focus", "turns",
+                     "grantFocus does not use turns");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "effects.json",
+                      "\"id\": \"heal\",\n      \"trigger\": \"onUse\",\n      \"op\": \"heal\",\n "
+                      "     \"power\": 0",
+                      "\"id\": \"heal\",\n      \"trigger\": \"onTurnStart\",\n      \"op\": "
+                      "\"heal\",\n      \"power\": 0,\n      \"scaling\": \"strength\"");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "a recipe rejects a field its trigger does not read");
+        CheckHas(error.Message, "effects.json", "the recipe error names the file");
+        CheckHas(error.Message, "heal", "the recipe error names the effect");
+        CheckHas(error.Message, "scaling", "the recipe error names the field");
+    }
+    {
+        TempCopy copy;
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "the sample loads before a bad field edit");
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onHit\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onDamaged\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }");
+        Check(data.CheckForChanges(&error) == 0, "an unused field waits a check");
+        Check(data.CheckForChanges(&error) == 0, "an unused field does not replace the data");
+        CheckHas(data.GetLastError(), "skills.json", "the reload error names the file");
+        CheckHas(data.GetLastError(), "slash", "the reload error names the skill");
+        CheckHas(data.GetLastError(), "bleed", "the reload error names the effect");
+        CheckHas(data.GetLastError(), "every", "the reload error names the field");
+        const EffectDef* strike = EffectOf(data.FindSkill("strike"), "hit");
+        const EffectDef* bleed = EffectOf(data.FindSkill("slash"), "bleed");
+        Check(data.GetRevision() == 1 && strike != nullptr && strike->Power == 10 &&
+                  bleed != nullptr && bleed->Trigger == EffectTrigger::OnHit && bleed->Every == 3,
+              "the previous skills stay after the rejected reload");
     }
 }
 
@@ -497,6 +817,8 @@ int main()
     TestSample();
     TestHotReload();
     TestValidation();
+    TestLayers();
+    TestUnusedFields();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

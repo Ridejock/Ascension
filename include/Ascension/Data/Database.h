@@ -17,12 +17,10 @@ struct DataError {
     std::string Message;
 };
 
-// The JSON files in a data directory (stats, skills, statuses, classes, enemies, items, shop,
-// combat, progress), checked against each other. Load once, then call CheckForChanges from the
-// frame loop:
-// a file that
-// changed, and then stayed unchanged for one more check, is read again. A failed read keeps the
-// previous definitions and sets GetLastError().
+// The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies, items,
+// shop, combat, progress), checked against each other. Load once, then call CheckForChanges from
+// the frame loop: a file that changed, and then stayed unchanged for one more check, is read
+// again. A failed read keeps the previous definitions and sets GetLastError().
 //
 // Pointers returned by Find* and by ActiveSkills / Passives point into this database. Look them
 // up again after a reload; do not keep them across a frame.
@@ -68,8 +66,12 @@ public:
     // Evolutions whose EvolvesFrom is `baseId`, in file order.
     [[nodiscard]] std::vector<const ClassDef*> EvolutionsOf(std::string_view baseId) const;
 
-    // Active skills this class has, parent first, then the ones it adds. Empty ids are skipped
-    // (a database that loaded has none).
+    // Base classes marked starter, in file order. Reset offers this list, not a hard-coded class.
+    [[nodiscard]] std::vector<const ClassDef*> Starters() const;
+
+    // Active skills this class has, parent first, then the ones it adds. Each pointer is that
+    // grant's own resolved copy (the catalog skill, then the grant's tune). FindSkill returns
+    // the catalog entry, which has no grant tune. Empty when the class grants none.
     [[nodiscard]] std::vector<const SkillDef*> ActiveSkills(const ClassDef& klass) const;
     [[nodiscard]] std::vector<const SkillDef*> Passives(const ClassDef& klass) const;
 

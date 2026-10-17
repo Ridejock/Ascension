@@ -122,10 +122,10 @@ void TestFormula()
     Check(GuardedDamage(16, 50) == 8, "a 50 percent guard halves the hit");
     Check(GuardedDamage(16, 100) == 0, "a full guard can reduce a hit to zero");
     Check(HealAmount(8, 0, rules) == 8, "a heal with no scaling is its power");
-    Check(BloodlustBonus(1, 10, 6, 72, 72) == 0, "bloodlust is quiet at full health");
-    Check(BloodlustBonus(1, 10, 6, 90, 100) == 1, "10 percent missing is +1 strength");
-    Check(BloodlustBonus(1, 10, 6, 36, 72) == 5, "half health is five steps");
-    Check(BloodlustBonus(1, 10, 6, 0, 100) == 6, "bloodlust stops at +6");
+    Check(MissingHpBonus(1, 10, 6, 72, 72) == 0, "bloodlust is quiet at full health");
+    Check(MissingHpBonus(1, 10, 6, 90, 100) == 1, "10 percent missing is +1 strength");
+    Check(MissingHpBonus(1, 10, 6, 36, 72) == 5, "half health is five steps");
+    Check(MissingHpBonus(1, 10, 6, 0, 100) == 6, "bloodlust stops at +6");
     Check(ReflectedDamage(10, 50, 28) == 33, "riposte returns half the blocked damage plus power");
     Check(ScalePercent(16, 125) == 20, "exposed adds 25 percent to the hit");
     Check(ScalePercent(16, 130) == 20 && ScalePercent(20, 115) == 23,
@@ -237,11 +237,11 @@ void TestDefeatAndSkip()
     TempCopy copy;
     ReplaceInFile(copy.Path / "skills.json",
                   "\"id\": \"bite\",\n      \"name\": \"Bite\",\n      \"description\": \"A quick "
-                  "snap.\",\n      \"kind\": \"active\",\n      \"effect\": \"damage\",\n      "
-                  "\"target\": \"enemy\",\n      \"power\": 6,\n      \"focusCost\": 0,",
+                  "snap.\",\n      \"kind\": \"active\",\n      \"target\": \"enemy\",\n      "
+                  "\"focusCost\": 0,",
                   "\"id\": \"bite\",\n      \"name\": \"Bite\",\n      \"description\": \"A quick "
-                  "snap.\",\n      \"kind\": \"active\",\n      \"effect\": \"damage\",\n      "
-                  "\"target\": \"enemy\",\n      \"power\": 6,\n      \"focusCost\": 4,");
+                  "snap.\",\n      \"kind\": \"active\",\n      \"target\": \"enemy\",\n      "
+                  "\"focusCost\": 4,");
     Database priced(copy.Path);
     Check(priced.Load(), "the priced bite loads");
     Battle broke = StartSample(
@@ -369,8 +369,8 @@ void TestBulwarkReloads()
     Check(guard.EnemyAct().Damage == 8, "maul into 18 defense deals 8");
 
     ReplaceInFile(copy.Path / "skills.json",
-                  "\"effect\": \"bulwark\",\n      \"stat\": \"defense\",\n      \"amount\": 3,",
-                  "\"effect\": \"bulwark\",\n      \"stat\": \"defense\",\n      \"amount\": 0,");
+                  "\"op\": \"stat\", \"stat\": \"defense\", \"amount\": 3",
+                  "\"op\": \"stat\", \"stat\": \"defense\", \"amount\": 0");
     DataError reported;
     Check(data.CheckForChanges(&reported) == 0, "the bulwark edit waits");
     Check(data.CheckForChanges(&reported) == 1, "the bulwark edit reloads");
@@ -663,6 +663,44 @@ void TestGearAndConsumables()
           "a reloaded potion heals the new amount");
 }
 
+void TestGrantCopies()
+{
+    TempCopy copy;
+    ReplaceInFile(
+        copy.Path / "classes.json", "      \"passives\": [\"bulwark\"]\n    }\n  ]\n}",
+        "      \"passives\": [\"bulwark\"]\n    },\n    {\n      \"id\": \"paladin\",\n   "
+        "   \"name\": \"Paladin\",\n      \"description\": \"Keeps Bulwark, tuned.\",\n   "
+        "   \"evolvesFrom\": \"fighter\",\n      \"evolveLevel\": 5,\n      \"bonus\": "
+        "{},\n      \"growth\": {},\n      \"skills\": [\"shield_wall\"],\n      "
+        "\"passives\": [\n        { \"skill\": \"bulwark\", \"tune\": { \"focus\": { "
+        "\"amount\": 2 } } }\n      ]\n    }\n  ]\n}");
+    ReplaceInFile(copy.Path / "enemies.json", "\"skills\": [\"bite\"]",
+                  "\"skills\": [{ \"skill\": \"bite\", \"tune\": { \"hit\": { \"power\": 9 } } }]");
+    ReplaceInFile(copy.Path / "items.json", "\"bonus\": { \"agility\": 2 },\n      \"value\": 35",
+                  "\"bonus\": { \"agility\": 2 },\n      \"grants\": [{ \"skill\": \"bulwark\", "
+                  "\"tune\": { \"focus\": { \"amount\": 4 } } }],\n      \"value\": 35");
+    Database data(copy.Path);
+    Check(data.Load(), "the tuned roster loads");
+
+    Battle paladin(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    std::string error;
+    Check(paladin.Start("paladin", 5, "wolf", error), "the paladin meets the wolf");
+    Check(paladin.Player().Stats.Defense == 13, "the shared bulwark still adds 3 defense");
+    Check(paladin.UseSkill("brace").Accepted, "the paladin braces");
+    Check(paladin.EnemyAct().Damage == 0 && paladin.Player().Focus == 12,
+          "the paladin's grant returns 2 focus when a guard stops a hit");
+
+    Battle guardian(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    Check(guardian.Start("guardian", 5, "wolf", error), "the guardian meets the same wolf");
+    Check(guardian.UseSkill("brace").Accepted && guardian.EnemyAct().Damage == 0 &&
+              guardian.Player().Focus == 11,
+          "the guardian's own copy of bulwark still returns 1 focus");
+
+    Battle fighter = StartSample(data, Sides({CombatantSide::Enemy}), "wolf");
+    Check(fighter.Player().Stats.Defense == 6 && fighter.EnemyAct().Damage == 8,
+          "the wolf's tuned bite deals 8, and an item grant does not change the fighter");
+}
+
 } // namespace
 
 int main()
@@ -682,6 +720,7 @@ int main()
     TestPhaseShard();
     TestGearAndConsumables();
     TestBossPlans();
+    TestGrantCopies();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

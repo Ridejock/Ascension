@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,44 +48,72 @@ struct StatDef {
 
 enum class SkillKind : u8 { Active, Passive };
 
-// Who an active skill lands on. Passives leave this at Enemy; it is not used.
+// Who an active skill lands on. Passives leave this at Enemy; it is not read.
 enum class SkillTarget : u8 { Self, Enemy, AllEnemies };
 
-// What an active skill does. The numbers come from the skill; the damage formula that combines
-// them with defense comes from CombatRules. Riposte guards the next hit and reflects part of
-// what that guard stopped. Harden adds Power defense for Duration turns.
-enum class SkillEffect : u8 { Damage, Guard, Heal, Empower, Riposte, Harden };
+// When an effect runs. Battle dispatches these. It does not look at a skill id.
+// always is folded into the unit (a flat stat, or a missing-health bonus on a blow).
+// onUse runs when the skill is spent. onHit runs after that skill's damage lands.
+// onBlock runs when a guard reduces a hit against the unit. onTurnStart runs when the
+// unit's turn is actually taken. onDamaged runs when a hit lowers the unit's health.
+enum class EffectTrigger : u8 { Always, OnUse, OnHit, OnBlock, OnTurnStart, OnDamaged };
 
-// What a passive does. Stat adds Amount to Stat. Bloodied adds Amount to Stat for each
-// StepPercent of missing health, capped at Max. Bulwark adds Amount to Stat and grants
-// FocusGain focus whenever a guard or block reduces an incoming hit. Battle reads these; it
-// does not special-case a passive id.
-enum class PassiveEffect : u8 { Stat, Bloodied, Bulwark };
+// What an effect does. Which fields are set comes from the recipe. A tune cannot add a field
+// the recipe left out, and it cannot change the op.
+enum class EffectOp : u8 {
+    Damage,
+    Heal,
+    Guard,
+    Reflect,
+    Empower,
+    Harden,
+    Stat,
+    StatPerMissingHp,
+    GrantFocus,
+    ApplyStatus,
+    StunIfWindingUp,
+};
 
+// One effect. An engaged optional is a field the recipe set, which a later tune may replace.
+// An empty optional is not on this effect. Power on damage, heal, and reflect is what a rank
+// adds to. A guard's Amount is a percent and is not ranked.
+struct EffectDef {
+    std::string Id;
+    EffectTrigger Trigger = EffectTrigger::OnUse;
+    EffectOp Op = EffectOp::Damage;
+    std::optional<i32> Power;
+    std::optional<i32> Amount;
+    std::optional<i32> Percent;
+    std::optional<i32> Per;
+    std::optional<i32> Max;
+    std::optional<i32> Turns;
+    std::optional<i32> Every;
+    std::optional<std::string> Stat;
+    std::optional<std::string> Scaling;
+    std::optional<std::string> Status;
+};
+
+// A catalog skill, after its own tune and before any grant tune. Effects keep the ids a tune
+// targets. Name, target, focus cost, and windup stay here.
 struct SkillDef {
     std::string Id;
     std::string Name;
     std::string Description;
     SkillKind Kind = SkillKind::Active;
-    SkillEffect Effect = SkillEffect::Damage;
     SkillTarget Target = SkillTarget::Enemy;
-    PassiveEffect Passive = PassiveEffect::Stat;
-    i32 Power = 0;          // damage and heal added to the scaling stat; a guard percent (0-100);
-                            // riposte's flat contribution to the reflected blow; harden's defense
-    i32 FocusCost = 0;      // active
-    i32 Guard = 0;          // riposte: percent of the next hit that is stopped (0-100)
-    i32 Reflect = 0;        // riposte: percent of the stopped damage sent back (0-100)
-    i32 Windup = 0;         // damage: telegraph turns before the hit. 0 hits now
-    i32 Duration = 0;       // harden: turns the defense bonus lasts
-    i32 StatusEvery = 0;    // with Status: apply on every Nth use. 0 or 1 applies every use
-    std::string Status;     // status id applied when the skill is used
-    std::string StunWindup; // status id applied when the target is winding up an attack
-    std::string Scaling;    // active: a stat id the power scales with, or empty
-    std::string Stat;       // passive: the stat it changes
-    i32 Amount = 0;         // stat passive, and each bloodied or bulwark step
-    i32 StepPercent = 0;    // bloodied: missing-health percent per step
-    i32 Max = 0;            // bloodied: the bonus stops here
-    i32 FocusGain = 0;      // bulwark: focus gained when a guard reduces a hit
+    i32 FocusCost = 0;
+    i32 Windup = 0; // active damage: telegraph turns before the hit. 0 hits now
+    std::vector<EffectDef> Effects;
+
+    [[nodiscard]] const EffectDef* FindEffect(std::string_view id) const;
+};
+
+// One class, enemy, or item grant, resolved to its own copy at load time. Id is the catalog
+// skill id, which is also the key skill ranks use. Resolved is the recipe, then the skill tune,
+// then this grant's tune. Battle reads the copy.
+struct SkillGrant {
+    std::string Id;
+    SkillDef Resolved;
 };
 
 // A named condition from statuses.json. Zero fields are unused. Stacks up to MaxStacks, and
@@ -126,7 +155,7 @@ struct CombatRules {
 // the first entry is 0. Rank starts at 1 and stops at MaxSkillRank. UsesPerRank is either one
 // integer (a flat step: rank = 1 + uses / step) or a longer strictly increasing list of the
 // total uses required to reach rank 2, rank 3, and so on. Each rank above 1 adds PowerPerRank
-// to that skill's power (damage, healing, and a riposte's flat reflect, not a guard's percent).
+// to that skill's power (damage, healing, and a reflect's flat power, not a guard's percent).
 struct ProgressRules {
     std::vector<i32> XpToReach;
     std::vector<i32> UsesPerRank;
@@ -192,10 +221,12 @@ struct ProgressRules {
     return rank;
 }
 
-// A class. A base class (EvolvesFrom empty) has level-1 Stats and per-level Growth. An evolution
-// names the base it comes from and the level it is offered at; Bonus is added on top of the
-// parent's stats at that level, and Growth applies to levels after that. Skills and Passives are
-// what this class itself grants: an evolution's lists are the skills and passives it adds.
+// A class. A base class (EvolvesFrom empty) has level-1 Stats and per-level Growth. Stats is
+// that class's attribute grant. An evolution names the base it comes from and the level it is
+// offered at; Bonus is the attribute grant it adds, and Growth applies to levels after that.
+// Skills and Passives are what this class itself grants. Starter is set on a base class the
+// player may return to when a build is reset. The list is read from data, so another starter
+// is a JSON flag, not a code change.
 struct ClassDef {
     std::string Id;
     std::string Name;
@@ -203,10 +234,11 @@ struct ClassDef {
     StatBlock Stats;
     StatBlock Bonus;
     StatBlock Growth;
-    std::vector<std::string> Skills;
-    std::vector<std::string> Passives;
+    std::vector<SkillGrant> Skills;
+    std::vector<SkillGrant> Passives;
     std::string EvolvesFrom;
     i32 EvolveLevel = 0;
+    bool Starter = false;
 
     [[nodiscard]] bool IsEvolution() const { return !EvolvesFrom.empty(); }
 };
@@ -217,7 +249,7 @@ struct EnemyDef {
     std::string Description;
     i32 Level = 1;
     StatBlock Stats;
-    std::vector<std::string> Skills; // active skill ids
+    std::vector<SkillGrant> Skills; // active grants; each is its own copy
     i32 Experience = 0;
     i32 Gold = 0;
     bool Boss = false;                // the roster has one boss, last in the sample
@@ -240,6 +272,9 @@ struct ItemDef {
     bool TwoHanded = false; // weapons only; fills the offhand as well
     i32 Heal = 0;           // consumable: flat health, not the skill formula
     i32 Focus = 0;          // consumable: flat focus, capped at the fighter's pool
+    // Resolved grants from the optional "grants" list. Empty on the sample gear. Combat does
+    // not apply these yet; a later slice can hand the copy to the same trigger code a class uses.
+    std::vector<SkillGrant> Grants;
 };
 
 // Old Pell's Provisions, and the bag it sells into. BagSlots is how many stacks the hero can
@@ -268,7 +303,8 @@ struct ShopDef {
 
 [[nodiscard]] const char* ToString(SkillKind kind);
 [[nodiscard]] const char* ToString(SkillTarget target);
-[[nodiscard]] const char* ToString(SkillEffect effect);
+[[nodiscard]] const char* ToString(EffectTrigger trigger);
+[[nodiscard]] const char* ToString(EffectOp op);
 [[nodiscard]] const char* ToString(GearSlot slot);
 
 // --- StatBlock (inline: five fields, no reason to hide them in a .cpp) ---
@@ -291,6 +327,11 @@ inline const i32* FindStatValue(const StatBlock& block, std::string_view id)
 inline i32* FindStatValue(StatBlock& block, std::string_view id)
 {
     return const_cast<i32*>(FindStatValue(static_cast<const StatBlock&>(block), id));
+}
+
+[[nodiscard]] inline i32 StatTotal(const StatBlock& block)
+{
+    return block.Vitality + block.Strength + block.Defense + block.Agility + block.Focus;
 }
 
 inline i32 StatBlock::Get(std::string_view id) const
@@ -338,28 +379,53 @@ inline const char* ToString(SkillTarget target)
     return "enemy";
 }
 
-inline const char* ToString(SkillEffect effect)
+inline const char* ToString(EffectTrigger trigger)
 {
-    if (effect == SkillEffect::Guard)
-        return "guard";
-    if (effect == SkillEffect::Heal)
+    if (trigger == EffectTrigger::Always)
+        return "always";
+    if (trigger == EffectTrigger::OnUse)
+        return "onUse";
+    if (trigger == EffectTrigger::OnHit)
+        return "onHit";
+    if (trigger == EffectTrigger::OnBlock)
+        return "onBlock";
+    if (trigger == EffectTrigger::OnTurnStart)
+        return "onTurnStart";
+    return "onDamaged";
+}
+
+inline const char* ToString(EffectOp op)
+{
+    if (op == EffectOp::Heal)
         return "heal";
-    if (effect == SkillEffect::Empower)
+    if (op == EffectOp::Guard)
+        return "guard";
+    if (op == EffectOp::Reflect)
+        return "reflect";
+    if (op == EffectOp::Empower)
         return "empower";
-    if (effect == SkillEffect::Riposte)
-        return "riposte";
-    if (effect == SkillEffect::Harden)
+    if (op == EffectOp::Harden)
         return "harden";
+    if (op == EffectOp::Stat)
+        return "stat";
+    if (op == EffectOp::StatPerMissingHp)
+        return "statPerMissingHp";
+    if (op == EffectOp::GrantFocus)
+        return "grantFocus";
+    if (op == EffectOp::ApplyStatus)
+        return "applyStatus";
+    if (op == EffectOp::StunIfWindingUp)
+        return "stunIfWindingUp";
     return "damage";
 }
 
-inline const char* ToString(PassiveEffect effect)
+inline const EffectDef* SkillDef::FindEffect(std::string_view id) const
 {
-    if (effect == PassiveEffect::Bloodied)
-        return "bloodied";
-    if (effect == PassiveEffect::Bulwark)
-        return "bulwark";
-    return "stat";
+    for (const EffectDef& effect : Effects) {
+        if (effect.Id == id)
+            return &effect;
+    }
+    return nullptr;
 }
 
 inline const char* ToString(GearSlot slot)
