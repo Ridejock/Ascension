@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -8,6 +9,7 @@
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Emerald/Core/Application.h"
+#include "Playtest.h"
 
 namespace Ascension {
 
@@ -18,7 +20,7 @@ namespace Ascension {
 // are extra turn actions. C opens every stack; number keys still cover the ones that fit.
 class AscensionApp : public Emerald::Application {
 public:
-    explicit AscensionApp(const Emerald::ApplicationSpec& spec);
+    AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options);
 
 protected:
     void OnStart() override;
@@ -39,6 +41,17 @@ private:
     void ClampCamp();
     void HandleCamp(SDL_Scancode scancode);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // --choose, once the evolution choice is open and a fight is not underway.
+    // False when that pick failed and the run is stopping.
+    bool TakeAutoPath();
+    // One scripted key per frame. The press goes through OnEvent, so the window
+    // does not need focus. The run ends after the last key unless --frames is longer.
+    void PlayScriptedKey();
+
+    // Declared before m_Data: the database is opened on this command's folder.
+    PlaytestOptions m_Play;
+    std::ofstream m_Transcript;
+    usize m_KeyCursor = 0;
 
     Database m_Data;
     Hero m_Hero;

@@ -94,6 +94,8 @@ add_executable(Ascension
     src/App/Main.cpp
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
+    src/App/Playtest.cpp
+    src/App/Playtest.h
 )
 target_link_libraries(Ascension PRIVATE AscensionCombat AscensionProgress)
 # A dev build watches the source data/ so saving a JSON file updates the running
@@ -117,7 +119,8 @@ add_dependencies(Ascension AscensionContent)
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT Ascension)
 
 # ---------------------------------------------------------------------------
-# Tests (ctest): the JSON loaders, combat, and the XP / evolution career. No window or GPU.
+# Tests (ctest): the JSON loaders, combat, the XP / evolution career, and playtest
+# flags. No window or GPU.
 # ---------------------------------------------------------------------------
 option(ASCENSION_BUILD_TESTS "Build the Ascension data tests" ON)
 if(ASCENSION_BUILD_TESTS)
@@ -149,6 +152,19 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionInventoryTests)
     add_test(NAME Inventory COMMAND AscensionInventoryTests)
+
+    add_executable(AscensionPlaytestTests
+        tests/PlaytestTests.cpp
+        tests/Check.h
+        src/App/Playtest.cpp
+        src/App/Playtest.h
+    )
+    target_include_directories(AscensionPlaytestTests PRIVATE src/App)
+    target_link_libraries(AscensionPlaytestTests PRIVATE AscensionProgress)
+    target_compile_definitions(AscensionPlaytestTests PRIVATE
+        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionPlaytestTests)
+    add_test(NAME Playtest COMMAND AscensionPlaytestTests)
 endif()
 
 # ---------------------------------------------------------------------------

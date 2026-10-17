@@ -50,7 +50,7 @@ cmake --build --preset debug
 ./build/debug/bin/Ascension
 ```
 
-Release is the same preset name used for the zip (`cmake --preset release`, then `cmake --build --preset release`). Escape closes the window. `--frames N` quits after N frames (an Emerald option).
+Release is the same preset name used for the zip (`cmake --preset release`, then `cmake --build --preset release`). Escape closes the window. `--frames N` quits after N frames (an Emerald option). The playtest flags are in [Playtest](#playtest).
 
 ## Tests
 
@@ -58,7 +58,7 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ctest --test-dir build/debug --output-on-failure
 ```
 
-`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and Pell's shop. None of them open a window.
+`AscensionDataTests` loads `data/`, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against the sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and Pell's shop. `AscensionPlaytestTests` checks the playtest flags, unknown ids, and a `--data` folder that hot-reloads. None of them open a window.
 
 ## Data
 
@@ -138,6 +138,32 @@ After a win that reaches level 5 the skill list is replaced by the choice, and t
 Varn's pattern is Maul Swing, then Crushing Slam (telegraphed, then it lands), then Stone Skin. Phase 2 starts at half health: Varn becomes Enraged. Every third action in that phase the panel names the Rubble Shard, and Varn's next action calls it into the fight. A second shard does not join while one is still up, and the fight holds at most three enemies. The shard has to die too. A corpse does not keep its seat: once it falls, Varn can call another, and a second copy is numbered the same way a wolf pack is (Rubble Shard, then Rubble Shard 2). Cleave hits every living enemy. The line under the skill says who each damage, status, and stun effect hits, using that effect's `target`. Change Cleave's effect `target` to `target` and the line says the marked enemy, which is also who the swing hits. Heavy Blow (`3`) stuns a wind-up and cancels it, which is the Berserker's answer. Riposte (`6`) or Shield Wall (`5`) is the Guardian's answer to a telegraph. The Bone Archer's Aimed Shot is the same kind of telegraph, two turns long, so it can be practiced before the boss. Edit `data/encounters.json`, or an effect's `target`, save, and the next action uses the new fight.
 
 Waiting against the Wolf loses. Strike three times and it dies (8 XP, level 2). `N` restarts on the next foe.
+
+## Playtest
+
+A scripted run sets the hero and the fight from the command line, so a playtest does not have to grind or edit `data/`. Emerald still owns `--frames`, `--screenshot`, `--capture`, `--capture-fps`, `--record`, `--replay`, `--profile`, and `--profile-trace` (and `--gpu`). Ascension reads the flags below and leaves those alone. A value can be the next argument or `--flag=value`. Fights are deterministic, so there is no seed.
+
+| Flag | Effect |
+|---|---|
+| `--transcript file` | Append every on-screen log line (blows, gold, XP, shop notes, path choices, and build resets) |
+| `--data dir` | Load that folder instead of `data/`. A save there hot-reloads, the same check the game already runs |
+| `--level N` | Start at level N. N has to be on the curve in `progress.json` |
+| `--class id` | Start as that class. An evolution is taken only when that choice is open, so `--level` has to be at least the path's evolve level |
+| `--enemy id` | Start on that enemy. The id is an enemy id from `enemies.json` |
+| `--gold N` | Start with N gold |
+| `--give id[:count],...` | Put items in the bag. A missing count is 1 |
+| `--equip id,...` | Wear those pieces. An id that was also given comes out of the bag; anything else is added and then worn. A two-handed weapon still fills the offhand |
+| `--keys "1 1 c e r"` | Press those keys in order, one per frame after the window is up, then quit. The names are the combat table: `1`–`8`, `c`, `e`, `u`, `x`, `i`, `r`, `n`, `space`, `up`, `down`, `left`, `right`, `escape`. The window does not need focus |
+| `--keys-file path` | The same list, read from a file. Pass this or `--keys`, not both |
+| `--choose id` | When the evolution choice opens, pick that class |
+
+An unknown id stops the process before the window opens, and the message names the id. The same is true of an unknown key, a missing folder, and a transcript that cannot be opened. A relative `--data` path is relative to the working directory. A key script ends on its last frame, which is the frame `--screenshot` saves, unless `--frames` asks for a different length.
+
+```
+Ascension.exe --data playtest-data --level 6 --class berserker --enemy oathkeeper_varn --keys "1 1 3 1" --transcript varn.txt --screenshot varn.png
+```
+
+That is a level-6 Berserker against Oathkeeper Varn. The four keys are Strike, Strike, Heavy Blow, and Strike. `varn.txt` collects the log, and `varn.png` is the last of those frames.
 
 ## Package
 

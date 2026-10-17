@@ -52,6 +52,14 @@ public:
     [[nodiscard]] std::vector<i32> ConsumableSlots() const;
 
     void GrantGold(i32 amount);
+    // Replaces the purse. Negative gold is refused, and so is a purse above the same cap
+    // GrantGold stops at.
+    bool SetGold(i32 amount, std::string& error);
+
+    // Puts `count` of `itemId` into the bag, stacking into an open stack of the same id first.
+    // Unknown ids fail and the message names the id. Nothing is added when the bag cannot hold
+    // the whole count.
+    bool Give(std::string_view itemId, i32 count, std::string& error);
 
     // Buys one from Pell's stock into the first stack that has room, or an empty slot.
     bool Buy(std::string_view itemId, std::string& error);
