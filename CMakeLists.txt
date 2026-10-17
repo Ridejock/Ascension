@@ -121,35 +121,41 @@ set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT Ascension)
 # ---------------------------------------------------------------------------
 # Tests (ctest): the JSON loaders, combat, the XP / evolution career, and playtest
 # flags. No window or GPU.
+#
+# They read tests/data, a frozen copy of the numbers the checks assert. Tuning
+# the shipped data/ does not move those checks. The game executable still
+# watches data/.
 # ---------------------------------------------------------------------------
 option(ASCENSION_BUILD_TESTS "Build the Ascension data tests" ON)
 if(ASCENSION_BUILD_TESTS)
     enable_testing()
+    set(ASCENSION_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+
     add_executable(AscensionDataTests tests/DataTests.cpp tests/Check.h)
     target_link_libraries(AscensionDataTests PRIVATE AscensionData)
     target_compile_definitions(AscensionDataTests PRIVATE
-        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionDataTests)
     add_test(NAME Data COMMAND AscensionDataTests)
 
     add_executable(AscensionCombatTests tests/CombatTests.cpp tests/Check.h)
     target_link_libraries(AscensionCombatTests PRIVATE AscensionCombat)
     target_compile_definitions(AscensionCombatTests PRIVATE
-        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionCombatTests)
     add_test(NAME Combat COMMAND AscensionCombatTests)
 
     add_executable(AscensionProgressTests tests/ProgressTests.cpp tests/Check.h)
     target_link_libraries(AscensionProgressTests PRIVATE AscensionProgress AscensionCombat)
     target_compile_definitions(AscensionProgressTests PRIVATE
-        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionProgressTests)
     add_test(NAME Progress COMMAND AscensionProgressTests)
 
     add_executable(AscensionInventoryTests tests/InventoryTests.cpp tests/Check.h)
     target_link_libraries(AscensionInventoryTests PRIVATE AscensionProgress)
     target_compile_definitions(AscensionInventoryTests PRIVATE
-        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionInventoryTests)
     add_test(NAME Inventory COMMAND AscensionInventoryTests)
 
@@ -162,7 +168,7 @@ if(ASCENSION_BUILD_TESTS)
     target_include_directories(AscensionPlaytestTests PRIVATE src/App)
     target_link_libraries(AscensionPlaytestTests PRIVATE AscensionProgress)
     target_compile_definitions(AscensionPlaytestTests PRIVATE
-        ASCENSION_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionPlaytestTests)
     add_test(NAME Playtest COMMAND AscensionPlaytestTests)
 endif()

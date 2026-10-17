@@ -1,0 +1,241 @@
+{
+  "skills": [
+    {
+      "id": "strike",
+      "name": "Strike",
+      "description": "A straightforward blow.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength", "target": "target" }
+      ]
+    },
+    {
+      "id": "brace",
+      "name": "Brace",
+      "description": "Set your guard and weather the next hit.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 }
+      ]
+    },
+    {
+      "id": "heavy_blow",
+      "name": "Heavy Blow",
+      "description": "A committed swing. It stuns a foe who is winding up.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 18, "scaling": "strength" },
+        { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
+      ]
+    },
+    {
+      "id": "second_wind",
+      "name": "Second Wind",
+      "description": "Catch your breath and knit a wound.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8 }
+      ]
+    },
+    {
+      "id": "rage",
+      "name": "Rage",
+      "description": "Spend focus to hit harder for a short while.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "fury", "trigger": "onUse", "op": "empower", "amount": 50 }
+      ]
+    },
+    {
+      "id": "cleave",
+      "name": "Cleave",
+      "description": "A wide swing.",
+      "kind": "active",
+      "target": "allEnemies",
+      "focusCost": 4,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength", "target": "allEnemies" }
+      ]
+    },
+    {
+      "id": "bloodlust",
+      "name": "Bloodlust",
+      "description": "Gain 1 strength for every 10 percent of health that is missing, up to 6.",
+      "kind": "passive",
+      "effects": [
+        {
+          "id": "fury",
+          "trigger": "always",
+          "op": "statPerMissingHp",
+          "stat": "strength",
+          "amount": 1,
+          "per": 10,
+          "max": 6
+        }
+      ]
+    },
+    {
+      "id": "shield_wall",
+      "name": "Shield Wall",
+      "description": "Interpose your shield and blunt the blow.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 75 }
+      ]
+    },
+    {
+      "id": "riposte",
+      "name": "Riposte",
+      "description": "Guard half of the next hit and send half of what it stops back, plus a blow that scales with defense.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
+        {
+          "id": "back",
+          "trigger": "onUse",
+          "op": "reflect",
+          "percent": 50,
+          "power": 10,
+          "scaling": "defense"
+        }
+      ]
+    },
+    {
+      "id": "bulwark",
+      "name": "Bulwark",
+      "description": "Defense +3. A guard that actually stops damage also returns 1 focus.",
+      "kind": "passive",
+      "effects": [
+        { "id": "def", "trigger": "always", "op": "stat", "stat": "defense", "amount": 3 },
+        { "id": "focus", "trigger": "onBlock", "op": "grantFocus", "amount": 1 }
+      ]
+    },
+    {
+      "id": "bite",
+      "name": "Bite",
+      "description": "A quick snap.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "slash",
+      "name": "Slash",
+      "description": "A dirty cut. Every third slash leaves a bleed.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" },
+        { "id": "bleed", "trigger": "onHit", "op": "applyStatus", "status": "bleed", "every": 3 }
+      ]
+    },
+    {
+      "id": "flutter",
+      "name": "Flutter",
+      "description": "A brush of dusty wings.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "aimed_shot",
+      "name": "Aimed Shot",
+      "description": "A long draw. The shot is telegraphed for two turns, then flies.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "windup": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 20, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "harden",
+      "name": "Harden",
+      "description": "The stone sets. Defense rises for a few turns.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "shell", "trigger": "onUse", "op": "harden", "amount": 4, "turns": 3 }
+      ]
+    },
+    {
+      "id": "thrust",
+      "name": "Thrust",
+      "description": "A short stab from a barrow spear.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength", "target": "target" }
+      ]
+    },
+    {
+      "id": "maul_swing",
+      "name": "Maul Swing",
+      "description": "A heavy swing of the oath-iron.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "crushing_slam",
+      "name": "Crushing Slam",
+      "description": "Varn lifts a barrow stone. The slam is telegraphed, then lands.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "windup": 1,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 24, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "rubble_strike",
+      "name": "Rubble Strike",
+      "description": "A barrow stone breaks loose and falls.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "target": "target" }
+      ]
+    },
+    {
+      "id": "stone_skin",
+      "name": "Stone Skin",
+      "description": "The barrow closes over Varn. Defense rises for a short while.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "shell", "trigger": "onUse", "op": "harden", "amount": 6, "turns": 2 }
+      ]
+    }
+  ]
+}

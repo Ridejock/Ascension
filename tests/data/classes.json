@@ -1,0 +1,65 @@
+{
+  "classes": [
+    {
+      "id": "fighter",
+      "name": "Fighter",
+      "description": "A front-line combatant. At level 5, a Fighter becomes a Berserker or a Guardian.",
+      "starter": true,
+      "stats": {
+        "vitality": 18,
+        "strength": 8,
+        "defense": 6,
+        "agility": 5,
+        "focus": 4
+      },
+      "growth": {
+        "vitality": 4,
+        "strength": 2,
+        "defense": 1,
+        "agility": 1,
+        "focus": 1
+      },
+      "skills": ["strike", "brace", "heavy_blow", "second_wind"],
+      "passives": []
+    },
+    {
+      "id": "berserker",
+      "name": "Berserker",
+      "description": "Trades caution for blood. Offered when a Fighter reaches level 5.",
+      "evolvesFrom": "fighter",
+      "evolveLevel": 5,
+      "bonus": {
+        "strength": 4,
+        "vitality": 2
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 3,
+        "agility": 1,
+        "focus": 1
+      },
+      "skills": ["rage", "cleave"],
+      "passives": ["bloodlust"]
+    },
+    {
+      "id": "guardian",
+      "name": "Guardian",
+      "description": "Plants their feet and keeps everyone else standing. Offered at level 5.",
+      "evolvesFrom": "fighter",
+      "evolveLevel": 5,
+      "bonus": {
+        "defense": 5,
+        "vitality": 3
+      },
+      "growth": {
+        "vitality": 4,
+        "strength": 1,
+        "defense": 2,
+        "agility": 1,
+        "focus": 1
+      },
+      "skills": ["shield_wall", "riposte"],
+      "passives": ["bulwark"]
+    }
+  ]
+}

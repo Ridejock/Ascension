@@ -1,0 +1,37 @@
+{
+  "statuses": [
+    {
+      "id": "bleed",
+      "name": "Bleed",
+      "description": "Loses 3 health at the start of each of their turns, for 3 turns. A second application stacks it once.",
+      "damagePerTurn": 3,
+      "turns": 3,
+      "maxStacks": 2
+    },
+    {
+      "id": "exposed",
+      "name": "Exposed",
+      "description": "Takes 25 percent more damage. Lasts 2 turns.",
+      "damageTakenPercent": 25,
+      "turns": 2,
+      "maxStacks": 1
+    },
+    {
+      "id": "enraged",
+      "name": "Enraged",
+      "description": "Deals 30 percent more damage and takes 15 percent more. The sample applies it for the rest of a fight.",
+      "damageDealtPercent": 30,
+      "damageTakenPercent": 15,
+      "turns": 99,
+      "maxStacks": 1
+    },
+    {
+      "id": "stunned",
+      "name": "Stunned",
+      "description": "Skips their next action.",
+      "skipAction": true,
+      "turns": 1,
+      "maxStacks": 1
+    }
+  ]
+}

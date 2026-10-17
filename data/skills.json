@@ -167,7 +167,7 @@
       "focusCost": 0,
       "windup": 2,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 20, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 28, "scaling": "strength" }
       ]
     },
     {
@@ -223,7 +223,7 @@
       "target": "enemy",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "target": "target" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 14, "target": "target" }
       ]
     },
     {

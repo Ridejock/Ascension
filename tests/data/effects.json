@@ -1,0 +1,82 @@
+{
+  "effects": [
+    {
+      "id": "stat",
+      "trigger": "always",
+      "op": "stat",
+      "stat": "strength",
+      "amount": 0
+    },
+    {
+      "id": "stat_per_missing_hp",
+      "trigger": "always",
+      "op": "statPerMissingHp",
+      "stat": "strength",
+      "amount": 0,
+      "per": 10,
+      "max": 0
+    },
+    {
+      "id": "grant_focus",
+      "trigger": "onBlock",
+      "op": "grantFocus",
+      "amount": 0
+    },
+    {
+      "id": "damage",
+      "trigger": "onUse",
+      "op": "damage",
+      "power": 0,
+      "scaling": "strength",
+      "target": "target"
+    },
+    {
+      "id": "heal",
+      "trigger": "onUse",
+      "op": "heal",
+      "power": 0
+    },
+    {
+      "id": "guard",
+      "trigger": "onUse",
+      "op": "guard",
+      "amount": 0
+    },
+    {
+      "id": "reflect",
+      "trigger": "onUse",
+      "op": "reflect",
+      "percent": 0,
+      "power": 0,
+      "scaling": "defense"
+    },
+    {
+      "id": "empower",
+      "trigger": "onUse",
+      "op": "empower",
+      "amount": 0
+    },
+    {
+      "id": "harden",
+      "trigger": "onUse",
+      "op": "harden",
+      "amount": 0,
+      "turns": 1
+    },
+    {
+      "id": "apply_status",
+      "trigger": "onHit",
+      "op": "applyStatus",
+      "status": "bleed",
+      "every": 1,
+      "target": "target"
+    },
+    {
+      "id": "stun_windup",
+      "trigger": "onHit",
+      "op": "stunIfWindingUp",
+      "status": "stunned",
+      "target": "target"
+    }
+  ]
+}
