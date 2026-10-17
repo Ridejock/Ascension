@@ -204,6 +204,17 @@ std::string WornLine(const Database& data, const Inventory& bag)
     return line;
 }
 
+const SkillDef* GrantedSkill(const Database& data, std::string_view classId, std::string_view id)
+{
+    if (const ClassDef* heroClass = data.FindClass(classId)) {
+        for (const SkillDef* granted : data.ActiveSkills(*heroClass)) {
+            if (granted->Id == id)
+                return granted;
+        }
+    }
+    return data.FindSkill(id);
+}
+
 std::string StatusLine(const Database& data, const CombatantState& who)
 {
     std::string line;
@@ -848,7 +859,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 skillIds.push_back(id);
         }
         for (usize i = 0; i < skillIds.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-            const SkillDef* skill = m_Data.FindSkill(skillIds[i]);
+            const SkillDef* skill = GrantedSkill(m_Data, m_Hero.ClassId(), skillIds[i]);
             if (skill == nullptr)
                 continue;
             ++shownSkills;
@@ -858,7 +869,10 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             line += " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   ";
             line += std::to_string(skill->FocusCost) + " focus";
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), color, 2);
-            y += Emerald::DebugTextLineHeight(2) + 4.0f;
+            y += Emerald::DebugTextLineHeight(2) + 2.0f;
+            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(DescribeSkill(*skill)),
+                                       kDim, 1, leftSize.x - 56.0f);
+            y += 4.0f;
         }
         const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
         int shownDrinks = 0;

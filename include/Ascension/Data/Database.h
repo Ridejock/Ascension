@@ -111,4 +111,9 @@ private:
     u32 m_Revision = 0;
 };
 
+// The skill's own description, then one sentence for each effect that lands on an aim
+// (damage, a status, a stun). That sentence uses the effect's target, or the skill's target
+// when the effect doesn't set one. A retune of `target` changes this text with the behavior.
+[[nodiscard]] std::string DescribeSkill(const SkillDef& skill);
+
 } // namespace Ascension

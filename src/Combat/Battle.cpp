@@ -69,7 +69,11 @@ void CopyFightState(const CombatantState& from, CombatantState& to)
         to.Focus = to.MaxFocus;
 }
 
+// A fight draws at most this many enemies. A corpse does not hold one of these seats.
+constexpr i32 kMaxCombatants = 3;
+
 // The first copy of a repeated name stays as it is. Later copies gain " 2", " 3", and so on.
+// Call NameCombatants so every name is the enemy's own name before this runs.
 void DisambiguateNames(std::vector<CombatantState>& foes)
 {
     const usize count = foes.size();
@@ -91,6 +95,18 @@ void DisambiguateNames(std::vector<CombatantState>& foes)
         if (place[nameIndex] > 1)
             foes[nameIndex].Name += " " + std::to_string(place[nameIndex]);
     }
+}
+
+void NameCombatants(const Database* data, std::vector<CombatantState>& foes)
+{
+    if (data != nullptr) {
+        for (CombatantState& foe : foes) {
+            const EnemyDef* def = data->FindEnemy(foe.Id);
+            if (def != nullptr)
+                foe.Name = def->Name;
+        }
+    }
+    DisambiguateNames(foes);
 }
 
 bool SeatListed(const TurnSeat& seat, std::span<const TurnSeat> living)
@@ -367,7 +383,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     }
     if (keepWounds) {
         for (i32 extra = previousBase; extra < static_cast<i32>(previous.size()); ++extra) {
-            if (foes.size() >= 3)
+            if (foes.size() >= static_cast<usize>(kMaxCombatants))
                 break;
             const CombatantState& older = previous[static_cast<usize>(extra)];
             const EnemyDef* def = m_Data->FindEnemy(older.Id);
@@ -379,7 +395,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
             foes.push_back(std::move(foe));
         }
     }
-    DisambiguateNames(foes);
+    NameCombatants(m_Data, foes);
 
     if (keepWounds)
         CopyFightState(m_Player, player);
@@ -1421,33 +1437,47 @@ ActionResult Battle::ResolveSummon(i32 index)
 {
     ActionResult result;
     result.Accepted = true;
+    const i32 count = static_cast<i32>(m_Enemies.size());
     const EnemyDef* host =
-        m_Data != nullptr && index >= 0 && index < static_cast<i32>(m_Enemies.size())
+        m_Data != nullptr && index >= 0 && index < count
             ? m_Data->FindEnemy(m_Enemies[static_cast<usize>(index)].Id)
             : nullptr;
     const EnemyDef* add =
         host != nullptr && m_Data != nullptr ? m_Data->FindEnemy(host->SummonId) : nullptr;
     result.SkillId = add != nullptr ? add->Id : "";
     const std::string hostName =
-        index >= 0 && index < static_cast<i32>(m_Enemies.size())
-            ? m_Enemies[static_cast<usize>(index)].Name
-            : std::string("The foe");
+        index >= 0 && index < count ? m_Enemies[static_cast<usize>(index)].Name
+                                    : std::string("The foe");
     bool already = false;
-    if (add != nullptr) {
-        for (const CombatantState& foe : m_Enemies) {
-            if (foe.Alive() && foe.Id == add->Id)
-                already = true;
+    i32 living = 0;
+    i32 openSlot = -1;
+    for (i32 body = 0; body < count; ++body) {
+        const CombatantState& present = m_Enemies[static_cast<usize>(body)];
+        if (!present.Alive()) {
+            if (openSlot < 0)
+                openSlot = body;
+            continue;
         }
+        ++living;
+        if (add != nullptr && present.Id == add->Id)
+            already = true;
     }
     if (add == nullptr) {
         result.Text = hostName + " calls, and nothing answers.";
-    } else if (already || m_Enemies.size() >= 3) {
+    } else if (already || living >= kMaxCombatants) {
         result.Text = add->Name + " is already in the fight.";
     } else {
         CombatantState shard;
         MakeFoe(*add, shard);
-        m_Enemies.push_back(std::move(shard));
-        result.Text = m_Enemies.back().Name + " joins the fight.";
+        i32 joined = openSlot;
+        if (count >= kMaxCombatants && openSlot >= 0) {
+            m_Enemies[static_cast<usize>(openSlot)] = std::move(shard);
+        } else {
+            m_Enemies.push_back(std::move(shard));
+            joined = static_cast<i32>(m_Enemies.size()) - 1;
+        }
+        NameCombatants(m_Data, m_Enemies);
+        result.Text = m_Enemies[static_cast<usize>(joined)].Name + " joins the fight.";
     }
     FinishIfDead();
     PrefixOpening(result);

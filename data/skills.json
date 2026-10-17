@@ -59,7 +59,7 @@
     {
       "id": "cleave",
       "name": "Cleave",
-      "description": "A wide swing that hits every enemy.",
+      "description": "A wide swing.",
       "kind": "active",
       "target": "allEnemies",
       "focusCost": 4,

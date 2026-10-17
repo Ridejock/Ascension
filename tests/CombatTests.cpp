@@ -694,6 +694,90 @@ void TestWolfPack()
           "the other wolves do not bleed");
 }
 
+i32 ShardSlot(const Battle& battle, bool livingOnly)
+{
+    const std::span<const CombatantState> foes = battle.Enemies();
+    for (i32 foeIndex = 0; foeIndex < static_cast<i32>(foes.size()); ++foeIndex) {
+        const CombatantState& foe = foes[static_cast<usize>(foeIndex)];
+        if (foe.Id != "rubble_shard")
+            continue;
+        if (livingOnly && !foe.Alive())
+            continue;
+        return foeIndex;
+    }
+    return -1;
+}
+
+bool NamedShard(const Battle& battle, const char* name, bool livingOnly)
+{
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Id == "rubble_shard" && foe.Name == name && (!livingOnly || foe.Alive()))
+            return true;
+    }
+    return false;
+}
+
+ActionResult DriveVarn(Battle& battle)
+{
+    battle.SetPlayerHp(battle.Player().MaxHp);
+    return battle.EnemyAct();
+}
+
+void TestSummonSeats()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+    std::vector<CombatantSide> turns(20, CombatantSide::Enemy);
+    Battle boss(data, Sides(std::move(turns)));
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can call more than one shard");
+    boss.SetEnemyHp(120);
+    Check(boss.Enemy().Phase == 2, "phase 2 is open");
+
+    ActionResult joined;
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
+        joined = DriveVarn(boss);
+    const i32 firstShard = ShardSlot(boss, true);
+    Check(firstShard >= 0 && joined.Text.find("Rubble Shard joins") != std::string::npos &&
+              boss.Enemies().size() == 2,
+          "the first shard joins under its own name");
+    Check(boss.SetTarget(firstShard), "the shard can be marked");
+    boss.SetEnemyHp(0);
+    Check(boss.Result() == BattleResult::Ongoing && boss.TargetIndex() != firstShard &&
+              !boss.Enemies()[static_cast<usize>(firstShard)].Alive(),
+          "a dead shard leaves the marker on someone still up");
+
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
+        joined = DriveVarn(boss);
+    Check(joined.Text.find("Rubble Shard 2 joins") != std::string::npos &&
+              NamedShard(boss, "Rubble Shard", false) && NamedShard(boss, "Rubble Shard 2", true) &&
+              boss.Enemies().size() == 3,
+          "a second shard is numbered, and the corpse keeps the first name");
+
+    const i32 secondShard = ShardSlot(boss, true);
+    Check(boss.SetTarget(secondShard), "the second shard can be marked");
+    boss.SetEnemyHp(0);
+    Check(ShardSlot(boss, true) < 0 && boss.Enemies().size() == 3 &&
+              boss.Result() == BattleResult::Ongoing,
+          "both shards are down and still listed");
+
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0 &&
+                       boss.Result() == BattleResult::Ongoing;
+         ++step)
+        joined = DriveVarn(boss);
+    Check(joined.Text.find("joins") != std::string::npos &&
+              joined.Text.find("already") == std::string::npos && ShardSlot(boss, true) >= 0 &&
+              boss.Enemies().size() == 3,
+          "a corpse does not fill the fight, so the next shard takes its seat");
+    Check(boss.TargetIndex() >= 0 &&
+              boss.Enemies()[static_cast<usize>(boss.TargetIndex())].Alive(),
+          "the marker is on a living enemy");
+    const i32 marked = boss.TargetIndex();
+    boss.CycleTarget(1);
+    Check(boss.Enemy().Alive() && boss.TargetIndex() != marked, "cycling skips a corpse");
+    Check(boss.ActorIndex() == 0, "Varn's seat in the turn order is unchanged");
+}
+
 void TestPackAim()
 {
     TempCopy copy;
@@ -732,6 +816,20 @@ void TestPackAim()
     Check(narrowed.Damage == 26 && marked.Enemies()[0].Hp == 40 && marked.Enemies()[1].Hp == 40 &&
               marked.Enemies()[2].Hp == 14,
           "an effect target hits only the marked wolf, even when the skill says all enemies");
+    const SkillDef* tuned = data.FindSkill("cleave");
+    const ClassDef* berserkClass = data.FindClass("berserker");
+    const SkillDef* grantedCleave = nullptr;
+    if (berserkClass != nullptr) {
+        for (const SkillDef* granted : data.ActiveSkills(*berserkClass)) {
+            if (granted->Id == "cleave")
+                grantedCleave = granted;
+        }
+    }
+    Check(tuned != nullptr && grantedCleave != nullptr &&
+              DescribeSkill(*tuned).find("Hits the marked enemy.") != std::string::npos &&
+              DescribeSkill(*tuned).find("every enemy") == std::string::npos &&
+              DescribeSkill(*grantedCleave).find("Hits the marked enemy.") != std::string::npos,
+          "cleave's description follows the effect target");
 
     Battle wounds(data, Sides({CombatantSide::Player}));
     Check(wounds.Start("fighter", 1, "wolf_pack", error), "a pack can shrink on reload");
@@ -910,6 +1008,7 @@ int main()
     TestWindup();
     TestPhaseShard();
     TestWolfPack();
+    TestSummonSeats();
     TestPackAim();
     TestGearAndConsumables();
     TestBossPlans();

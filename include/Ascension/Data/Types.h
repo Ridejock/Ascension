@@ -265,7 +265,8 @@ struct EnemyDef {
     i32 PhaseAtPercent = 0;  // 0 means one phase. Otherwise phase 2 begins at this health
     std::string PhaseStatus; // applied once when phase 2 begins
     // In phase 2, every SummonEvery actions, this enemy calls SummonId into the fight.
-    // Empty SummonId means no add. A second copy is not called while one is still up.
+    // Empty SummonId means no add. A second copy is not called while one is still standing.
+    // A corpse does not count as standing and does not hold a seat.
     std::string SummonId;
     i32 SummonEvery = 0;
 };

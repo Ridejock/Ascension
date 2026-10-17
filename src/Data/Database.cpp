@@ -1988,4 +1988,60 @@ StatBlock Database::StatsAt(const ClassDef& klass, i32 level) const
     return klass.Stats + Scaled(klass.Growth, level - 1);
 }
 
+namespace {
+
+EffectAim AimFor(const SkillDef& skill, const EffectDef& effect)
+{
+    if (effect.Aim.has_value())
+        return *effect.Aim;
+    if (skill.Target == SkillTarget::Self)
+        return EffectAim::Self;
+    if (skill.Target == SkillTarget::AllEnemies)
+        return EffectAim::AllEnemies;
+    return EffectAim::Target;
+}
+
+const char* AimWords(EffectAim aim)
+{
+    if (aim == EffectAim::Self)
+        return "you";
+    if (aim == EffectAim::AllEnemies)
+        return "every enemy";
+    if (aim == EffectAim::RandomEnemy)
+        return "a random enemy";
+    return "the marked enemy";
+}
+
+// Empty for an op that does not pick someone. Battle aims damage, a status, and a stun.
+// A guard, a heal, and the other self effects ignore target, so they add no sentence.
+std::string EffectSentence(EffectOp op, EffectAim aim)
+{
+    const char* verb = nullptr;
+    if (op == EffectOp::Damage)
+        verb = "Hits";
+    else if (op == EffectOp::ApplyStatus)
+        verb = "Afflicts";
+    else if (op == EffectOp::StunIfWindingUp)
+        verb = "Stuns";
+    if (verb == nullptr)
+        return {};
+    return std::string(verb) + " " + AimWords(aim) + ".";
+}
+
+} // namespace
+
+std::string DescribeSkill(const SkillDef& skill)
+{
+    std::string text = skill.Description;
+    for (const EffectDef& effect : skill.Effects) {
+        const std::string sentence = EffectSentence(effect.Op, AimFor(skill, effect));
+        if (sentence.empty())
+            continue;
+        if (!text.empty())
+            text += " ";
+        text += sentence;
+    }
+    return text;
+}
+
 } // namespace Ascension

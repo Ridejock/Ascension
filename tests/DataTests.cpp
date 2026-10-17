@@ -293,7 +293,8 @@ void TestSample()
     const EffectDef* cleaveHit = cleave != nullptr ? cleave->FindEffect("hit") : nullptr;
     Check(cleave != nullptr && cleave->Target == SkillTarget::AllEnemies && cleaveHit != nullptr &&
               cleaveHit->Power == 8 && cleave->FocusCost == 4 && cleaveHit->Scaling == "strength" &&
-              cleaveHit->Aim == EffectAim::AllEnemies,
+              cleaveHit->Aim == EffectAim::AllEnemies &&
+              DescribeSkill(*cleave).find("Hits every enemy.") != std::string::npos,
           "cleave is parsed as an active skill that hits every enemy");
 }
 
