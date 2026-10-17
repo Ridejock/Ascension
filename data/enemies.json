@@ -104,8 +104,8 @@
       "level": 8,
       "boss": true,
       "stats": {
-        "vitality": 92,
-        "strength": 20,
+        "vitality": 83,
+        "strength": 18,
         "defense": 12,
         "agility": 3,
         "focus": 0
