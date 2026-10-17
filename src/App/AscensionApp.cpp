@@ -372,8 +372,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
     if (event.key.scancode == SDL_SCANCODE_N) {
         const i32 count = static_cast<i32>(m_Data.GetEnemies().size());
-        if (count > 0)
-            m_EnemyIndex = (m_EnemyIndex + 1) % count;
+        m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
         BeginFight();
         return;
     }

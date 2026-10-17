@@ -67,6 +67,10 @@ public:
     // fight may start.
     [[nodiscard]] const char* NextFightBlock() const;
 
+    // Roster slot after the next-foe key. `count` is the roster length. While an evolution
+    // choice blocks the next fight, `index` is returned unchanged, including across a wrap.
+    [[nodiscard]] i32 IndexAfterNextFoe(i32 index, i32 count) const;
+
     // Adds XP (negative amounts are ignored) and may cross several levels at once.
     XpGrant GrantXp(i32 amount);
 

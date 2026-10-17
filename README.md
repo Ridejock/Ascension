@@ -114,12 +114,12 @@ Run the game. The Wolf is faster, so it bites first. Then:
 | `X` | In the shop, sell one of the highlighted stack |
 | `U` | In the shop, take off the highlighted worn piece |
 | `R` | Fight this enemy again. Level, XP, gold, gear, and skill ranks stay. Refused while a path is still open |
-| `N` | The next enemy in `enemies.json`. Refused while a path is still open |
+| `N` | The next enemy in `enemies.json`. While a path is open the fight does not start and the roster stays on this foe |
 | Escape | Quit |
 
 The roster, in order, is Wolf, Bandit, Tomb Moth, Bone Archer, Barrow Sentry, and the boss, Oathkeeper Varn. The corner of the foe's name shows the place in that list, and Varn is marked BOSS. Fights are still one enemy at a time. Varn's rubble is a timed hit for 10 in phase 2 (telegraphed as RUBBLE), standing in for a later multi-enemy shard fight.
 
-After a win that reaches level 5 the skill list is replaced by the choice, and the next fight waits. `1` is Berserker. `2` is Guardian. `3` is Reset build, which clears skill ranks and leaves the choice open. It is not offered anywhere else. The new skills show once a path is picked, and `R` or `N` then starts the next fight as that class. Wolf, Bandit, Tomb Moth, and Bone Archer are 8 + 18 + 14 + 22 XP, which is level 5. The Barrow Sentry is the next fight (its 40 XP reaches level 6). Varn is the level-6 boss.
+After a win that reaches level 5 the skill list is replaced by the choice, and the next fight waits. `1` is Berserker. `2` is Guardian. `3` is Reset build, which clears skill ranks and leaves the choice open. It is not offered anywhere else. The new skills show once a path is picked. `R` then fights the same foe again, and `N` is what moves on. Pressing `N` before the choice does not skip ahead. Wolf, Bandit, Tomb Moth, and Bone Archer are 8 + 18 + 14 + 22 XP, which is level 5. The Barrow Sentry is the next fight (its 40 XP reaches level 6). Varn is the level-6 boss.
 
 Varn's pattern is Maul Swing, then Crushing Slam (telegraphed, then it lands), then Stone Skin. Phase 2 starts at half health: Varn becomes Enraged, and every few turns the barrow throws rubble. Heavy Blow (`3`) stuns a wind-up and cancels it, which is the Berserker's answer. Riposte (`6`) or Shield Wall (`5`) is the Guardian's answer to a telegraph or to RUBBLE. The Bone Archer's Aimed Shot is the same kind of telegraph, two turns long, so it can be practiced before the boss.
 
