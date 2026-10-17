@@ -1,13 +1,11 @@
 #include "AscensionApp.h"
 
 #include <algorithm>
-#include <filesystem>
+#include <cstdio>
 #include <string>
-#include <system_error>
 
 #include <SDL3/SDL.h>
 
-#include "Emerald/Core/Paths.h"
 #include "Emerald/Math/Mat4.h"
 #include "Emerald/Renderer/DebugText.h"
 
@@ -30,17 +28,6 @@ constexpr Emerald::Vec4 kFigure{0.78f, 0.62f, 0.32f, 1.0f};
 constexpr Emerald::Vec4 kFoe{0.62f, 0.28f, 0.24f, 1.0f};
 constexpr Emerald::Vec4 kHp{0.78f, 0.32f, 0.30f, 1.0f};
 constexpr Emerald::Vec4 kFocus{0.66f, 0.46f, 0.84f, 1.0f};
-
-std::filesystem::path DataDirectory()
-{
-#ifdef ASCENSION_DATA_DIR
-    const std::filesystem::path source = ASCENSION_DATA_DIR;
-    std::error_code error;
-    if (std::filesystem::is_directory(source, error))
-        return source;
-#endif
-    return Emerald::Paths::GetBasePath() / "data";
-}
 
 std::string Upper(std::string_view text)
 {
@@ -273,8 +260,8 @@ f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const Com
 
 } // namespace
 
-AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec)
-    : Emerald::Application(spec), m_Data(DataDirectory())
+AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options)
+    : Emerald::Application(spec), m_Play(std::move(options)), m_Data(PlaytestDataDirectory(m_Play))
 {
 }
 
@@ -282,6 +269,10 @@ void AscensionApp::Note(std::string line)
 {
     if (line.empty())
         return;
+    if (m_Transcript.is_open()) {
+        m_Transcript << line << '\n';
+        m_Transcript.flush();
+    }
     m_Log.push_back(std::move(line));
     while (m_Log.size() > kLogLines)
         m_Log.erase(m_Log.begin());
@@ -289,7 +280,22 @@ void AscensionApp::Note(std::string line)
 
 void AscensionApp::Note(const ActionResult& result)
 {
+    // Battle text is the multi-enemy log: Cleave names each hit, and a summon says
+    // "Rubble Shard 2 joins the fight." The transcript is this same line.
     Note(result.Text);
+}
+
+void AscensionApp::NoteMarked(i32 previous)
+{
+    if (m_Battle == nullptr)
+        return;
+    const auto foes = m_Battle->Enemies();
+    if (foes.size() < 2)
+        return;
+    const i32 marked = m_Battle->TargetIndex();
+    if (marked == previous || marked < 0 || marked >= static_cast<i32>(foes.size()))
+        return;
+    Note(MarkedTargetLine(foes[static_cast<usize>(marked)].Name));
 }
 
 void AscensionApp::PushRanks(std::string_view pendingSkill)
@@ -335,6 +341,7 @@ void AscensionApp::AwardVictory()
         line += ".";
     }
     Note(line);
+    TakeAutoPath();
 }
 
 void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
@@ -360,8 +367,10 @@ void AscensionApp::ResolveFoe()
     for (i32 step = 0; step < 8 && m_Battle->Result() == BattleResult::Ongoing &&
                        m_Battle->Actor() == CombatantSide::Enemy;
          ++step) {
+        const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult act = m_Battle->EnemyAct();
         Note(act);
+        NoteMarked(markedBefore);
         FinishAction(act, false);
     }
 }
@@ -382,22 +391,25 @@ void AscensionApp::BeginFight()
     m_Picking = false;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
-    const auto encounters = m_Data.GetEncounters();
-    if (encounters.empty()) {
-        m_StartError = "No encounters in data/.";
-        m_Battle.reset();
-        return;
+    std::string fightId = m_DirectEnemy;
+    if (fightId.empty()) {
+        const auto encounters = m_Data.GetEncounters();
+        if (encounters.empty()) {
+            m_StartError = "No encounters in data/.";
+            m_Battle.reset();
+            return;
+        }
+        if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(encounters.size()))
+            m_EnemyIndex = 0;
+        fightId = encounters[static_cast<usize>(m_EnemyIndex)].Id;
     }
-    if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(encounters.size()))
-        m_EnemyIndex = 0;
     if (m_Battle == nullptr)
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
 
     m_Battle->SetGear(m_Inventory.GearBonus());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
-    if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(),
-                         encounters[static_cast<usize>(m_EnemyIndex)].Id, error)) {
+    if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
         m_StartError = error;
         return;
     }
@@ -421,17 +433,38 @@ void AscensionApp::BeginFight()
 
 void AscensionApp::OnStart()
 {
-    if (!m_Data.Load())
-        return;
-    std::string error;
-    if (!m_Hero.Start(m_Data, error)) {
-        m_StartError = error;
+    if (!m_Play.Transcript.empty()) {
+        m_Transcript.open(m_Play.Transcript, std::ios::app);
+        if (!m_Transcript) {
+            m_StartError = "could not open transcript '" + m_Play.Transcript.string() + "'";
+            std::fprintf(stderr, "%s\n", m_StartError.c_str());
+            Quit();
+            return;
+        }
+    }
+    if (!m_Data.Load()) {
+        if (m_Play.UsesData() || !m_Play.Keys.empty() || !m_Play.Transcript.empty()) {
+            const std::string& message = m_Data.GetLastError();
+            if (!message.empty())
+                std::fprintf(stderr, "%s\n", message.c_str());
+            Quit();
+        }
         return;
     }
-    if (!m_Inventory.Start(m_Data, error)) {
-        m_StartError = error;
+    PlaytestSetup setup;
+    std::string why;
+    if (!ApplyPlaytest(m_Hero, m_Inventory, m_Data, m_Play, setup, why)) {
+        m_StartError = std::move(why);
+        std::fprintf(stderr, "%s\n", m_StartError.c_str());
+        Note(m_StartError);
+        Quit();
         return;
     }
+    // An encounter id is a place in encounters.json. A lone enemy id is started by name.
+    m_EnemyIndex = setup.EnemyIndex;
+    m_DirectEnemy = std::move(setup.DirectEnemy);
+    if (!TakeAutoPath())
+        return;
     BeginFight();
 }
 
@@ -450,6 +483,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         return;
     }
     if (event.key.scancode == SDL_SCANCODE_N) {
+        m_DirectEnemy.clear();
         const i32 count = static_cast<i32>(m_Data.GetEncounters().size());
         m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
         BeginFight();
@@ -555,7 +589,9 @@ void AscensionApp::OnEvent(const SDL_Event& event)
             Note("Wait for your turn.");
             return;
         }
+        const i32 markedBefore = m_Battle->TargetIndex();
         m_Battle->CycleTarget(event.key.scancode == SDL_SCANCODE_RIGHT ? 1 : -1);
+        NoteMarked(markedBefore);
         return;
     }
 
@@ -574,8 +610,10 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
 
     if (event.key.scancode == SDL_SCANCODE_SPACE) {
+        const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult waited = m_Battle->Wait();
         Note(waited);
+        NoteMarked(markedBefore);
         FinishAction(waited, true);
         ResolveFoe();
         return;
@@ -587,10 +625,12 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     if (digit < static_cast<int>(skills.size())) {
         const std::string& skillId = skills[static_cast<usize>(digit)];
         PushRanks(skillId);
+        const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult used = m_Battle->UseSkill(skillId);
         if (!used.Accepted)
             PushRanks();
         Note(used);
+        NoteMarked(markedBefore);
         FinishAction(used, true);
         ResolveFoe();
         return;
@@ -602,8 +642,51 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     DrinkAt(drinks[static_cast<usize>(drink)]);
 }
 
+bool AscensionApp::TakeAutoPath()
+{
+    if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+        return true;
+    std::string why;
+    const EvolutionPick pick = PickEvolution(m_Hero, m_Play.ChooseId, why);
+    if (pick == EvolutionPick::Failed) {
+        Note(why);
+        std::fprintf(stderr, "%s\n", why.c_str());
+        if (m_Battle == nullptr)
+            m_StartError = std::move(why);
+        Quit();
+        return false;
+    }
+    if (pick != EvolutionPick::Chosen)
+        return true;
+    const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
+    Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
+    PushRanks();
+    return true;
+}
+
+void AscensionApp::PlayScriptedKey()
+{
+    if (m_KeyCursor >= m_Play.Keys.size() || !m_StartError.empty() || !m_Data.IsLoaded())
+        return;
+    const SDL_Scancode scancode = m_Play.Keys[m_KeyCursor];
+    ++m_KeyCursor;
+    SDL_Event event{};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.scancode = scancode;
+    event.key.down = true;
+    OnEvent(event);
+    if (m_KeyCursor < m_Play.Keys.size())
+        return;
+    const u64 frameLimit = GetDevOptions().Frames;
+    if (frameLimit == 0 || frameLimit <= static_cast<u64>(m_Play.Keys.size()))
+        Quit();
+}
+
 void AscensionApp::OnUpdate(f32 dt)
 {
+    if (!TakeAutoPath())
+        return;
+    PlayScriptedKey();
     m_ReloadWait += dt;
     if (m_ReloadWait < kPollSeconds)
         return;
@@ -639,6 +722,8 @@ void AscensionApp::OnUpdate(f32 dt)
     if (!why.empty())
         Note(why);
     if (m_Battle == nullptr || !m_StartError.empty()) {
+        if (!TakeAutoPath())
+            return;
         BeginFight();
         return;
     }
@@ -651,6 +736,8 @@ void AscensionApp::OnUpdate(f32 dt)
     PushRanks();
     if (m_Hero.Level() != levelBefore)
         Note("Level " + std::to_string(m_Hero.Level()) + ".");
+    if (!TakeAutoPath())
+        return;
     Note("Data reloaded.");
 }
 
@@ -909,7 +996,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         y = right.y + 24.0f;
         const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
         std::string foeTitle = enemy.Name;
-        if (encounterTotal > 0) {
+        if (m_DirectEnemy.empty() && encounterTotal > 0) {
             foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
                         std::to_string(encounterTotal);
         }
@@ -941,7 +1028,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     } else {
         y = right.y + 16.0f;
         std::string packTitle = m_Battle->EncounterName();
-        if (encounterTotal > 0) {
+        if (m_DirectEnemy.empty() && encounterTotal > 0) {
             packTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
                          std::to_string(encounterTotal);
         }
@@ -1153,6 +1240,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
     const ItemDef* item = m_Data.FindItem(stack.Id);
     if (item == nullptr)
         return;
+    const i32 markedBefore = m_Battle->TargetIndex();
     const ActionResult drunk = m_Battle->UseItem(*item);
     if (drunk.Accepted && drunk.SkillId == item->Id) {
         std::string why;
@@ -1160,6 +1248,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
             Note(why);
     }
     Note(drunk);
+    NoteMarked(markedBefore);
     FinishAction(drunk, false);
     ResolveFoe();
     if (drunk.Accepted)

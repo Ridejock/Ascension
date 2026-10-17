@@ -150,6 +150,48 @@ void Inventory::GrantGold(i32 amount)
     m_Gold = static_cast<i32>(next);
 }
 
+bool Inventory::SetGold(i32 amount, std::string& error)
+{
+    if (amount < 0) {
+        error = "gold cannot be negative";
+        return false;
+    }
+    if (amount > kGoldCap) {
+        error = "gold " + std::to_string(amount) + " is above " + std::to_string(kGoldCap);
+        return false;
+    }
+    m_Gold = amount;
+    error.clear();
+    return true;
+}
+
+bool Inventory::Give(std::string_view itemId, i32 count, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the bag is not ready";
+        return false;
+    }
+    if (count < 1) {
+        error = "item '" + std::string(itemId) + "' needs a count of at least 1";
+        return false;
+    }
+    const ItemDef* item = m_Data->FindItem(itemId);
+    if (item == nullptr) {
+        error = "item '" + std::string(itemId) + "' does not exist";
+        return false;
+    }
+    std::vector<ItemStack> next = m_Bag;
+    for (i32 remaining = count; remaining > 0; --remaining) {
+        if (!TryGive(next, item->Id)) {
+            error = "item '" + item->Id + "' does not fit in the bag";
+            return false;
+        }
+    }
+    m_Bag = std::move(next);
+    error.clear();
+    return true;
+}
+
 const ShopDef* Inventory::Shop() const
 {
     if (m_Data == nullptr || !m_Data->IsLoaded())
