@@ -20,9 +20,8 @@ struct PlaytestItem {
     i32 Count = 1;
 };
 
-// The id from --enemy. ResolveFight is the only lookup. Today that id is an enemy on the
-// roster. An encounter id is the same field once encounters exist: accept it inside
-// ResolveFight and return FightKind::Encounter. The flag does not change.
+// The id from --enemy. ResolveFight is the only lookup. An encounter id and a single
+// enemy id share this field. Encounter ids are checked first.
 struct FightRequest {
     std::string Id;
 };
@@ -35,7 +34,7 @@ enum class FightKind {
 struct ResolvedFight {
     FightKind Kind = FightKind::Enemy;
     std::string Id;
-    // Roster slot for FightKind::Enemy. BeginFight already starts that one foe.
+    // Encounter-list index for FightKind::Encounter. Roster index for FightKind::Enemy.
     i32 EnemyIndex = 0;
 };
 
@@ -58,7 +57,12 @@ struct PlaytestOptions {
 };
 
 struct PlaytestSetup {
+    // Place in encounters.json. A normal start is 0. An encounter id from --enemy
+    // is that encounter's place in the list.
     i32 EnemyIndex = 0;
+    // Set when --enemy names a roster foe that is not an encounter. Empty for an
+    // encounter, and for a start that did not pass --enemy.
+    std::string DirectEnemy;
 };
 
 // What PickEvolution did. Waiting means the choice is not open (or no id was set).
@@ -73,10 +77,15 @@ enum class EvolutionPick { Waiting, Chosen, Failed };
 // directory is present, and the copy beside the executable when it is not.
 [[nodiscard]] std::filesystem::path PlaytestDataDirectory(const PlaytestOptions& options);
 
-// Looks `request` up. An enemy id becomes FightKind::Enemy. Anything else fails and the
-// message names the id. Encounter ids belong in this function when that data exists.
+// Looks `request` up. An id in encounters.json becomes FightKind::Encounter, even when
+// an enemy uses the same id. Otherwise an enemy id becomes FightKind::Enemy. Anything
+// else fails and the message names the id.
 [[nodiscard]] bool ResolveFight(const Database& data, const FightRequest& request,
                                 ResolvedFight& resolved, std::string& error);
+
+// The on-screen line when the marked enemy changes. Note() writes it, so --transcript
+// keeps it with the other log lines.
+[[nodiscard]] std::string MarkedTargetLine(std::string_view name);
 
 // Starts the hero and the bag, then applies level, class, gold, items, gear, and the foe.
 // Unknown ids fail and the message names the id. Does not pick --choose; call PickEvolution

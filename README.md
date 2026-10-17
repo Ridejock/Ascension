@@ -145,11 +145,11 @@ A scripted run sets the hero and the fight from the command line, so a playtest 
 
 | Flag | Effect |
 |---|---|
-| `--transcript file` | Append every on-screen log line (blows, gold, XP, shop notes, path choices, and build resets) |
+| `--transcript file` | Append every on-screen log line: blows, gold, XP, shop notes, path choices, build resets, a target change (`Target: Wolf 2.`), each enemy Cleave hits, and a summon (`Rubble Shard 2 joins the fight`) |
 | `--data dir` | Load that folder instead of `data/`. A save there hot-reloads, the same check the game already runs |
 | `--level N` | Start at level N. N has to be on the curve in `progress.json` |
 | `--class id` | Start as that class. An evolution is taken only when that choice is open, so `--level` has to be at least the path's evolve level |
-| `--enemy id` | Start on that enemy. The id is an enemy id from `enemies.json` |
+| `--enemy id` | Start on that fight. An id from `encounters.json` (such as `wolf_pack`) is that encounter. An id from `enemies.json` that is not an encounter is that one enemy. When an id is both, the encounter wins |
 | `--gold N` | Start with N gold |
 | `--give id[:count],...` | Put items in the bag. A missing count is 1 |
 | `--equip id,...` | Wear those pieces. An id that was also given comes out of the bag; anything else is added and then worn. A two-handed weapon still fills the offhand |
@@ -163,7 +163,13 @@ An unknown id stops the process before the window opens, and the message names t
 Ascension.exe --data playtest-data --level 6 --class berserker --enemy oathkeeper_varn --keys "1 1 3 1" --transcript varn.txt --screenshot varn.png
 ```
 
-That is a level-6 Berserker against Oathkeeper Varn. The four keys are Strike, Strike, Heavy Blow, and Strike. `varn.txt` collects the log, and `varn.png` is the last of those frames.
+That is a level-6 Berserker against Oathkeeper Varn. The four keys are Strike, Strike, Heavy Blow, and Strike. `varn.txt` collects the log, and `varn.png` is the last of those frames. `oathkeeper_varn` is an encounter id, so the fight is the one in `encounters.json`.
+
+```
+Ascension.exe --level 6 --class berserker --enemy wolf_pack --keys "6 right 6" --transcript pack.txt
+```
+
+That is the same Berserker against the Wolf Pack. `6` is Cleave, which logs a hit on each living wolf. `right` marks the next wolf and logs `Target: Wolf 2.` A Varn fight that calls a second shard logs `Rubble Shard 2 joins the fight.` Those lines are in the transcript because they are the on-screen log.
 
 ## Package
 

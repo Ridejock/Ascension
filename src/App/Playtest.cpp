@@ -510,6 +510,11 @@ std::filesystem::path PlaytestDataDirectory(const PlaytestOptions& options)
     return Emerald::Paths::GetBasePath() / "data";
 }
 
+std::string MarkedTargetLine(std::string_view name)
+{
+    return "Target: " + std::string(name) + ".";
+}
+
 bool ResolveFight(const Database& data, const FightRequest& request, ResolvedFight& resolved,
                   std::string& error)
 {
@@ -517,8 +522,19 @@ bool ResolveFight(const Database& data, const FightRequest& request, ResolvedFig
         error = "--enemy needs an id";
         return false;
     }
-    // Enemy ids are the roster today. When encounters exist, resolve that id here and return
-    // FightKind::Encounter before this miss. Callers branch on Kind; the flag stays --enemy.
+    // Encounter ids take precedence. wolf and oathkeeper_varn are both an encounter and
+    // an enemy; --enemy wolf_pack is only an encounter.
+    const auto encounters = data.GetEncounters();
+    for (i32 encounterIndex = 0; encounterIndex < static_cast<i32>(encounters.size());
+         ++encounterIndex) {
+        if (encounters[static_cast<usize>(encounterIndex)].Id != request.Id)
+            continue;
+        resolved.Kind = FightKind::Encounter;
+        resolved.Id = request.Id;
+        resolved.EnemyIndex = encounterIndex;
+        error.clear();
+        return true;
+    }
     const auto roster = data.GetEnemies();
     for (i32 rosterIndex = 0; rosterIndex < static_cast<i32>(roster.size()); ++rosterIndex) {
         if (roster[static_cast<usize>(rosterIndex)].Id != request.Id)
@@ -558,15 +574,15 @@ bool ApplyPlaytest(Hero& hero, Inventory& inventory, const Database& data,
     }
 
     setup.EnemyIndex = 0;
+    setup.DirectEnemy.clear();
     if (!options.Fight.Id.empty()) {
         ResolvedFight resolved;
         if (!ResolveFight(data, options.Fight, resolved, error))
             return false;
-        if (resolved.Kind == FightKind::Encounter) {
-            error = "encounter '" + resolved.Id + "' is not available yet";
-            return false;
-        }
-        setup.EnemyIndex = resolved.EnemyIndex;
+        if (resolved.Kind == FightKind::Encounter)
+            setup.EnemyIndex = resolved.EnemyIndex;
+        else
+            setup.DirectEnemy = resolved.Id;
     }
     if (!CheckChooseId(hero, data, options.ChooseId, error))
         return false;

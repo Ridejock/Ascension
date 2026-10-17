@@ -280,7 +280,22 @@ void AscensionApp::Note(std::string line)
 
 void AscensionApp::Note(const ActionResult& result)
 {
+    // Battle text is the multi-enemy log: Cleave names each hit, and a summon says
+    // "Rubble Shard 2 joins the fight." The transcript is this same line.
     Note(result.Text);
+}
+
+void AscensionApp::NoteMarked(i32 previous)
+{
+    if (m_Battle == nullptr)
+        return;
+    const auto foes = m_Battle->Enemies();
+    if (foes.size() < 2)
+        return;
+    const i32 marked = m_Battle->TargetIndex();
+    if (marked == previous || marked < 0 || marked >= static_cast<i32>(foes.size()))
+        return;
+    Note(MarkedTargetLine(foes[static_cast<usize>(marked)].Name));
 }
 
 void AscensionApp::PushRanks(std::string_view pendingSkill)
@@ -352,8 +367,10 @@ void AscensionApp::ResolveFoe()
     for (i32 step = 0; step < 8 && m_Battle->Result() == BattleResult::Ongoing &&
                        m_Battle->Actor() == CombatantSide::Enemy;
          ++step) {
+        const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult act = m_Battle->EnemyAct();
         Note(act);
+        NoteMarked(markedBefore);
         FinishAction(act, false);
     }
 }
@@ -374,22 +391,25 @@ void AscensionApp::BeginFight()
     m_Picking = false;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
-    const auto encounters = m_Data.GetEncounters();
-    if (encounters.empty()) {
-        m_StartError = "No encounters in data/.";
-        m_Battle.reset();
-        return;
+    std::string fightId = m_DirectEnemy;
+    if (fightId.empty()) {
+        const auto encounters = m_Data.GetEncounters();
+        if (encounters.empty()) {
+            m_StartError = "No encounters in data/.";
+            m_Battle.reset();
+            return;
+        }
+        if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(encounters.size()))
+            m_EnemyIndex = 0;
+        fightId = encounters[static_cast<usize>(m_EnemyIndex)].Id;
     }
-    if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(encounters.size()))
-        m_EnemyIndex = 0;
     if (m_Battle == nullptr)
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
 
     m_Battle->SetGear(m_Inventory.GearBonus());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
-    if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(),
-                         encounters[static_cast<usize>(m_EnemyIndex)].Id, error)) {
+    if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
         m_StartError = error;
         return;
     }
@@ -440,9 +460,9 @@ void AscensionApp::OnStart()
         Quit();
         return;
     }
-    // --enemy is an enemy id today, so this is that foe's roster slot. ResolveFight is
-    // where an encounter id will be told apart from an enemy later.
+    // An encounter id is a place in encounters.json. A lone enemy id is started by name.
     m_EnemyIndex = setup.EnemyIndex;
+    m_DirectEnemy = std::move(setup.DirectEnemy);
     if (!TakeAutoPath())
         return;
     BeginFight();
@@ -463,6 +483,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         return;
     }
     if (event.key.scancode == SDL_SCANCODE_N) {
+        m_DirectEnemy.clear();
         const i32 count = static_cast<i32>(m_Data.GetEncounters().size());
         m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
         BeginFight();
@@ -568,7 +589,9 @@ void AscensionApp::OnEvent(const SDL_Event& event)
             Note("Wait for your turn.");
             return;
         }
+        const i32 markedBefore = m_Battle->TargetIndex();
         m_Battle->CycleTarget(event.key.scancode == SDL_SCANCODE_RIGHT ? 1 : -1);
+        NoteMarked(markedBefore);
         return;
     }
 
@@ -587,8 +610,10 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
 
     if (event.key.scancode == SDL_SCANCODE_SPACE) {
+        const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult waited = m_Battle->Wait();
         Note(waited);
+        NoteMarked(markedBefore);
         FinishAction(waited, true);
         ResolveFoe();
         return;
@@ -600,10 +625,12 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     if (digit < static_cast<int>(skills.size())) {
         const std::string& skillId = skills[static_cast<usize>(digit)];
         PushRanks(skillId);
+        const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult used = m_Battle->UseSkill(skillId);
         if (!used.Accepted)
             PushRanks();
         Note(used);
+        NoteMarked(markedBefore);
         FinishAction(used, true);
         ResolveFoe();
         return;
@@ -969,7 +996,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         y = right.y + 24.0f;
         const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
         std::string foeTitle = enemy.Name;
-        if (encounterTotal > 0) {
+        if (m_DirectEnemy.empty() && encounterTotal > 0) {
             foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
                         std::to_string(encounterTotal);
         }
@@ -1001,7 +1028,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     } else {
         y = right.y + 16.0f;
         std::string packTitle = m_Battle->EncounterName();
-        if (encounterTotal > 0) {
+        if (m_DirectEnemy.empty() && encounterTotal > 0) {
             packTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
                          std::to_string(encounterTotal);
         }
@@ -1213,6 +1240,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
     const ItemDef* item = m_Data.FindItem(stack.Id);
     if (item == nullptr)
         return;
+    const i32 markedBefore = m_Battle->TargetIndex();
     const ActionResult drunk = m_Battle->UseItem(*item);
     if (drunk.Accepted && drunk.SkillId == item->Id) {
         std::string why;
@@ -1220,6 +1248,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
             Note(why);
     }
     Note(drunk);
+    NoteMarked(markedBefore);
     FinishAction(drunk, false);
     ResolveFoe();
     if (drunk.Accepted)

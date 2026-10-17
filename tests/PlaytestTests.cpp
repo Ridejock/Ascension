@@ -105,6 +105,17 @@ i32 IndexOf(const Database& data, std::string_view id)
     return -1;
 }
 
+i32 EncounterOf(const Database& data, std::string_view id)
+{
+    const auto encounters = data.GetEncounters();
+    for (i32 encounterIndex = 0; encounterIndex < static_cast<i32>(encounters.size());
+         ++encounterIndex) {
+        if (encounters[static_cast<usize>(encounterIndex)].Id == id)
+            return encounterIndex;
+    }
+    return -1;
+}
+
 Database Sample()
 {
     Database data(kSample);
@@ -203,11 +214,34 @@ void TestBadIds()
     ResolvedFight resolved;
     Check(!ResolveFight(data, foe.Fight, resolved, why), "ResolveFight rejects the same id");
     CheckHas(why, "no_such_foe", "ResolveFight names the id");
+
+    foe.Fight.Id = "wolf_pack";
+    Check(ResolveFight(data, foe.Fight, resolved, why), "the wolf pack resolves");
+    Check(resolved.Kind == FightKind::Encounter && resolved.Id == "wolf_pack" &&
+              resolved.EnemyIndex == EncounterOf(data, "wolf_pack") && resolved.EnemyIndex >= 0,
+          "--enemy wolf_pack is the encounter, not a missing enemy");
+
     foe.Fight.Id = "oathkeeper_varn";
     Check(ResolveFight(data, foe.Fight, resolved, why), "Varn resolves");
-    Check(resolved.Kind == FightKind::Enemy && resolved.Kind != FightKind::Encounter &&
-              resolved.EnemyIndex == IndexOf(data, "oathkeeper_varn") && resolved.EnemyIndex >= 0,
-          "an enemy id is a roster slot, and an encounter is a different kind");
+    Check(resolved.Kind == FightKind::Encounter &&
+              resolved.EnemyIndex == EncounterOf(data, "oathkeeper_varn") &&
+              resolved.EnemyIndex != IndexOf(data, "oathkeeper_varn"),
+          "an id that is both an encounter and an enemy is the encounter");
+
+    foe.Fight.Id = "wolf";
+    Check(ResolveFight(data, foe.Fight, resolved, why) && resolved.Kind == FightKind::Encounter &&
+              resolved.EnemyIndex == EncounterOf(data, "wolf"),
+          "wolf is the encounter, which is the single wolf");
+
+    foe.Fight.Id = "rubble_shard";
+    Check(ResolveFight(data, foe.Fight, resolved, why), "a summoned foe with no encounter resolves");
+    Check(resolved.Kind == FightKind::Enemy && resolved.Id == "rubble_shard" &&
+              resolved.EnemyIndex == IndexOf(data, "rubble_shard"),
+          "a roster id that is not an encounter stays a single enemy");
+
+    Check(MarkedTargetLine("Wolf 2") == "Target: Wolf 2.", "a target change names the enemy");
+    Check(MarkedTargetLine("Rubble Shard 2") == "Target: Rubble Shard 2.",
+          "a numbered summon keeps that name in the target line");
 
     PlaytestOptions klass;
     klass.ClassId = "no_such_class";
@@ -299,7 +333,8 @@ void TestVarnSetupAndChoose()
     Check(why.empty(), "setup leaves no error");
     Check(hero.Level() == 6 && hero.ClassId() == "berserker" && !hero.ChoicePending(),
           "the path is already chosen, so the fight may start");
-    Check(setup.EnemyIndex == IndexOf(data, "oathkeeper_varn"), "the foe is Varn");
+    Check(setup.EnemyIndex == EncounterOf(data, "oathkeeper_varn") && setup.DirectEnemy.empty(),
+          "Varn is that encounter, not the roster slot");
     Check(bag.Gold() == 40, "gold is the amount from --gold");
     Check(CountOf(bag, "minor_potion") == 2 && CountOf(bag, "focus_tonic") == 1,
           "give puts stacks in the bag");
@@ -333,6 +368,36 @@ void TestVarnSetupAndChoose()
           "a bad pick fails once the choice is open");
     CheckHas(why, "no_such_path", "that failure names the id");
     Check(later.ClassId() == "fighter", "a failed pick leaves the fighter");
+}
+
+void TestWolfPackAndLoneEnemy()
+{
+    Database data = Sample();
+    Hero hero;
+    Inventory bag;
+    PlaytestSetup setup;
+    std::string why;
+
+    PlaytestOptions pack;
+    pack.Fight.Id = "wolf_pack";
+    Check(ApplyPlaytest(hero, bag, data, pack, setup, why), "the wolf pack is a legal start");
+    Check(setup.EnemyIndex == EncounterOf(data, "wolf_pack") && setup.DirectEnemy.empty(),
+          "startup keeps the encounter index and does not treat the pack as one enemy");
+
+    Hero shardHero;
+    Inventory shardBag;
+    PlaytestSetup shard;
+    PlaytestOptions lone;
+    lone.Fight.Id = "rubble_shard";
+    Check(ApplyPlaytest(shardHero, shardBag, data, lone, shard, why),
+          "a roster foe with no encounter is a legal start");
+    Check(shard.DirectEnemy == "rubble_shard" && shard.EnemyIndex == 0,
+          "that foe is started by id, and the encounter cursor stays on the first fight");
+
+    PlaytestOptions missing;
+    missing.Fight.Id = "no_such_pack";
+    Check(!CheckPlaytestStartup(missing, why), "an unknown --enemy fails before the window");
+    CheckHas(why, "no_such_pack", "startup names the unknown id");
 }
 
 void TestDataFolderHotReload()
@@ -369,6 +434,7 @@ int main()
     TestParseExampleAndEngineFlags();
     TestBadIds();
     TestVarnSetupAndChoose();
+    TestWolfPackAndLoneEnemy();
     TestDataFolderHotReload();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;

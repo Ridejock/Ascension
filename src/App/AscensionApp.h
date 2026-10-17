@@ -35,6 +35,9 @@ private:
     void AwardVictory();
     void Note(std::string line);
     void Note(const ActionResult& result);
+    // Writes a target-change line when the marked enemy moved. previous is the index
+    // before the action. A single enemy, or a marker that stayed put, writes nothing.
+    void NoteMarked(i32 previous);
     void FinishAction(const ActionResult& result, bool playerActed);
     void DrinkAt(i32 bagIndex);
     void HandlePicker(SDL_Scancode scancode);
@@ -60,6 +63,8 @@ private:
     std::vector<std::string> m_Log;
     std::string m_StartError;
     i32 m_EnemyIndex = 0;
+    // A roster foe from --enemy that is not an encounter. Empty fights use the encounter list.
+    std::string m_DirectEnemy;
     f32 m_ReloadWait = 0.0f;
     bool m_XpAwarded = false;
     bool m_Camp = false;
