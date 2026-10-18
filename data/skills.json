@@ -171,6 +171,17 @@
       ]
     },
     {
+      "id": "bone_bolt",
+      "name": "Bone Bolt",
+      "description": "A splinter of barrow-bone, loosed between draws.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 16, "scaling": "strength" }
+      ]
+    },
+    {
       "id": "harden",
       "name": "Harden",
       "description": "The stone sets. Defense rises for a few turns.",
