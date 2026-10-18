@@ -779,11 +779,10 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     if (!m_Data.IsLoaded() || m_Battle == nullptr || !m_StartError.empty()) {
         Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 28.0f}, "ASCENSION", kFrame, 3);
-        std::string message = m_StartError;
-        if (message.empty())
-            message = m_Data.GetLastError();
-        if (message.empty())
-            message = "Could not load data/.";
+        // No fight yet. A load error keeps its file and field. A fight block (a path still
+        // open, a class to pick, points to spend) keeps the sentence NextFightBlock produced.
+        const std::string message =
+            StartupFailureText(m_StartError, m_Data.GetLastError(), m_Hero.NextFightBlock());
         Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 80.0f}, Upper(message), kError,
                                2, leftSize.x - 48.0f);
         renderer.End();
