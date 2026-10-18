@@ -1,0 +1,43 @@
+GIMP Palette
+Name: Emerald LitRPG
+Columns: 8
+#
+ 26  20  35	outline
+ 58  63  82	steel0
+ 98 104 122	steel1
+149 155 171	steel2
+201 205 214	steel3
+138  74  60	skinA0
+208 138 104	skinA1
+242 194 154	skinA2
+ 78  42  42	skinB0
+138  86  56	skinB1
+182 126  82	skinB2
+ 46  30  34	hair0
+ 94  58  38	hair1
+ 74  44  34	leath0
+126  78  46	leath1
+176 122  68	leath2
+ 90  20  38	red0
+168  32  44	red1
+232  80  58	red2
+ 44  58  82	bg0
+ 79 106 134	bg1
+138 166 190	bg2
+122  74  24	gold0
+208 154  42	gold1
+246 220 106	gold2
+ 30  74  58	fol0
+ 58 138  62	fol1
+140 208  74	fol2
+ 42  36  56	stone0
+ 76  68  88	stone1
+122 112 132	stone2
+ 30  42 122	mp0
+ 46 106 216	mp1
+110 194 246	mp2
+ 28  62  70	teal0
+ 46 106 112	teal1
+ 90 160 160	teal2
+ 30  26  46	panel
+244 241 232	white

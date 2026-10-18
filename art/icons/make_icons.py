@@ -1,6 +1,7 @@
 """Build icons from icons.txt: shape maps -> auto top-left shading -> 1px outline -> 16x16.
 
-Reads palette.gpl from the parent of this folder (outline, steel0-3, panel, white).
+Reads art/palette.gpl next to this folder (outline, steel0-3, panel, white). The path is
+this file's directory, so the working directory does not matter.
 Writes the runtime sheet, accent sheet, and icons_sheet.json to assets/icons/.
 Per-icon PNGs and rarity_preview.png stay beside this script.
 """
@@ -8,8 +9,9 @@ import os,re,json
 from PIL import Image,ImageDraw
 HERE=os.path.dirname(os.path.abspath(__file__))
 RUNTIME=os.path.normpath(os.path.join(HERE,'..','..','assets','icons'))
+PALETTE=os.path.normpath(os.path.join(HERE,'..','palette.gpl'))
 P={}
-for l in open(HERE+'/../palette.gpl'):
+for l in open(PALETTE):
     m=re.match(r'\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)',l)
     if m: P[m.group(4)]=tuple(map(int,m.groups()[:3]))
 O=P['outline']; S=[P['steel0'],P['steel1'],P['steel2'],P['steel3']]
