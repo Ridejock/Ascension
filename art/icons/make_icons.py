@@ -66,7 +66,9 @@ sheet=Image.new('RGBA',(6*16,((len(icons)+5)//6)*16),(0,0,0,0)); asheet=sheet.co
 for i,(n,rows) in enumerate(icons.items()):
     im,ac=build(rows); im.save(f'{HERE}/icon_{n}.png'); ac.save(f'{HERE}/icon_{n}_accent.png'); ACCS[n]=(im,ac)
     x,y=(i%6)*16,(i//6)*16; sheet.paste(im,(x,y)); asheet.paste(ac,(x,y)); meta[n]=dict(x=x,y=y,w=16,h=16)
-sheet.save(RUNTIME+'/icons_sheet.png'); asheet.save(RUNTIME+'/icons_accent_sheet.png'); json.dump(meta,open(RUNTIME+'/icons_sheet.json','w'),indent=1)
+sheet.save(RUNTIME+'/icons_sheet.png'); asheet.save(RUNTIME+'/icons_accent_sheet.png')
+with open(RUNTIME+'/icons_sheet.json','w') as out:
+    json.dump(meta,out,indent=2); out.write('\n')
 bg=P['panel']; L=P['white']; cw=84
 pv=Image.new('RGB',(6*cw+8,2*(16+64+28)+12),bg); d=ImageDraw.Draw(pv)
 for i,n in enumerate(icons):
