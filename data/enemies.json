@@ -68,7 +68,7 @@
     {
       "id": "dire_wolf",
       "name": "Dire Wolf",
-      "description": "PLACEHOLDER: A barrow-fed wolf that runs at the front of the pack. Bigger, and slower to fall.",
+      "description": "A barrow-fed wolf that runs at the front of the pack. Bigger, and slower to fall.",
       "level": 5,
       "stats": {
         "vitality": 16,
