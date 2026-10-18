@@ -30,7 +30,7 @@
       "target": "enemy",
       "focusCost": 3,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 18, "scaling": "strength" },
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "strength" },
         { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
       ]
     },
@@ -246,6 +246,19 @@
       "focusCost": 0,
       "effects": [
         { "id": "shell", "trigger": "onUse", "op": "harden", "amount": 6, "turns": 2 }
+      ]
+    },
+    {
+      "id": "shield_bash",
+      "name": "Shield Bash",
+      "description": "Drive the rim in and leave the foe {crack.status}. A foe already {follow.ifTargetHas} takes the full weight and loses it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "defense" },
+        { "id": "follow", "trigger": "onUse", "op": "damage", "power": 20, "ifTargetHas": "exposed", "consume": true },
+        { "id": "crack", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
       ]
     }
   ]

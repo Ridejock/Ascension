@@ -99,6 +99,11 @@ struct EffectDef {
     std::optional<std::string> Status;
     // Empty: use the skill's target. A skill target of "enemy" means EffectAim::Target.
     std::optional<EffectAim> Aim;
+    // Damage only. When set, the blow lands on an aim only while that aim holds the status.
+    // Checked when the effect resolves, before onHit. Consume spends that status at the end of
+    // the use: every damage effect in the use still sees it, and the use does not apply it again.
+    std::optional<std::string> IfTargetHas;
+    bool Consume = false;
 };
 
 // A catalog skill, after its own tune and before any grant tune. Effects keep the ids a tune

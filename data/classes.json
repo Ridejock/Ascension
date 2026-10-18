@@ -58,7 +58,7 @@
         "agility": 1,
         "focus": 1
       },
-      "skills": ["shield_wall", "riposte"],
+      "skills": ["shield_wall", "riposte", "shield_bash"],
       "passives": ["bulwark"]
     }
   ]
