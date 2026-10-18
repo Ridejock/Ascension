@@ -37,7 +37,8 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
-// encounters, items, shop, combat, progress), checked against each other. Load once, then
+// encounters, items, rarities, shop, combat, progress), plus the icon sheet under assets/icons,
+// checked against each other. Load once, then
 // call CheckForChanges from
 // the frame loop: a file that changed, and then stayed unchanged for one more check, is read
 // again. A failed read keeps the previous definitions and sets GetLastError().
@@ -73,7 +74,12 @@ public:
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
     [[nodiscard]] std::span<const EncounterDef> GetEncounters() const { return m_Encounters; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
+    [[nodiscard]] std::span<const RarityDef> GetRarities() const { return m_Rarities; }
+    [[nodiscard]] std::span<const IconDef> GetIcons() const { return m_Icons; }
     [[nodiscard]] const ShopDef& GetShop() const { return m_Shop; }
+    // icons_sheet.json. The accent sheet is icons_accent_sheet.png beside it. Dev builds use the
+    // source assets/ when that file is present, and a packaged build uses assets/ next to data/.
+    [[nodiscard]] const std::filesystem::path& GetIconSheet() const { return m_IconSheet; }
     [[nodiscard]] const CombatRules& GetRules() const { return m_Rules; }
     [[nodiscard]] const ProgressRules& GetProgress() const { return m_Progress; }
 
@@ -84,6 +90,8 @@ public:
     [[nodiscard]] const EnemyDef* FindEnemy(std::string_view id) const;
     [[nodiscard]] const EncounterDef* FindEncounter(std::string_view id) const;
     [[nodiscard]] const ItemDef* FindItem(std::string_view id) const;
+    [[nodiscard]] const RarityDef* FindRarity(std::string_view id) const;
+    [[nodiscard]] const IconDef* FindIcon(std::string_view id) const;
 
     // Evolutions whose EvolvesFrom is `baseId`, in file order.
     [[nodiscard]] std::vector<const ClassDef*> EvolutionsOf(std::string_view baseId) const;
@@ -139,6 +147,9 @@ private:
     std::vector<EnemyDef> m_Enemies;
     std::vector<EncounterDef> m_Encounters;
     std::vector<ItemDef> m_Items;
+    std::vector<RarityDef> m_Rarities;
+    std::vector<IconDef> m_Icons;
+    std::filesystem::path m_IconSheet;
     ShopDef m_Shop;
     CombatRules m_Rules;
     ProgressRules m_Progress;

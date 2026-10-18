@@ -1,0 +1,9 @@
+{
+  "rarities": [
+    { "id": "common", "name": "Common", "color": "#9DA3AD" },
+    { "id": "uncommon", "name": "Uncommon", "color": "#5EC45E" },
+    { "id": "rare", "name": "Rare", "color": "#4A90E2" },
+    { "id": "epic", "name": "Epic", "color": "#A35BD9" },
+    { "id": "legendary", "name": "Legendary", "color": "#F0902E" }
+  ]
+}

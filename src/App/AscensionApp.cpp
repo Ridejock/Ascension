@@ -10,6 +10,8 @@
 
 #include "Emerald/Math/Mat4.h"
 #include "Emerald/Renderer/DebugText.h"
+#include "Emerald/Renderer/Sprite.h"
+#include "Emerald/Renderer/TextureAtlas.h"
 
 namespace Ascension {
 
@@ -480,6 +482,7 @@ void AscensionApp::OnStart()
     m_DirectEnemy = std::move(setup.DirectEnemy);
     if (!TakeAutoPath())
         return;
+    EnsureIcons();
     BeginFight();
 }
 
@@ -1242,11 +1245,6 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     renderer.End();
 }
 
-std::string StockLine(const Database& data, const ItemDef& item)
-{
-    return item.Name + "   " + std::to_string(item.Value) + " gold" + GearLine(data, item, true);
-}
-
 void AscensionApp::DrinkAt(i32 bagIndex)
 {
     if (m_Battle == nullptr)
@@ -1407,96 +1405,290 @@ void AscensionApp::HandleCamp(SDL_Scancode scancode)
     Note("Equipped " + wornName + ".");
 }
 
+namespace {
+
+// Base sheet plus the accent sheet. Column and Row are the drawn icon size (native pixels
+// times Scale). Scale is an integer so nearest filtering keeps every texel the same size.
+struct IconArt {
+    const Emerald::TextureAtlas* Base = nullptr;
+    const Emerald::Texture* Accent = nullptr;
+    i32 Scale = 1;
+    f32 Column = 0.0f;
+    f32 Row = 0.0f;
+};
+
+bool AssetIsLive(const Emerald::Assets& assets, Emerald::AssetId id)
+{
+    const std::optional<Emerald::AssetInfo> info = assets.GetInfo(id);
+    return info.has_value() && !info->Placeholder;
+}
+
+i32 TallestIcon(const Database& data)
+{
+    i32 tallest = 1;
+    for (const IconDef& icon : data.GetIcons()) {
+        if (icon.Height > tallest)
+            tallest = icon.Height;
+    }
+    return tallest;
+}
+
+// Largest integer scale whose icons fit in `room` pixels across `rows` rows. 1 when the native
+// icon is already taller than the slot.
+i32 IconScaleFor(f32 room, i32 rows, i32 pixels)
+{
+    i32 scale = 1;
+    if (rows < 1 || pixels < 1 || room <= 0.0f)
+        return scale;
+    for (i32 next = 2; next <= 4; ++next) {
+        const f32 need = static_cast<f32>(next) * static_cast<f32>(pixels) * static_cast<f32>(rows);
+        if (need > room + 0.5f)
+            break;
+        scale = next;
+    }
+    return scale;
+}
+
+void MeasureIconColumn(const Database& data, i32 scale, f32& column, f32& row)
+{
+    column = 0.0f;
+    row = 0.0f;
+    const i32 drawScale = scale < 1 ? 1 : scale;
+    for (const IconDef& icon : data.GetIcons()) {
+        const f32 width = static_cast<f32>(icon.Width * drawScale);
+        const f32 height = static_cast<f32>(icon.Height * drawScale);
+        if (width > column)
+            column = width;
+        if (height > row)
+            row = height;
+    }
+}
+
+Emerald::Vec4 RarityTint(const Database& data, const ItemDef& item, const Emerald::Vec4& fallback)
+{
+    const RarityDef* rarity = data.FindRarity(item.Rarity);
+    if (rarity == nullptr)
+        return fallback;
+    return {static_cast<f32>(rarity->Red) / 255.0f, static_cast<f32>(rarity->Green) / 255.0f,
+            static_cast<f32>(rarity->Blue) / 255.0f, 1.0f};
+}
+
+void DrawItemIcon(Emerald::Renderer2D& renderer, const IconArt& art, std::string_view iconId,
+                  const Emerald::Vec2& topLeft, const Emerald::Vec4& tint)
+{
+    if (art.Base == nullptr || art.Base->IsPlaceholder() || iconId.empty())
+        return;
+    const std::optional<Emerald::Sprite> sprite = art.Base->Find(iconId);
+    if (!sprite.has_value() || sprite->Source == nullptr)
+        return;
+    Emerald::SpriteOptions options;
+    options.Size = {sprite->Region.Size.x * static_cast<f32>(art.Scale),
+                    sprite->Region.Size.y * static_cast<f32>(art.Scale)};
+    options.Origin = {0.0f, 0.0f};
+    options.PixelSnap = true;
+    const f32 shiftX = art.Column > options.Size.x ? (art.Column - options.Size.x) * 0.5f : 0.0f;
+    const f32 shiftY = art.Row > options.Size.y ? (art.Row - options.Size.y) * 0.5f : 0.0f;
+    const Emerald::Vec2 at = topLeft + Emerald::Vec2{shiftX, shiftY};
+    renderer.DrawSprite(*sprite, at, options);
+    if (art.Accent == nullptr)
+        return;
+    Emerald::Sprite accent;
+    accent.Source = art.Accent;
+    accent.Region = sprite->Region;
+    options.Tint = tint;
+    renderer.DrawSprite(accent, at, options);
+}
+
+// Icon, then `lead`, then the item name in the rarity color, then `tail` in `color`.
+// Returns the y of the next row.
+f32 DrawGearRow(Emerald::Renderer2D& renderer, const IconArt& art, const Emerald::Vec2& origin,
+                f32 width, const ItemDef* item, const Emerald::Vec4& nameColor,
+                std::string_view lead, std::string_view name, std::string_view tail,
+                const Emerald::Vec4& color)
+{
+    const f32 textLine = Emerald::DebugTextLineHeight(1);
+    const f32 rowH = art.Row > textLine ? art.Row : textLine;
+    if (item != nullptr)
+        DrawItemIcon(renderer, art, item->Icon, origin, nameColor);
+    const i32 textOffset = static_cast<i32>(rowH - textLine) / 2;
+    const f32 textY = origin.y + static_cast<f32>(textOffset > 0 ? textOffset : 0);
+    f32 x = origin.x;
+    if (art.Column > 0.0f)
+        x += art.Column + 4.0f;
+    const std::string leadText = Upper(lead);
+    const std::string nameText = Upper(name);
+    const std::string tailText = Upper(tail);
+    if (!leadText.empty()) {
+        Emerald::DrawDebugText(renderer, {x, textY}, leadText, color, 1);
+        x += Emerald::MeasureDebugText(leadText, 1).x;
+    }
+    if (!nameText.empty()) {
+        Emerald::DrawDebugText(renderer, {x, textY}, nameText, nameColor, 1);
+        x += Emerald::MeasureDebugText(nameText, 1).x;
+    }
+    if (!tailText.empty()) {
+        const f32 used = x - origin.x;
+        const f32 remain = width > used ? width - used : 0.0f;
+        Emerald::DrawDebugText(renderer, {x, textY}, tailText, color, 1, remain);
+    }
+    return origin.y + rowH;
+}
+
+} // namespace
+
+void AscensionApp::EnsureIcons()
+{
+    if (m_Icons || !m_Data.IsLoaded())
+        return;
+    Emerald::TextureOptions options;
+    options.Filter = Emerald::TextureFilter::Nearest;
+    const std::filesystem::path sheet = m_Data.GetIconSheet();
+    m_Icons = GetAssets().Load<Emerald::TextureAtlas>(sheet, options);
+    const std::filesystem::path accent = sheet.parent_path() / "icons_accent_sheet.png";
+    m_Accents = GetAssets().Load<Emerald::Texture>(accent, options);
+}
+
 void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
+    EnsureIcons();
     const Emerald::Vec2 left{28.0f, 24.0f};
-    const Emerald::Vec2 leftSize{600.0f, height - 188.0f};
+    // The worn and bag lists are the tall column. The footer under it keeps a few notes and
+    // the help line. Icon scale is chosen so that column's rows fit at an integer size.
+    const f32 footer = 88.0f;
+    const f32 panelH = height - left.y - footer;
+    const Emerald::Vec2 leftSize{600.0f, panelH};
     const Emerald::Vec2 right{648.0f, 24.0f};
-    const Emerald::Vec2 rightSize{width - 676.0f, height - 188.0f};
+    const Emerald::Vec2 rightSize{width - 676.0f, panelH};
     DrawPanel(renderer, left, leftSize);
     DrawPanel(renderer, right, rightSize);
-    DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
+    const f32 panelBottom = left.y + panelH;
+    const f32 bottomY = panelBottom + 8.0f;
+    const f32 bottomH = height - 16.0f - bottomY;
+    if (bottomH > 8.0f)
+        DrawPanel(renderer, {28.0f, bottomY}, {width - 56.0f, bottomH});
 
     ClampCamp();
     const ShopDef& shop = m_Data.GetShop();
     const bool bagSide = m_CampColumn == 0;
+    const f32 text2 = Emerald::DebugTextLineHeight(2);
     f32 y = left.y + 16.0f;
     Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(shop.Name), kFrame, 2);
-    y += Emerald::DebugTextLineHeight(2) + 2.0f;
+    y += text2 + 2.0f;
     Emerald::DrawDebugText(renderer, {left.x + 24.0f, y},
                            Upper(shop.Keeper + "    gold " + std::to_string(m_Inventory.Gold())),
                            kInk, 2);
-    y += Emerald::DebugTextLineHeight(2) + 8.0f;
+    y += text2 + 2.0f;
+    y += 8.0f;
     Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, "WORN AND BAG", bagSide ? kFrame : kDim,
                            2);
-    y += Emerald::DebugTextLineHeight(2) + 4.0f;
+    y += text2 + 4.0f;
 
+    const i32 bagSlots = m_Inventory.BagSlots();
+    const i32 leftRows = 4 + bagSlots;
+    const f32 sectionGap = 6.0f;
+    const f32 room = panelBottom - y - 4.0f - sectionGap;
+    const i32 scale = IconScaleFor(room, leftRows, TallestIcon(m_Data));
+    IconArt art;
+    art.Scale = scale;
+    if (m_Icons && AssetIsLive(GetAssets(), m_Icons.GetId()))
+        art.Base = &m_Icons.Get();
+    if (m_Accents && AssetIsLive(GetAssets(), m_Accents.GetId()))
+        art.Accent = &m_Accents.Get();
+    MeasureIconColumn(m_Data, art.Scale, art.Column, art.Row);
+
+    const f32 iconX = left.x + 16.0f;
+    const f32 rowWidth = leftSize.x - 32.0f;
     const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
                                   GearSlot::Accessory};
     const char* wornLabels[] = {"WEAPON", "OFFHAND", "ARMOR", "ACCESSORY"};
-    for (i32 row = 0; row < 4; ++row) {
-        const bool marked = bagSide && m_CampRow == row;
-        std::string rowText = marked ? "> " : "  ";
-        rowText += wornLabels[row];
-        rowText += "  ";
-        if (wornSlots[row] == GearSlot::Offhand && m_Inventory.OffhandBlocked()) {
-            rowText += "BOTH HANDS";
+    for (i32 wornIndex = 0; wornIndex < 4; ++wornIndex) {
+        const bool marked = bagSide && m_CampRow == wornIndex;
+        const Emerald::Vec4 rowColor = marked ? kFrame : kInk;
+        std::string lead = marked ? "> " : "  ";
+        lead += wornLabels[wornIndex];
+        lead += "  ";
+        const ItemDef* piece = nullptr;
+        std::string name;
+        std::string tail;
+        if (wornSlots[wornIndex] == GearSlot::Offhand && m_Inventory.OffhandBlocked()) {
+            lead += "BOTH HANDS";
         } else {
-            const std::string& worn = m_Inventory.Equipped(wornSlots[row]);
-            if (worn.empty())
-                rowText += "EMPTY";
-            else {
-                const ItemDef* piece = m_Data.FindItem(worn);
+            const std::string& worn = m_Inventory.Equipped(wornSlots[wornIndex]);
+            if (worn.empty()) {
+                lead += "EMPTY";
+            } else {
+                piece = m_Data.FindItem(worn);
                 if (piece == nullptr)
-                    rowText += worn;
-                else
-                    rowText += piece->Name + GearLine(m_Data, *piece, false);
+                    lead += worn;
+                else {
+                    name = piece->Name;
+                    tail = GearLine(m_Data, *piece, false);
+                }
             }
         }
-        Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(rowText),
-                               marked ? kFrame : kInk, 1, leftSize.x - 48.0f);
-        y += Emerald::DebugTextLineHeight(1) + 2.0f;
+        const Emerald::Vec4 nameColor =
+            piece != nullptr ? RarityTint(m_Data, *piece, rowColor) : rowColor;
+        y = DrawGearRow(renderer, art, {iconX, y}, rowWidth, piece, nameColor, lead, name, tail,
+                        rowColor);
     }
-    y += 6.0f;
-    for (i32 slot = 0; slot < m_Inventory.BagSlots(); ++slot) {
-        const bool marked = bagSide && m_CampRow == slot + 4;
-        const ItemStack& stack = m_Inventory.BagAt(slot);
-        std::string rowText = marked ? "> " : "  ";
+    y += sectionGap;
+    for (i32 bagIndex = 0; bagIndex < bagSlots; ++bagIndex) {
+        const bool marked = bagSide && m_CampRow == bagIndex + 4;
+        const Emerald::Vec4 rowColor = marked ? kFrame : kDim;
+        const ItemStack& stack = m_Inventory.BagAt(bagIndex);
+        std::string lead = marked ? "> " : "  ";
+        const ItemDef* held = nullptr;
+        std::string name;
+        std::string tail;
         if (stack.Empty()) {
-            rowText += "EMPTY";
+            lead += "EMPTY";
         } else {
-            const ItemDef* held = m_Data.FindItem(stack.Id);
-            rowText += held != nullptr ? held->Name : stack.Id;
-            rowText += " x" + std::to_string(stack.Count);
-            if (held != nullptr) {
-                rowText += "   sell " + std::to_string(SellPrice(shop, held->Value));
-                rowText += GearLine(m_Data, *held, true);
+            held = m_Data.FindItem(stack.Id);
+            if (held == nullptr) {
+                lead += stack.Id;
+                lead += " x" + std::to_string(stack.Count);
+            } else {
+                name = held->Name;
+                tail = " x" + std::to_string(stack.Count);
+                tail += "   sell " + std::to_string(SellPrice(shop, held->Value));
+                tail += GearLine(m_Data, *held, true);
             }
         }
-        Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(rowText),
-                               marked ? kFrame : kDim, 1, leftSize.x - 48.0f);
-        y += Emerald::DebugTextLineHeight(1) + 1.0f;
+        const Emerald::Vec4 nameColor =
+            held != nullptr ? RarityTint(m_Data, *held, rowColor) : rowColor;
+        y = DrawGearRow(renderer, art, {iconX, y}, rowWidth, held, nameColor, lead, name, tail,
+                        rowColor);
     }
 
     y = right.y + 16.0f;
     Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, "STOCK", bagSide ? kDim : kFrame, 2);
-    y += Emerald::DebugTextLineHeight(2) + 8.0f;
-    for (i32 row = 0; row < static_cast<i32>(shop.Stock.size()); ++row) {
-        const bool marked = !bagSide && m_CampRow == row;
-        const ItemDef* goods = m_Data.FindItem(shop.Stock[static_cast<usize>(row)]);
-        std::string rowText = marked ? "> " : "  ";
-        if (goods == nullptr)
-            rowText += shop.Stock[static_cast<usize>(row)];
-        else
-            rowText += StockLine(m_Data, *goods);
-        Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, Upper(rowText),
-                               marked ? kFrame : kInk, 1, rightSize.x - 48.0f);
-        y += Emerald::DebugTextLineHeight(1) + 6.0f;
+    y += text2 + 8.0f;
+    const f32 stockWidth = rightSize.x - 32.0f;
+    for (i32 stockIndex = 0; stockIndex < static_cast<i32>(shop.Stock.size()); ++stockIndex) {
+        const bool marked = !bagSide && m_CampRow == stockIndex;
+        const Emerald::Vec4 rowColor = marked ? kFrame : kInk;
+        const ItemDef* goods = m_Data.FindItem(shop.Stock[static_cast<usize>(stockIndex)]);
+        std::string lead = marked ? "> " : "  ";
+        std::string name;
+        std::string tail;
+        if (goods == nullptr) {
+            lead += shop.Stock[static_cast<usize>(stockIndex)];
+        } else {
+            name = goods->Name;
+            tail = "   " + std::to_string(goods->Value) + " gold";
+            tail += GearLine(m_Data, *goods, true);
+        }
+        const Emerald::Vec4 nameColor =
+            goods != nullptr ? RarityTint(m_Data, *goods, rowColor) : rowColor;
+        y = DrawGearRow(renderer, art, {right.x + 16.0f, y}, stockWidth, goods, nameColor, lead,
+                        name, tail, rowColor);
     }
 
-    Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, Upper(shop.Name), kFrame, 2);
-    f32 logY = height - 96.0f;
+    const f32 helpY = height - 36.0f;
+    f32 logY = bottomY + 10.0f;
     for (const std::string& note : m_Log) {
+        if (logY + Emerald::DebugTextLineHeight(1) > helpY)
+            break;
         Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(note), kDim, 1, width - 96.0f);
         logY += Emerald::DebugTextLineHeight(1) + 1.0f;
     }

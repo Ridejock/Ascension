@@ -62,6 +62,8 @@ target_include_directories(AscensionData PUBLIC include)
 target_link_libraries(AscensionData
     PUBLIC Emerald::Emerald
     PRIVATE nlohmann_json::nlohmann_json)
+target_compile_definitions(AscensionData PRIVATE
+    ASCENSION_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 emerald_set_warnings(AscensionData)
 
 # ---------------------------------------------------------------------------
@@ -112,7 +114,10 @@ add_custom_target(AscensionContent
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Ascension>/data"
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/data" "$<TARGET_FILE_DIR:Ascension>/data"
-    COMMENT "Copying data/ next to the executable"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Ascension>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:Ascension>/assets"
+    COMMENT "Copying data/ and assets/ next to the executable"
     VERBATIM
 )
 add_dependencies(Ascension AscensionContent)

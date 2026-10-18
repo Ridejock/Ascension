@@ -21,8 +21,22 @@ using FileTime = std::optional<std::filesystem::file_time_type>;
 constexpr const char* kFileNames[] = {
     "stats.json",   "effects.json", "skills.json",     "statuses.json",
     "classes.json", "enemies.json", "encounters.json", "items.json",
-    "shop.json",    "combat.json",  "progress.json",
+    "shop.json",    "combat.json",  "progress.json",   "rarities.json",
 };
+
+// Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
+// source path is not on disk, reads assets/icons next to the data directory.
+std::filesystem::path IconSheetFor(const std::filesystem::path& dataDirectory)
+{
+#ifdef ASCENSION_ASSETS_DIR
+    const std::filesystem::path source =
+        std::filesystem::path(ASCENSION_ASSETS_DIR) / "icons" / "icons_sheet.json";
+    std::error_code missing;
+    if (std::filesystem::is_regular_file(source, missing))
+        return source;
+#endif
+    return dataDirectory.parent_path() / "assets" / "icons" / "icons_sheet.json";
+}
 
 constexpr i32 kMinLevel = 1;
 constexpr i32 kMaxLevel = 99;
@@ -293,6 +307,8 @@ struct Parsed {
     std::vector<EnemyDef> Enemies;
     std::vector<EncounterDef> Encounters;
     std::vector<ItemDef> Items;
+    std::vector<RarityDef> Rarities;
+    std::vector<IconDef> Icons;
     ShopDef Shop;
     CombatRules Rules;
     ProgressRules Progress;
@@ -1571,10 +1587,17 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
             return fail("there is another item with this id");
         std::string unknown;
         if (!AllowKeys(entry,
-                       {"id", "name", "description", "slot", "bonus", "value", "twoHanded", "heal",
-                        "focus", "grants"},
+                       {"id", "name", "description", "icon", "rarity", "slot", "bonus", "value",
+                        "twoHanded", "heal", "focus", "grants"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
+        if (!RequireString(entry, "icon", item.Icon, error) ||
+            !RequireString(entry, "rarity", item.Rarity, error))
+            return fail(error);
+        if (!IsId(item.Icon))
+            return fail("icon must be letters, digits and _, starting with a letter");
+        if (!IsId(item.Rarity))
+            return fail("rarity must be letters, digits and _, starting with a letter");
         std::string slot;
         if (!RequireString(entry, "slot", slot, error))
             return fail(error);
@@ -1641,6 +1664,128 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
             !RequireString(entry, "description", item.Description, error))
             return fail(error);
         parsed.Items.push_back(std::move(item));
+    }
+    return true;
+}
+
+int HexNibble(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+bool ParseColor(std::string_view text, u8& red, u8& green, u8& blue, std::string& error)
+{
+    if (text.size() != 7 || text[0] != '#') {
+        error = "'color' must be #RRGGBB";
+        return false;
+    }
+    const int r0 = HexNibble(text[1]);
+    const int r1 = HexNibble(text[2]);
+    const int g0 = HexNibble(text[3]);
+    const int g1 = HexNibble(text[4]);
+    const int b0 = HexNibble(text[5]);
+    const int b1 = HexNibble(text[6]);
+    if (r0 < 0 || r1 < 0 || g0 < 0 || g1 < 0 || b0 < 0 || b1 < 0) {
+        error = "'color' must be #RRGGBB";
+        return false;
+    }
+    red = static_cast<u8>(r0 * 16 + r1);
+    green = static_cast<u8>(g0 * 16 + g1);
+    blue = static_cast<u8>(b0 * 16 + b1);
+    return true;
+}
+
+bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("rarities");
+    if (list == root.end() || !list->is_array()) {
+        error = "'rarities' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "rarity entries must be objects";
+            return false;
+        }
+        RarityDef rarity;
+        if (!RequireString(entry, "id", rarity.Id, error))
+            return false;
+        const std::string where = "rarity " + Quote(rarity.Id);
+        if (!IsId(rarity.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (FindId(parsed.Rarities, rarity.Id) != nullptr) {
+            error = where + ": there is another rarity with this id";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "name", "color"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        std::string color;
+        if (!RequireString(entry, "name", rarity.Name, error) ||
+            !RequireString(entry, "color", color, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        std::string why;
+        if (!ParseColor(color, rarity.Red, rarity.Green, rarity.Blue, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        parsed.Rarities.push_back(std::move(rarity));
+    }
+    return true;
+}
+
+bool LoadIconSheet(const Json& root, Parsed& parsed, std::string& error)
+{
+    if (!root.is_object()) {
+        error = "the file must be a JSON object";
+        return false;
+    }
+    for (auto it = root.begin(); it != root.end(); ++it) {
+        IconDef icon;
+        icon.Id = it.key();
+        const std::string where = "icon " + Quote(icon.Id);
+        if (!IsId(icon.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (FindId(parsed.Icons, icon.Id) != nullptr) {
+            error = where + ": there is another icon with this id";
+            return false;
+        }
+        if (!it->is_object()) {
+            error = where + ": must be an object with x, y, w, and h";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(*it, {"x", "y", "w", "h"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        std::string why;
+        if (!RequireInt(*it, "x", 0, 4096, icon.X, why) ||
+            !RequireInt(*it, "y", 0, 4096, icon.Y, why) ||
+            !RequireInt(*it, "w", 1, 4096, icon.Width, why) ||
+            !RequireInt(*it, "h", 1, 4096, icon.Height, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        parsed.Icons.push_back(std::move(icon));
+    }
+    if (parsed.Icons.empty()) {
+        error = "needs at least one icon";
+        return false;
     }
     return true;
 }
@@ -2330,8 +2475,17 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
         }
     }
     for (const ItemDef& item : parsed.Items) {
-        if (!GrantsKnown(parsed, item.Grants, "item " + Quote(item.Id), error))
+        const std::string itemWhere = "item " + Quote(item.Id);
+        if (!GrantsKnown(parsed, item.Grants, itemWhere, error))
             return false;
+        if (FindId(parsed.Icons, item.Icon) == nullptr) {
+            error = itemWhere + ": icon " + Quote(item.Icon) + " does not exist";
+            return false;
+        }
+        if (FindId(parsed.Rarities, item.Rarity) == nullptr) {
+            error = itemWhere + ": rarity " + Quote(item.Rarity) + " does not exist";
+            return false;
+        }
     }
     for (const std::string& stocked : parsed.Shop.Stock) {
         if (FindId(parsed.Items, stocked) == nullptr) {
@@ -2353,15 +2507,21 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     for (usize i = 0; i < files.size(); ++i)
         times[i] = ReadStamp(files[i]);
 
+    if (files.size() != std::size(kFileNames) + 1) {
+        error = "internal: data file list";
+        return false;
+    }
+
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
                               LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
-                              LoadShop,    LoadCombat,  LoadProgress};
+                              LoadShop,    LoadCombat,  LoadProgress,   LoadRarities};
+    static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
                            "classes.json", "enemies.json", "encounters.json", "items.json",
-                           "shop.json",    "combat.json",  "progress.json"};
+                           "shop.json",    "combat.json",  "progress.json",   "rarities.json"};
 
-    for (usize i = 0; i < files.size(); ++i) {
+    for (usize i = 0; i < std::size(kFileNames); ++i) {
         std::string text;
         std::string why;
         if (!ReadText(files[i], text, why)) {
@@ -2376,7 +2536,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         std::string unknown;
         const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
                                     "classes", "enemies", "encounters", "items",
-                                    "shop",    "combat",  "progress"};
+                                    "shop",    "combat",  "progress",   "rarities"};
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
                                 : AllowKeys(root, {allowedTop[i]}, unknown);
@@ -2386,6 +2546,20 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         }
         if (!loaders[i](root, parsed, why)) {
             error = Err(names[i], {}, why);
+            return false;
+        }
+    }
+    {
+        std::string text;
+        std::string why;
+        const std::filesystem::path& iconPath = files[std::size(kFileNames)];
+        if (!ReadText(iconPath, text, why)) {
+            error = Err("icons_sheet.json", {}, why);
+            return false;
+        }
+        Json iconRoot;
+        if (!ParseRoot(text, iconRoot, why) || !LoadIconSheet(iconRoot, parsed, why)) {
+            error = Err("icons_sheet.json", {}, why);
             return false;
         }
     }
@@ -2425,6 +2599,10 @@ Database::Database(std::filesystem::path directory) : m_Directory(std::move(dire
         watch.Path = m_Directory / name;
         m_Watches.push_back(std::move(watch));
     }
+    m_IconSheet = IconSheetFor(m_Directory);
+    FileWatch icons;
+    icons.Path = m_IconSheet;
+    m_Watches.push_back(std::move(icons));
 }
 
 void Database::NoteFailure(const DataError& error, DataError* out)
@@ -2481,6 +2659,8 @@ bool Database::Load(DataError* error)
     m_Enemies = std::move(parsed.Enemies);
     m_Encounters = std::move(parsed.Encounters);
     m_Items = std::move(parsed.Items);
+    m_Rarities = std::move(parsed.Rarities);
+    m_Icons = std::move(parsed.Icons);
     m_Shop = std::move(parsed.Shop);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
@@ -2553,6 +2733,16 @@ const EncounterDef* Database::FindEncounter(std::string_view id) const
 const ItemDef* Database::FindItem(std::string_view id) const
 {
     return FindId(m_Items, id);
+}
+
+const RarityDef* Database::FindRarity(std::string_view id) const
+{
+    return FindId(m_Rarities, id);
+}
+
+const IconDef* Database::FindIcon(std::string_view id) const
+{
+    return FindId(m_Icons, id);
 }
 
 std::vector<const ClassDef*> Database::EvolutionsOf(std::string_view baseId) const
