@@ -1,4 +1,4 @@
-// Bag, gear, and Pell's shop. No window or GPU.
+// Bag, gear, and the shop. No window or GPU.
 
 #include <chrono>
 #include <filesystem>

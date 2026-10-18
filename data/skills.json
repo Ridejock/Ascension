@@ -48,7 +48,7 @@
     {
       "id": "rage",
       "name": "Rage",
-      "description": "Spend focus to hit harder for your next three turns.",
+      "description": "Spend focus for {fury.status}: {fury.status.dealt} percent more damage for a short while.",
       "kind": "active",
       "target": "self",
       "focusCost": 3,
@@ -70,7 +70,7 @@
     {
       "id": "bloodlust",
       "name": "Bloodlust",
-      "description": "Gain 1 strength for every 10 percent of health that is missing, up to 6.",
+      "description": "Gain {fury.amount} {fury.stat} for every {fury.per} percent of health that is missing, up to {fury.max}.",
       "kind": "passive",
       "effects": [
         {
@@ -98,7 +98,7 @@
     {
       "id": "riposte",
       "name": "Riposte",
-      "description": "Guard half of the next hit and send half of what it stops back, plus a blow that scales with defense.",
+      "description": "Guard {ward.amount} percent of the next hit and send {back.percent} percent of what it stops back, plus a blow that scales with {back.scaling}.",
       "kind": "active",
       "target": "self",
       "focusCost": 2,
@@ -117,7 +117,7 @@
     {
       "id": "bulwark",
       "name": "Bulwark",
-      "description": "Defense +3. A guard that actually stops damage also returns 1 focus.",
+      "description": "{def.stat} +{def.amount}. A guard that actually stops damage also returns {focus.amount} focus.",
       "kind": "passive",
       "effects": [
         { "id": "def", "trigger": "always", "op": "stat", "stat": "defense", "amount": 3 },
@@ -138,7 +138,7 @@
     {
       "id": "slash",
       "name": "Slash",
-      "description": "A dirty cut. Every third slash leaves a bleed.",
+      "description": "A dirty cut. Every {bleed.every} slashes leave a {bleed.status}.",
       "kind": "active",
       "target": "enemy",
       "focusCost": 0,
@@ -161,7 +161,7 @@
     {
       "id": "aimed_shot",
       "name": "Aimed Shot",
-      "description": "A long draw. The shot is telegraphed for two turns, then flies.",
+      "description": "A long draw. The shot is telegraphed for {windup} turns, then flies.",
       "kind": "active",
       "target": "enemy",
       "focusCost": 0,

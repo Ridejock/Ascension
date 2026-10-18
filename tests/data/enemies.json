@@ -84,7 +84,7 @@
     {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
-      "description": "Oathkeeper Varn keeps the Stillbarrow. Below half health the barrow throws a rubble shard into the fight.",
+      "description": "{name} keeps the Stillbarrow. Below {phaseAt} percent health the barrow throws a {summon} into the fight.",
       "level": 8,
       "boss": true,
       "stats": {

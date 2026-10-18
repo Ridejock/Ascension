@@ -10,14 +10,15 @@ constexpr i32 kXpCap = 999999;
 
 bool Hero::Start(const Database& data, std::string& error)
 {
-    if (data.FindClass("fighter") == nullptr) {
-        error = "class 'fighter' does not exist";
+    const std::vector<const ClassDef*> starters = data.Starters();
+    if (starters.empty() || starters.front() == nullptr) {
+        error = "no starter class";
         m_Data = nullptr;
         m_ClassId.clear();
         return false;
     }
     m_Data = &data;
-    m_ClassId = "fighter";
+    m_ClassId = starters.front()->Id;
     m_Xp = 0;
     m_Practiced.clear();
     m_Uses.clear();

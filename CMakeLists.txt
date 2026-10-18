@@ -94,6 +94,7 @@ add_executable(Ascension
     src/App/Main.cpp
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
+    src/App/GearLine.h
     src/App/Playtest.cpp
     src/App/Playtest.h
 )
@@ -133,8 +134,11 @@ if(ASCENSION_BUILD_TESTS)
 
     add_executable(AscensionDataTests tests/DataTests.cpp tests/Check.h)
     target_link_libraries(AscensionDataTests PRIVATE AscensionData)
+    target_include_directories(AscensionDataTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/App")
     target_compile_definitions(AscensionDataTests PRIVATE
-        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionDataTests)
     add_test(NAME Data COMMAND AscensionDataTests)
 

@@ -35,7 +35,7 @@ struct AttributeSource {
 // class and spends the pool. The total does not change.
 class Hero {
 public:
-    // Starts as the level-1 fighter with no XP. Fails if that class is not in `data`.
+    // Starts as the first starter class, at level 1 with no XP. Fails if `data` has none.
     bool Start(const Database& data, std::string& error);
 
     // The class id still has to exist. XP and uses are kept, so a new curve or uses-per-rank

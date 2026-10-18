@@ -58,7 +58,7 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ctest --test-dir build/debug --output-on-failure
 ```
 
-`AscensionDataTests` loads `tests/data/`, a frozen copy of the data the checks were written against, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against those sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and Pell's shop. `AscensionPlaytestTests` checks the playtest flags, unknown ids, and a `--data` folder that hot-reloads. None of them open a window. They do not read the shipped `data/`, so tuning that folder does not move the checks.
+`AscensionDataTests` loads `tests/data/`, a frozen copy of the data the checks were written against, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against those sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and the shop. `AscensionPlaytestTests` checks the playtest flags, unknown ids, and a `--data` folder that hot-reloads. None of them open a window. One data check loads the shipped `data/` and asserts that every description expands. It does not lock the wording, so a retune of a number does not move it. The other checks stay on `tests/data/`.
 
 ## Data
 
@@ -105,6 +105,18 @@ A hit is `power + scaling stat`, minus defense, and then at least `minDamage`. T
 `items.json` is the gear and the drinks. A weapon may set `twoHanded`, which fills the offhand as well. Oak Shield is an offhand. Consumables are not worn: `heal` is flat health and `focus` is flat focus, spent as a turn in a fight. The sample is Rusty Sword (strength +1, 12 gold), Notched Greataxe (strength +6, defense -2, two-handed, 60 gold), Oak Shield (defense +2, 15 gold), Oathkeeper's Plate (defense +6, agility -1, 55 gold), Wolfhide Charm (agility +2, 35 gold), Minor Potion (heal 30, 10 gold), and Focus Tonic (focus +4, 15 gold). The sword, the axe, and the plate prices are the ones chosen for this slice. Selling pays half the buy price, rounded down (`sellNumerator` 1, `sellDenominator` 2).
 
 `shop.json` is Pell Harrow's shop, Old Pell's Provisions. `bagSlots` is 12 and `stackSize` is 5, so a sixth potion of the same kind opens another slot and sixty potions fill the bag. Worn gear is added to the class stats before passives. A two-handed weapon sends the offhand piece back to the bag, and a shield cannot be worn until that weapon comes off. If a reload makes the worn weapon two-handed while a shield is still in the offhand, the shield's defense stops immediately and the shield is moved into the bag. A full bag sets the last stack down to make that slot. The offhand can always be taken off. The fight starts with an empty bag and no gold. Number keys stop at 8, so `C` opens every consumable stack during the player's turn. Drinking still spends the turn. Keys are fixed in the app; the data has no binding table.
+
+A description may contain `{placeholders}` filled from that entity's own fields. There is no arithmetic and no conditional. A brace that is not a real field fails the load and names the file, the entity, and the placeholder, for example `skills.json: skill 'bulwark' description: unknown placeholder {def.amout}`. The same expander runs when the screen draws the text, so a rank or an item tune shows the numbers on that copy. Damage and reflect `{power}` add `(rank - 1) * powerPerRank`. A new hero is the first class with `"starter": true`.
+
+| Entity | Placeholders |
+|---|---|
+| Skill | `{name}` `{cost}` `{windup}` (only when windup is set). Per effect: `{id.power}` `{id.amount}` `{id.percent}` `{id.per}` `{id.max}` `{id.turns}` `{id.every}`. `{id.stat}` and `{id.scaling}` are the stat's name. `{id.status}` is the status's name, and `{id.status.dealt}` (also `taken`, `perTurn`, `turns`, `stacks`, `name`) reads that status. |
+| Status | `{name}` `{turns}` `{stacks}` `{perTurn}` `{dealt}` `{taken}`, and only when that number is set |
+| Class | `{name}` `{evolveLevel}` `{from}` (the parent class's name). A base class uses `{paths}` (the children's names joined with " or a ") and `{pathLevel}` (their evolve level, which has to be the same) |
+| Enemy | `{name}` `{phaseAt}` `{summon}` (the summoned enemy's name) `{summonEvery}` |
+| Item | `{name}` `{value}` `{heal}` `{focus}` |
+
+Shop, bag, and worn rows share one facts suffix: heal, focus, each bonus by its name in `stats.json`, "two handed", and `grants` plus the skill name. A worn row keeps the slot and the item name and skips the price, the heal, and "two handed". The camp title is `shop.name`. The buy refusal uses the keeper's full name. The help key and the between-fights note use the keeper's first word.
 
 The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and `include/Ascension/Progress/`) are plain structs, the battle, the hero's career, and the bag. JSON parsing and the error text live in `src/Data/Database.cpp`. A bad file names itself and the field, for example `classes.json: class 'berserker': skill 'smash' does not exist`. Unknown keys are errors, so a typo does not silently do nothing.
 

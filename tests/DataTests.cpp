@@ -9,6 +9,7 @@
 
 #include "Ascension/Data/Database.h"
 #include "Check.h"
+#include "GearLine.h"
 
 namespace {
 
@@ -294,7 +295,7 @@ void TestSample()
     Check(cleave != nullptr && cleave->Target == SkillTarget::AllEnemies && cleaveHit != nullptr &&
               cleaveHit->Power == 8 && cleave->FocusCost == 4 && cleaveHit->Scaling == "strength" &&
               cleaveHit->Aim == EffectAim::AllEnemies &&
-              DescribeSkill(*cleave).find("Hits every enemy.") != std::string::npos,
+              data.DescribeSkill(*cleave).find("Hits every enemy.") != std::string::npos,
           "cleave is parsed as an active skill that hits every enemy");
 }
 
@@ -564,12 +565,12 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "classes.json",
                       "\"id\": \"berserker\",\n      \"name\": \"Berserker\",\n      "
-                      "\"description\": \"Trades caution for blood. Offered when a Fighter "
-                      "reaches level 5.\",\n      \"evolvesFrom\": \"fighter\"",
+                      "\"description\": \"Trades caution for blood. Offered when a {from} "
+                      "reaches level {evolveLevel}.\",\n      \"evolvesFrom\": \"fighter\"",
                       "\"id\": \"berserker\",\n      \"name\": \"Berserker\",\n      "
-                      "\"description\": \"Trades caution for blood. Offered when a Fighter "
-                      "reaches level 5.\",\n      \"starter\": true,\n      \"evolvesFrom\": "
-                      "\"fighter\"");
+                      "\"description\": \"Trades caution for blood. Offered when a {from} "
+                      "reaches level {evolveLevel}.\",\n      \"starter\": true,\n      "
+                      "\"evolvesFrom\": \"fighter\"");
         TestRejected(copy.Path, "classes.json", "starter", "an evolution cannot be a starter");
     }
     {
@@ -1015,7 +1016,8 @@ void TestItemGrants()
         const EffectDef* berserkerHit =
             berserkerCleave != nullptr ? berserkerCleave->Skill.FindEffect("hit") : nullptr;
         const HeroGrant* bloodlust = FindGrant(berserkerGrants, "bloodlust");
-        const EffectDef* fury = bloodlust != nullptr ? bloodlust->Skill.FindEffect("fury") : nullptr;
+        const EffectDef* fury =
+            bloodlust != nullptr ? bloodlust->Skill.FindEffect("fury") : nullptr;
         usize cleaves = 0;
         for (const HeroGrant& grant : berserkerGrants) {
             if (grant.Skill.Id == "cleave")
@@ -1043,6 +1045,209 @@ void TestItemGrants()
     }
 }
 
+bool Braced(const std::string& text)
+{
+    return text.find('{') != std::string::npos || text.find('}') != std::string::npos;
+}
+
+void NoteBrace(const std::string& label, const std::string& text, i32& bad)
+{
+    if (!Braced(text))
+        return;
+    ++bad;
+    std::printf("    braced %s: %s\n", label.c_str(), text.c_str());
+}
+
+i32 BracedDescriptions(const Database& data)
+{
+    i32 bad = 0;
+    for (const StatDef& stat : data.GetStats())
+        NoteBrace("stat " + stat.Id, stat.Description, bad);
+    for (const SkillDef& skill : data.GetSkills())
+        NoteBrace("skill " + skill.Id, data.DescribeSkill(skill), bad);
+    for (const StatusDef& status : data.GetStatuses())
+        NoteBrace("status " + status.Id, data.Describe(status), bad);
+    for (const ClassDef& klass : data.GetClasses()) {
+        NoteBrace("class " + klass.Id, data.Describe(klass), bad);
+        for (const SkillGrant& grant : klass.Skills)
+            NoteBrace(klass.Id + ":" + grant.Id, data.DescribeSkill(grant.Resolved), bad);
+        for (const SkillGrant& grant : klass.Passives)
+            NoteBrace(klass.Id + ":" + grant.Id, data.DescribeSkill(grant.Resolved), bad);
+    }
+    for (const EnemyDef& enemy : data.GetEnemies()) {
+        NoteBrace("enemy " + enemy.Id, data.Describe(enemy), bad);
+        for (const SkillGrant& grant : enemy.Skills)
+            NoteBrace(enemy.Id + ":" + grant.Id, data.DescribeSkill(grant.Resolved), bad);
+    }
+    for (const ItemDef& item : data.GetItems()) {
+        NoteBrace("item " + item.Id, data.Describe(item), bad);
+        for (const SkillGrant& grant : item.Grants)
+            NoteBrace(item.Id + ":" + grant.Id, data.DescribeSkill(grant.Resolved), bad);
+    }
+    return bad;
+}
+
+void TestDescriptionsResolve()
+{
+    Database data(kSample);
+    DataError error;
+    Check(data.Load(&error), "tests/data loads with templated descriptions");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    Check(BracedDescriptions(data) == 0, "every tests/data description resolves");
+
+    const ClassDef* fighter = data.FindClass("fighter");
+    Check(fighter != nullptr &&
+              data.Describe(*fighter).find("a Berserker or a Guardian") != std::string::npos,
+          "paths join with ' or a '");
+    const SkillDef* riposte = data.FindSkill("riposte");
+    Check(riposte != nullptr &&
+              data.DescribeSkill(*riposte).find("Guard 50 percent") != std::string::npos,
+          "riposte prints the guard percent");
+    const SkillDef* bulwark = data.FindSkill("bulwark");
+    Check(bulwark != nullptr &&
+              data.DescribeSkill(*bulwark).find("Defense +3.") != std::string::npos &&
+              data.DescribeSkill(*bulwark).find("returns 1 focus.") != std::string::npos,
+          "bulwark prints its stat and focus");
+    const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");
+    Check(varn != nullptr && data.Describe(*varn).find("Rubble Shard") != std::string::npos &&
+              data.Describe(*varn).find("50 percent") != std::string::npos,
+          "the boss text names the phase and the summon");
+
+    const ItemDef* potion = data.FindItem("minor_potion");
+    const ItemDef* tonic = data.FindItem("focus_tonic");
+    const ItemDef* axe = data.FindItem("notched_greataxe");
+    Check(potion != nullptr && GearLine(data, *potion, true).find("heal 30") != std::string::npos,
+          "a shop row keeps the heal");
+    Check(tonic != nullptr && GearLine(data, *tonic, true).find("focus +4") != std::string::npos,
+          "a shop row keeps the focus");
+    Check(axe != nullptr && GearLine(data, *axe, true).find("Strength +6") != std::string::npos &&
+              GearLine(data, *axe, true).find("Defense -2") != std::string::npos &&
+              GearLine(data, *axe, true).find("two handed") != std::string::npos &&
+              GearLine(data, *axe, false).find("two handed") == std::string::npos &&
+              GearLine(data, *axe, false).find("Strength +6") != std::string::npos,
+          "rows use stat names, and a worn row skips the handling words");
+}
+
+void TestShippedDescriptions()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    Check(BracedDescriptions(data) == 0, "shipped descriptions resolve with no braces");
+}
+
+void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
+                             const char* what)
+{
+    Database data(dir);
+    DataError error;
+    Check(!data.Load(&error), what);
+    CheckHas(error.Message, "skills.json", what);
+    CheckHas(error.Message, skill, what);
+    CheckHas(error.Message, token, what);
+}
+
+void TestBadDescriptions()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "{def.amount}", "{def.amout}");
+        TestDescriptionRejected(copy.Path, "bulwark", "{def.amout}",
+                                "a misspelled field is named with the skill");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "A straightforward blow.", "A {hit.status} blow.");
+        TestDescriptionRejected(copy.Path, "strike", "{hit.status}",
+                                "a placeholder for a missing field names the skill");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json", "A straightforward blow.", "Wait {windup}.");
+        TestDescriptionRejected(copy.Path, "strike", "{windup}",
+                                "windup on a skill without one names the skill");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{def.stat} +{def.amount}. A guard that actually stops damage also returns "
+                      "{focus.amount} focus.",
+                      "Defense +{def.amount");
+        TestDescriptionRejected(copy.Path, "bulwark", "{def.amount",
+                                "an unclosed brace names the skill");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{def.stat} +{def.amount}. A guard that actually stops damage also returns "
+                      "{focus.amount} focus.",
+                      "Defense }");
+        TestDescriptionRejected(copy.Path, "bulwark", "}", "a stray close brace names the skill");
+    }
+}
+
+void TestTunedAndRankedText()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"bonus\": { \"defense\": 2 },",
+                      "\"bonus\": { \"defense\": 2 }, \"grants\": [{ \"skill\": \"bulwark\", "
+                      "\"tune\": { \"def\": { \"amount\": 1 }, \"focus\": { \"amount\": 2 } } }],");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a tuned bulwark grant loads");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        const ItemDef* shield = data.FindItem("oak_shield");
+        const SkillDef* tuned = nullptr;
+        if (shield != nullptr && !shield->Grants.empty())
+            tuned = &shield->Grants[0].Resolved;
+        const std::string text = tuned != nullptr ? data.DescribeSkill(*tuned) : std::string();
+        Check(text.find("Defense +1.") != std::string::npos &&
+                  text.find("returns 2 focus.") != std::string::npos,
+              "the grant copy prints its own amounts");
+        const std::string row = shield != nullptr ? GearLine(data, *shield, true) : std::string();
+        Check(row.find("grants Bulwark") != std::string::npos &&
+                  row.find("Defense +2") != std::string::npos,
+              "the row names the grant and the stat");
+
+        ReplaceInFile(copy.Path / "stats.json", "\"name\": \"Defense\"", "\"name\": \"Guard\"");
+        Database renamed(copy.Path);
+        DataError again;
+        Check(renamed.Load(&again), "a renamed stat still loads");
+        const ItemDef* renamedShield = renamed.FindItem("oak_shield");
+        const std::string renamedRow =
+            renamedShield != nullptr ? GearLine(renamed, *renamedShield, true) : std::string();
+        Check(renamedRow.find("Guard +2") != std::string::npos &&
+                  renamedRow.find("Defense") == std::string::npos &&
+                  renamedRow.find("grants Bulwark") != std::string::npos,
+              "the row label follows stats.json");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "A committed swing. It stuns a foe who is winding up.",
+                      "power {hit.power}, cost {cost}.");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a heavy blow that names its power loads");
+        const SkillDef* heavy = data.FindSkill("heavy_blow");
+        const std::string ranked = heavy != nullptr ? data.DescribeSkill(*heavy, 3) : std::string();
+        Check(ranked.find("power 22, cost 2.") != std::string::npos &&
+                  ranked.find("Hits the marked enemy.") != std::string::npos,
+              "rank 3 adds two power per rank and keeps the cost and the aim sentence");
+        const std::string base = heavy != nullptr ? data.DescribeSkill(*heavy) : std::string();
+        Check(base.find("power 18, cost 2.") != std::string::npos, "rank 1 is the base power");
+    }
+}
+
 } // namespace
 
 int main()
@@ -1054,6 +1259,10 @@ int main()
     TestUnusedFields();
     TestResists();
     TestItemGrants();
+    TestDescriptionsResolve();
+    TestShippedDescriptions();
+    TestBadDescriptions();
+    TestTunedAndRankedText();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

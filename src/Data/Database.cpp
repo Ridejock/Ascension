@@ -306,12 +306,12 @@ struct Parsed {
 // sources grant one skill, those keep the earliest source.
 struct EffectNumber {
     const char* Name;
-    std::optional<i32> EffectDef::* Slot;
+    std::optional<i32> EffectDef::*Slot;
 };
 
 struct SkillNumber {
     const char* Name;
-    i32 SkillDef::* Slot;
+    i32 SkillDef::*Slot;
 };
 
 constexpr EffectNumber kEffectNumbers[] = {
@@ -414,6 +414,15 @@ bool ParseAim(std::string_view text, EffectAim& out)
 }
 
 template <typename T> const T* FindId(const std::vector<T>& items, std::string_view id)
+{
+    for (const T& item : items) {
+        if (item.Id == id)
+            return &item;
+    }
+    return nullptr;
+}
+
+template <typename T> const T* FindId(std::span<const T> items, std::string_view id)
 {
     for (const T& item : items) {
         if (item.Id == id)
@@ -1893,6 +1902,349 @@ bool GrantsKnown(const Parsed& parsed, const std::vector<SkillGrant>& grants,
     return true;
 }
 
+// A description may name this entity's own fields in {braces}. There is no arithmetic.
+// A brace that is not a known, present field fails the load.
+
+struct TextScope {
+    std::span<const StatDef> Stats;
+    std::span<const StatusDef> Statuses;
+    std::span<const ClassDef> Classes;
+    std::span<const EnemyDef> Enemies;
+    const SkillDef* Skill = nullptr;
+    const StatusDef* Status = nullptr;
+    const ClassDef* Class = nullptr;
+    const EnemyDef* Enemy = nullptr;
+    const ItemDef* Item = nullptr;
+    // Added to damage and reflect power. A fight uses the same (rank - 1) * powerPerRank.
+    i32 RankBonus = 0;
+};
+
+std::optional<std::string> Number(const std::optional<i32>& amount)
+{
+    if (!amount.has_value())
+        return std::nullopt;
+    return std::to_string(*amount);
+}
+
+std::optional<std::string> StatName(const TextScope& scope, const std::optional<std::string>& id)
+{
+    if (!id.has_value())
+        return std::nullopt;
+    const StatDef* stat = FindId(scope.Stats, *id);
+    if (stat == nullptr)
+        return std::nullopt;
+    return stat->Name;
+}
+
+// Status fields, shared by a status's own text and by "{effect.status.field}" on a skill.
+// A zero percent or per-turn damage is not that field: the placeholder is then an error.
+std::optional<std::string> StatusField(const StatusDef& status, std::string_view key)
+{
+    if (key == "name")
+        return status.Name;
+    if (key == "turns")
+        return std::to_string(status.Turns);
+    if (key == "stacks")
+        return std::to_string(status.MaxStacks);
+    if (key == "perTurn" && status.DamagePerTurn != 0)
+        return std::to_string(status.DamagePerTurn);
+    if (key == "dealt" && status.DamageDealtPercent != 0)
+        return std::to_string(status.DamageDealtPercent);
+    if (key == "taken" && status.DamageTakenPercent != 0)
+        return std::to_string(status.DamageTakenPercent);
+    return std::nullopt;
+}
+
+bool ScalesWithRank(const EffectDef& effect)
+{
+    return effect.Op == EffectOp::Damage || effect.Op == EffectOp::Reflect;
+}
+
+std::optional<std::string> EffectField(const TextScope& scope, const EffectDef& effect,
+                                       std::string_view key)
+{
+    if (key == "power") {
+        if (!effect.Power.has_value())
+            return std::nullopt;
+        const i32 bonus = ScalesWithRank(effect) ? scope.RankBonus : 0;
+        return std::to_string(*effect.Power + bonus);
+    }
+    if (key == "amount")
+        return Number(effect.Amount);
+    if (key == "percent")
+        return Number(effect.Percent);
+    if (key == "per")
+        return Number(effect.Per);
+    if (key == "max")
+        return Number(effect.Max);
+    if (key == "turns")
+        return Number(effect.Turns);
+    if (key == "every")
+        return Number(effect.Every);
+    if (key == "stat")
+        return StatName(scope, effect.Stat);
+    if (key == "scaling")
+        return StatName(scope, effect.Scaling);
+    if (!effect.Status.has_value())
+        return std::nullopt;
+    const StatusDef* applied = FindId(scope.Statuses, *effect.Status);
+    if (applied == nullptr)
+        return std::nullopt;
+    if (key == "status")
+        return applied->Name;
+    constexpr std::string_view kPrefix = "status.";
+    if (key.substr(0, kPrefix.size()) == kPrefix)
+        return StatusField(*applied, key.substr(kPrefix.size()));
+    return std::nullopt;
+}
+
+std::optional<std::string> SkillField(const TextScope& scope, std::string_view key)
+{
+    const SkillDef& skill = *scope.Skill;
+    if (key == "name")
+        return skill.Name;
+    if (key == "cost")
+        return std::to_string(skill.FocusCost);
+    if (key == "windup" && skill.Windup > 0)
+        return std::to_string(skill.Windup);
+    const usize dot = key.find('.');
+    if (dot == std::string_view::npos)
+        return std::nullopt;
+    const EffectDef* effect = skill.FindEffect(key.substr(0, dot));
+    if (effect == nullptr)
+        return std::nullopt;
+    return EffectField(scope, *effect, key.substr(dot + 1));
+}
+
+std::optional<std::string> ClassField(const TextScope& scope, std::string_view key)
+{
+    const ClassDef& klass = *scope.Class;
+    if (key == "name")
+        return klass.Name;
+    if (klass.IsEvolution()) {
+        if (key == "evolveLevel")
+            return std::to_string(klass.EvolveLevel);
+        if (key == "from") {
+            const ClassDef* parent = FindId(scope.Classes, klass.EvolvesFrom);
+            if (parent == nullptr)
+                return std::nullopt;
+            return parent->Name;
+        }
+        return std::nullopt;
+    }
+    // A base class with evolutions. Names join as "Berserker or a Guardian" so the
+    // description's leading "a " reads "a Berserker or a Guardian". The level counts only
+    // when every child is offered at the same level.
+    std::string paths;
+    i32 level = 0;
+    bool seen = false;
+    bool agreed = true;
+    for (const ClassDef& child : scope.Classes) {
+        if (child.EvolvesFrom != klass.Id)
+            continue;
+        if (!paths.empty())
+            paths += " or a ";
+        paths += child.Name;
+        if (!seen) {
+            level = child.EvolveLevel;
+            seen = true;
+        } else if (child.EvolveLevel != level) {
+            agreed = false;
+        }
+    }
+    if (paths.empty())
+        return std::nullopt;
+    if (key == "paths")
+        return paths;
+    if (key == "pathLevel" && agreed)
+        return std::to_string(level);
+    return std::nullopt;
+}
+
+std::optional<std::string> EnemyField(const TextScope& scope, std::string_view key)
+{
+    const EnemyDef& enemy = *scope.Enemy;
+    if (key == "name")
+        return enemy.Name;
+    if (key == "phaseAt" && enemy.PhaseAtPercent > 0)
+        return std::to_string(enemy.PhaseAtPercent);
+    if (enemy.SummonId.empty())
+        return std::nullopt;
+    if (key == "summon") {
+        const EnemyDef* summoned = FindId(scope.Enemies, enemy.SummonId);
+        if (summoned == nullptr)
+            return std::nullopt;
+        return summoned->Name;
+    }
+    if (key == "summonEvery")
+        return std::to_string(enemy.SummonEvery);
+    return std::nullopt;
+}
+
+std::optional<std::string> ItemField(const TextScope& scope, std::string_view key)
+{
+    const ItemDef& item = *scope.Item;
+    if (key == "name")
+        return item.Name;
+    if (key == "value")
+        return std::to_string(item.Value);
+    if (key == "heal" && item.Heal > 0)
+        return std::to_string(item.Heal);
+    if (key == "focus" && item.Focus > 0)
+        return std::to_string(item.Focus);
+    return std::nullopt;
+}
+
+std::optional<std::string> Lookup(const TextScope& scope, std::string_view key)
+{
+    if (scope.Skill != nullptr)
+        return SkillField(scope, key);
+    if (scope.Status != nullptr)
+        return StatusField(*scope.Status, key);
+    if (scope.Class != nullptr)
+        return ClassField(scope, key);
+    if (scope.Enemy != nullptr)
+        return EnemyField(scope, key);
+    if (scope.Item != nullptr)
+        return ItemField(scope, key);
+    return std::nullopt;
+}
+
+bool ExpandText(std::string_view text, const TextScope& scope, std::string& out, std::string& why)
+{
+    out.clear();
+    usize at = 0;
+    while (at < text.size()) {
+        const usize open = text.find_first_of("{}", at);
+        if (open == std::string_view::npos) {
+            out += text.substr(at);
+            break;
+        }
+        out += text.substr(at, open - at);
+        const usize close = text[open] == '{' ? text.find('}', open) : std::string_view::npos;
+        if (close == std::string_view::npos) {
+            why = "stray brace in \"" + std::string(text) + "\"";
+            return false;
+        }
+        const std::string_view key = text.substr(open + 1, close - open - 1);
+        const std::optional<std::string> replacement = Lookup(scope, key);
+        if (!replacement.has_value()) {
+            why = "unknown placeholder {" + std::string(key) + "}";
+            return false;
+        }
+        out += *replacement;
+        at = close + 1;
+    }
+    why.clear();
+    return true;
+}
+
+TextScope CatalogOf(const Parsed& parsed)
+{
+    TextScope scope;
+    scope.Stats = parsed.Stats;
+    scope.Statuses = parsed.Statuses;
+    scope.Classes = parsed.Classes;
+    scope.Enemies = parsed.Enemies;
+    return scope;
+}
+
+TextScope CatalogOf(const Database& data)
+{
+    TextScope scope;
+    scope.Stats = data.GetStats();
+    scope.Statuses = data.GetStatuses();
+    scope.Classes = data.GetClasses();
+    scope.Enemies = data.GetEnemies();
+    return scope;
+}
+
+std::string ExpandOrRaw(std::string_view text, const TextScope& scope)
+{
+    std::string out;
+    std::string why;
+    if (!ExpandText(text, scope, out, why))
+        return std::string(text);
+    return out;
+}
+
+i32 RankBonusFor(i32 rank, i32 perRank)
+{
+    if (rank <= 1 || perRank <= 0)
+        return 0;
+    const i64 scaled = static_cast<i64>(rank - 1) * perRank;
+    if (scaled > 9999)
+        return 9999;
+    return static_cast<i32>(scaled);
+}
+
+bool CheckText(const char* kind, const std::string& id, std::string_view text,
+               const TextScope& scope, std::string& error)
+{
+    std::string out;
+    std::string why;
+    if (ExpandText(text, scope, out, why))
+        return true;
+    error = std::string(kind) + " " + Quote(id) + " description: " + why;
+    return false;
+}
+
+bool CheckSkillText(const TextScope& base, const SkillDef& skill, std::string& error)
+{
+    TextScope scope = base;
+    scope.Skill = &skill;
+    return CheckText("skill", skill.Id, skill.Description, scope, error);
+}
+
+bool CheckGrants(const TextScope& base, const std::vector<SkillGrant>& grants, std::string& error)
+{
+    for (const SkillGrant& grant : grants) {
+        if (!CheckSkillText(base, grant.Resolved, error))
+            return false;
+    }
+    return true;
+}
+
+bool DescriptionsResolve(const Parsed& parsed, std::string& error)
+{
+    const TextScope base = CatalogOf(parsed);
+    for (const SkillDef& skill : parsed.Skills) {
+        if (!CheckSkillText(base, skill, error))
+            return false;
+    }
+    for (const StatusDef& loaded : parsed.Statuses) {
+        TextScope scope = base;
+        scope.Status = &loaded;
+        if (!CheckText("status", loaded.Id, loaded.Description, scope, error))
+            return false;
+    }
+    for (const ClassDef& klass : parsed.Classes) {
+        TextScope scope = base;
+        scope.Class = &klass;
+        if (!CheckText("class", klass.Id, klass.Description, scope, error))
+            return false;
+        if (!CheckGrants(base, klass.Skills, error) || !CheckGrants(base, klass.Passives, error))
+            return false;
+    }
+    for (const EnemyDef& enemy : parsed.Enemies) {
+        TextScope scope = base;
+        scope.Enemy = &enemy;
+        if (!CheckText("enemy", enemy.Id, enemy.Description, scope, error))
+            return false;
+        if (!CheckGrants(base, enemy.Skills, error))
+            return false;
+    }
+    for (const ItemDef& item : parsed.Items) {
+        TextScope scope = base;
+        scope.Item = &item;
+        if (!CheckText("item", item.Id, item.Description, scope, error))
+            return false;
+        if (!CheckGrants(base, item.Grants, error))
+            return false;
+    }
+    return true;
+}
+
 bool CrossCheck(const Parsed& parsed, std::string& error)
 {
     for (const EffectDef& recipe : parsed.Effects) {
@@ -1987,6 +2339,8 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             return false;
         }
     }
+    if (!DescriptionsResolve(parsed, error))
+        return false;
     return true;
 }
 
@@ -2044,6 +2398,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             file = "encounters.json";
         else if (why.compare(0, 6, "skill ") == 0)
             file = "skills.json";
+        else if (why.compare(0, 7, "status ") == 0)
+            file = "statuses.json";
         else if (why.compare(0, 7, "effect ") == 0)
             file = "effects.json";
         else if (why.compare(0, 5, "item ") == 0)
@@ -2349,9 +2705,12 @@ std::string EffectSentence(EffectOp op, EffectAim aim)
 
 } // namespace
 
-std::string DescribeSkill(const SkillDef& skill)
+std::string Database::DescribeSkill(const SkillDef& skill, i32 rank) const
 {
-    std::string text = skill.Description;
+    TextScope scope = CatalogOf(*this);
+    scope.Skill = &skill;
+    scope.RankBonus = RankBonusFor(rank, m_Progress.PowerPerRank);
+    std::string text = ExpandOrRaw(skill.Description, scope);
     for (const EffectDef& effect : skill.Effects) {
         const std::string sentence = EffectSentence(effect.Op, AimFor(skill, effect));
         if (sentence.empty())
@@ -2361,6 +2720,34 @@ std::string DescribeSkill(const SkillDef& skill)
         text += sentence;
     }
     return text;
+}
+
+std::string Database::Describe(const ClassDef& def) const
+{
+    TextScope scope = CatalogOf(*this);
+    scope.Class = &def;
+    return ExpandOrRaw(def.Description, scope);
+}
+
+std::string Database::Describe(const EnemyDef& def) const
+{
+    TextScope scope = CatalogOf(*this);
+    scope.Enemy = &def;
+    return ExpandOrRaw(def.Description, scope);
+}
+
+std::string Database::Describe(const StatusDef& def) const
+{
+    TextScope scope = CatalogOf(*this);
+    scope.Status = &def;
+    return ExpandOrRaw(def.Description, scope);
+}
+
+std::string Database::Describe(const ItemDef& def) const
+{
+    TextScope scope = CatalogOf(*this);
+    scope.Item = &def;
+    return ExpandOrRaw(def.Description, scope);
 }
 
 } // namespace Ascension

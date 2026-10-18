@@ -271,7 +271,7 @@ bool Inventory::Buy(std::string_view itemId, std::string& error)
             stocked = true;
     }
     if (!stocked) {
-        error = "Pell does not sell that";
+        error = shop->Keeper + " does not sell that";
         return false;
     }
     const ItemDef* item = m_Data->FindItem(itemId);

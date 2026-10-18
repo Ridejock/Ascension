@@ -64,7 +64,7 @@ public:
     // the whole count.
     bool Give(std::string_view itemId, i32 count, std::string& error);
 
-    // Buys one from Pell's stock into the first stack that has room, or an empty slot.
+    // Buys one from the shop's stock into the first stack that has room, or an empty slot.
     bool Buy(std::string_view itemId, std::string& error);
     // Sells one from a bag stack. Worn gear has to come off first.
     bool Sell(i32 bagIndex, std::string& error);
