@@ -191,15 +191,43 @@ std::string WornLine(const Database& data, const Inventory& bag)
     return line;
 }
 
-const SkillDef* GrantedSkill(const Database& data, std::string_view classId, std::string_view id)
+// The hero's skills right now: class grants, then worn gear. Empty when the class is gone.
+std::vector<HeroGrant> CurrentGrants(const Database& data, std::string_view classId,
+                                     const Inventory& inventory)
 {
-    if (const ClassDef* heroClass = data.FindClass(classId)) {
-        for (const SkillDef* granted : data.ActiveSkills(*heroClass)) {
-            if (granted->Id == id)
-                return granted;
+    const ClassDef* heroClass = data.FindClass(classId);
+    if (heroClass == nullptr)
+        return {};
+    return data.HeroGrants(*heroClass, inventory.WornIds());
+}
+
+// "  [Rusty Sword]" for a skill a worn piece gives. A class skill with no other source has
+// no tag. A merge lists every source, class first.
+std::string SourceTag(const Database& data, const HeroGrant& grant)
+{
+    if (grant.Origins.size() == 1 && grant.Origins[0].Source == GrantSource::Class)
+        return {};
+    std::string tag;
+    for (const GrantOrigin& origin : grant.Origins) {
+        std::string name = origin.Id;
+        if (origin.Source == GrantSource::Item) {
+            const ItemDef* piece = data.FindItem(origin.Id);
+            if (piece != nullptr)
+                name = piece->Name;
+        } else {
+            const ClassDef* heroClass = data.FindClass(origin.Id);
+            if (heroClass != nullptr)
+                name = heroClass->Name;
         }
+        if (!tag.empty())
+            tag += " ";
+        tag += "[";
+        tag += name;
+        tag += "]";
     }
-    return data.FindSkill(id);
+    if (tag.empty())
+        return {};
+    return "  " + tag;
 }
 
 std::string StatusLine(const Database& data, const CombatantState& who)
@@ -303,7 +331,7 @@ void AscensionApp::PushRanks(std::string_view pendingSkill)
     if (m_Battle == nullptr || !m_Hero.IsReady())
         return;
     std::vector<SkillRank> ranks;
-    for (const std::string& id : m_Hero.SkillIds()) {
+    for (const std::string& id : m_Battle->PlayerSkillIds()) {
         SkillRank row;
         row.Id = id;
         if (!pendingSkill.empty() && id == pendingSkill)
@@ -407,6 +435,7 @@ void AscensionApp::BeginFight()
         m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
 
     m_Battle->SetGear(m_Inventory.GearBonus());
+    m_Battle->SetWornItems(m_Inventory.WornIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
@@ -728,6 +757,7 @@ void AscensionApp::OnUpdate(f32 dt)
         return;
     }
     m_Battle->SetGear(m_Inventory.GearBonus());
+    m_Battle->SetWornItems(m_Inventory.WornIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     if (!m_Battle->ApplyData(why)) {
         Note(why);
@@ -938,26 +968,26 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     } else {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
         y += Emerald::DebugTextLineHeight(2) + 8.0f;
-        std::vector<std::string> skillIds;
-        if (fightOver)
-            skillIds = m_Hero.SkillIds();
-        else {
-            for (const std::string& id : m_Battle->PlayerSkillIds())
-                skillIds.push_back(id);
-        }
-        for (usize i = 0; i < skillIds.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-            const SkillDef* skill = GrantedSkill(m_Data, m_Hero.ClassId(), skillIds[i]);
-            if (skill == nullptr)
+        // The same list, in the same order, that Battle builds its hotkeys from.
+        const std::vector<HeroGrant> grants = CurrentGrants(m_Data, m_Hero.ClassId(), m_Inventory);
+        usize hotkey = 0;
+        for (const HeroGrant& grant : grants) {
+            if (grant.Skill.Kind != SkillKind::Active)
                 continue;
+            if (hotkey >= static_cast<usize>(kMaxHotkeys))
+                break;
+            const usize shown = hotkey++;
+            const SkillDef& skill = grant.Skill;
             ++shownSkills;
-            const bool ready = playerTurn && player.Focus >= skill->FocusCost;
+            const bool ready = playerTurn && player.Focus >= skill.FocusCost;
             const Emerald::Vec4 color = fightOver || ready ? kInk : kDim;
-            std::string line = std::to_string(static_cast<int>(i) + 1) + "  " + skill->Name;
-            line += " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   ";
-            line += std::to_string(skill->FocusCost) + " focus";
+            std::string line = std::to_string(static_cast<int>(shown) + 1) + "  " + skill.Name;
+            line += " (" + std::to_string(m_Hero.RankOf(skill.Id)) + ")   ";
+            line += std::to_string(skill.FocusCost) + " focus";
+            line += SourceTag(m_Data, grant);
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), color, 2);
             y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(DescribeSkill(*skill)),
+            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(DescribeSkill(skill)),
                                        kDim, 1, leftSize.x - 56.0f);
             y += 4.0f;
         }
@@ -982,12 +1012,14 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "C  EVERY DRINK", kFrame, 1);
             y += Emerald::DebugTextLineHeight(1) + 2.0f;
         }
-        if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId())) {
-            for (const SkillDef* passive : m_Data.Passives(*heroClass)) {
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                       Upper(PassiveLine(m_Data, *passive)), kFrame, 1);
-                y += Emerald::DebugTextLineHeight(1) + 2.0f;
-            }
+        for (const HeroGrant& passiveGrant : grants) {
+            if (passiveGrant.Skill.Kind != SkillKind::Passive)
+                continue;
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                   Upper(PassiveLine(m_Data, passiveGrant.Skill) +
+                                         SourceTag(m_Data, passiveGrant)),
+                                   kFrame, 1);
+            y += Emerald::DebugTextLineHeight(1) + 2.0f;
         }
     }
 

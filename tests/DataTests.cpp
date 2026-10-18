@@ -903,6 +903,146 @@ void TestResists()
     }
 }
 
+const HeroGrant* FindGrant(const std::vector<HeroGrant>& grants, std::string_view id)
+{
+    for (const HeroGrant& grant : grants)
+        if (grant.Skill.Id == id)
+            return &grant;
+    return nullptr;
+}
+
+bool HasOrigin(const HeroGrant& grant, GrantSource source, std::string_view id)
+{
+    for (const GrantOrigin& origin : grant.Origins) {
+        if (origin.Source == source && origin.Id == id)
+            return true;
+    }
+    return false;
+}
+
+void TestItemGrants()
+{
+    {
+        TempCopy drink;
+        ReplaceInFile(drink.Path / "items.json", "\"heal\": 30,",
+                      "\"heal\": 30, \"grants\": [\"bulwark\"],");
+        Database data(drink.Path);
+        DataError error;
+        Check(!data.Load(&error), "a consumable cannot grant a skill");
+        CheckHas(error.Message, "items.json", "the error names the file");
+        CheckHas(error.Message, "minor_potion", "the error names the item");
+        CheckHas(error.Message, "grants", "the error names the field");
+    }
+    {
+        TempCopy two;
+        ReplaceInFile(two.Path / "items.json", "\"bonus\": { \"strength\": 1 },",
+                      "\"bonus\": { \"strength\": 1 }, \"grants\": [\"cleave\", \"strike\"],");
+        Database data(two.Path);
+        DataError error;
+        Check(!data.Load(&error), "an item cannot grant two active skills");
+        CheckHas(error.Message, "items.json", "the error names the file");
+        CheckHas(error.Message, "rusty_sword", "the error names the item");
+        CheckHas(error.Message, "one active", "the error says an item grants one active");
+    }
+    {
+        TempCopy missing;
+        ReplaceInFile(missing.Path / "effects.json",
+                      "    \"every\": \"lower\",\n    \"focusCost\": \"lower\"",
+                      "    \"every\": \"lower\"");
+        Database data(missing.Path);
+        DataError error;
+        Check(!data.Load(&error), "a tunable number with no direction is rejected");
+        CheckHas(error.Message, "effects.json", "the error names the file");
+        CheckHas(error.Message, "focusCost", "the error names the field");
+        CheckHas(error.Message, "better", "the error says the direction is missing");
+    }
+    {
+        TempCopy worn;
+        ReplaceInFile(worn.Path / "items.json", "\"bonus\": { \"strength\": 1 },",
+                      "\"bonus\": { \"strength\": 1 }, \"grants\": [{ \"skill\": \"cleave\", "
+                      "\"tune\": { \"focusCost\": 1, \"hit\": { \"power\": 5, \"target\": "
+                      "\"target\" } } }],");
+        ReplaceInFile(worn.Path / "items.json", "\"bonus\": { \"defense\": 6, \"agility\": -1 },",
+                      "\"bonus\": { \"defense\": 6, \"agility\": -1 }, \"grants\": [{ \"skill\": "
+                      "\"cleave\", \"tune\": { \"focusCost\": 6, \"hit\": { \"power\": 12 } } }],");
+        ReplaceInFile(
+            worn.Path / "items.json", "\"bonus\": { \"agility\": 2 },",
+            "\"bonus\": { \"agility\": 2 }, \"grants\": [{ \"skill\": \"bulwark\", \"tune\": { "
+            "\"def\": { \"amount\": 1 }, \"focus\": { \"amount\": 4 } } }, { \"skill\": "
+            "\"bloodlust\", \"tune\": { \"fury\": { \"amount\": 3, \"per\": 5, \"max\": 2 } } }],");
+        Database data(worn.Path);
+        DataError error;
+        Check(data.Load(&error), "gear may grant one active and any number of passives");
+        const ItemDef* sword = data.FindItem("rusty_sword");
+        const ItemDef* charm = data.FindItem("wolfhide_charm");
+        Check(sword != nullptr && sword->Grants.size() == 1 &&
+                  sword->Grants[0].Resolved.Kind == SkillKind::Active,
+              "the sword grants one active");
+        Check(charm != nullptr && charm->Grants.size() == 2 &&
+                  charm->Grants[0].Resolved.Kind == SkillKind::Passive &&
+                  charm->Grants[1].Resolved.Kind == SkillKind::Passive,
+              "passives on one item are not capped");
+
+        const ClassDef* fighter = data.FindClass("fighter");
+        const ClassDef* berserker = data.FindClass("berserker");
+        const ClassDef* guardian = data.FindClass("guardian");
+        const std::vector<std::string> wornIds{"rusty_sword", "oathkeepers_plate", "wolfhide_charm",
+                                               "no_such_item"};
+        std::vector<HeroGrant> fighterGrants;
+        std::vector<HeroGrant> berserkerGrants;
+        std::vector<HeroGrant> guardianGrants;
+        if (fighter != nullptr)
+            fighterGrants = data.HeroGrants(*fighter, wornIds);
+        if (berserker != nullptr)
+            berserkerGrants = data.HeroGrants(*berserker, wornIds);
+        if (guardian != nullptr)
+            guardianGrants = data.HeroGrants(*guardian, wornIds);
+
+        const HeroGrant* fighterCleave = FindGrant(fighterGrants, "cleave");
+        const EffectDef* fighterHit =
+            fighterCleave != nullptr ? fighterCleave->Skill.FindEffect("hit") : nullptr;
+        Check(fighterGrants.size() == 7 && fighterCleave != nullptr &&
+                  fighterCleave->Skill.FocusCost == 1 && fighterHit != nullptr &&
+                  fighterHit->Power == 12 && fighterHit->Aim == EffectAim::Target,
+              "per field: lower focusCost, higher power, and the first item's target");
+        Check(fighterCleave != nullptr && fighterCleave->Origins.size() == 2 &&
+                  HasOrigin(*fighterCleave, GrantSource::Item, "rusty_sword") &&
+                  HasOrigin(*fighterCleave, GrantSource::Item, "oathkeepers_plate") &&
+                  &fighterGrants[4] == fighterCleave,
+              "a new item skill comes after the class skills, once");
+
+        const HeroGrant* berserkerCleave = FindGrant(berserkerGrants, "cleave");
+        const EffectDef* berserkerHit =
+            berserkerCleave != nullptr ? berserkerCleave->Skill.FindEffect("hit") : nullptr;
+        const HeroGrant* bloodlust = FindGrant(berserkerGrants, "bloodlust");
+        const EffectDef* fury = bloodlust != nullptr ? bloodlust->Skill.FindEffect("fury") : nullptr;
+        usize cleaves = 0;
+        for (const HeroGrant& grant : berserkerGrants) {
+            if (grant.Skill.Id == "cleave")
+                ++cleaves;
+        }
+        Check(cleaves == 1 && berserkerCleave != nullptr && berserkerCleave->Skill.FocusCost == 1 &&
+                  berserkerHit != nullptr && berserkerHit->Power == 12 &&
+                  berserkerHit->Aim == EffectAim::AllEnemies,
+              "the class copy wins a non-numeric field; numbers still merge");
+        Check(berserkerCleave != nullptr &&
+                  HasOrigin(*berserkerCleave, GrantSource::Class, "berserker") &&
+                  berserkerCleave->Origins.size() == 3 && &berserkerGrants[5] == berserkerCleave,
+              "the merged cleave keeps the class hotkey slot");
+        Check(fury != nullptr && fury->Amount == 3 && fury->Per == 5 && fury->Max == 6,
+              "lower per wins, and higher amount and max win, on one passive");
+
+        const HeroGrant* bulwark = FindGrant(guardianGrants, "bulwark");
+        const EffectDef* defense = bulwark != nullptr ? bulwark->Skill.FindEffect("def") : nullptr;
+        const EffectDef* focus = bulwark != nullptr ? bulwark->Skill.FindEffect("focus") : nullptr;
+        Check(bulwark != nullptr && bulwark->Origins.size() == 2 &&
+                  HasOrigin(*bulwark, GrantSource::Class, "guardian") &&
+                  HasOrigin(*bulwark, GrantSource::Item, "wolfhide_charm") && defense != nullptr &&
+                  defense->Amount == 3 && focus != nullptr && focus->Amount == 4,
+              "bulwark keeps the class defense and the charm's focus");
+    }
+}
+
 } // namespace
 
 int main()
@@ -913,6 +1053,7 @@ int main()
     TestLayers();
     TestUnusedFields();
     TestResists();
+    TestItemGrants();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

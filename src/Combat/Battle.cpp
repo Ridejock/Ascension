@@ -365,6 +365,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     }
 
     const CombatRules rules = m_Data->GetRules();
+    m_HeroGrants = m_Data->HeroGrants(*klass, m_WornItems);
     CombatantState player;
     player.Id = klass->Id;
     player.Name = klass->Name;
@@ -377,8 +378,10 @@ bool Battle::Build(std::string& error, bool keepWounds)
     player.MaxFocus = ClampPool(static_cast<i64>(player.Stats.Focus) + rules.FocusBase);
 
     std::vector<std::string> playerSkills;
-    for (const SkillDef* skill : m_Data->ActiveSkills(*klass))
-        playerSkills.push_back(skill->Id);
+    for (const HeroGrant& held : m_HeroGrants) {
+        if (held.Skill.Kind == SkillKind::Active)
+            playerSkills.push_back(held.Skill.Id);
+    }
 
     const std::vector<CombatantState> previous = m_Enemies;
     const i32 previousBase = m_BaseCount;
@@ -481,6 +484,7 @@ bool Battle::ApplyData(std::string& error)
     const CombatantState player = m_Player;
     const std::vector<CombatantState> enemies = m_Enemies;
     const std::vector<std::string> playerSkills = m_PlayerSkills;
+    const std::vector<HeroGrant> grants = m_HeroGrants;
     const CombatRules rules = m_Rules;
     const i32 baseCount = m_BaseCount;
     const i32 target = m_Target;
@@ -489,6 +493,7 @@ bool Battle::ApplyData(std::string& error)
         m_Player = player;
         m_Enemies = enemies;
         m_PlayerSkills = playerSkills;
+        m_HeroGrants = grants;
         m_Rules = rules;
         m_BaseCount = baseCount;
         m_Target = target;
@@ -698,10 +703,8 @@ void Battle::CollectGranted(bool hero, std::string_view enemyId,
         const ClassDef* klass = m_Data->FindClass(m_ClassId);
         if (klass == nullptr)
             return;
-        for (const SkillDef* skill : m_Data->ActiveSkills(*klass))
-            out.push_back(skill);
-        for (const SkillDef* skill : m_Data->Passives(*klass))
-            out.push_back(skill);
+        for (const HeroGrant& held : m_HeroGrants)
+            out.push_back(&held.Skill);
         return;
     }
     const EnemyDef* enemy = m_Data->FindEnemy(enemyId);
@@ -823,14 +826,9 @@ i32 Battle::SkillScore(const SkillDef& skill) const
 
 const SkillDef* Battle::PlayerSkill(std::string_view skillId) const
 {
-    if (m_Data == nullptr)
-        return nullptr;
-    const ClassDef* klass = m_Data->FindClass(m_ClassId);
-    if (klass == nullptr)
-        return nullptr;
-    for (const SkillDef* skill : m_Data->ActiveSkills(*klass)) {
-        if (skill->Id == skillId)
-            return skill;
+    for (const HeroGrant& held : m_HeroGrants) {
+        if (held.Skill.Kind == SkillKind::Active && held.Skill.Id == skillId)
+            return &held.Skill;
     }
     return nullptr;
 }
@@ -1004,6 +1002,11 @@ void Battle::SetPlayerRanks(i32 powerPerRank, std::vector<SkillRank> ranks)
 void Battle::SetGear(StatBlock gear)
 {
     m_Gear = gear;
+}
+
+void Battle::SetWornItems(std::vector<std::string> itemIds)
+{
+    m_WornItems = std::move(itemIds);
 }
 
 void Battle::SetBaseStats(StatBlock stats)

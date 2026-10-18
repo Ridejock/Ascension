@@ -301,8 +301,9 @@ struct ItemDef {
     bool TwoHanded = false; // weapons only; fills the offhand as well
     i32 Heal = 0;           // consumable: flat health, not the skill formula
     i32 Focus = 0;          // consumable: flat focus, capped at the fighter's pool
-    // Resolved grants from the optional "grants" list. Empty on the sample gear. Combat does
-    // not apply these yet; a later slice can hand the copy to the same trigger code a class uses.
+    // Resolved grants from the optional "grants" list. Empty on the shipped gear. A worn
+    // piece's grants join the class skills. A consumable cannot grant, and an item grants
+    // at most one active skill (passives are not capped).
     std::vector<SkillGrant> Grants;
 };
 

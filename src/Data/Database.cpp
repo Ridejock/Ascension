@@ -296,7 +296,107 @@ struct Parsed {
     ShopDef Shop;
     CombatRules Rules;
     ProgressRules Progress;
+    std::vector<std::string> HigherFields;
+    std::vector<std::string> LowerFields;
 };
+
+// Numeric fields a tune may set. The direction is not stored here: effects.json "better"
+// names it once per field, and a tunable numeric field with no direction is rejected.
+// Non-numeric tune fields (target, stat, scaling, status) are absent on purpose. When two
+// sources grant one skill, those keep the earliest source.
+struct EffectNumber {
+    const char* Name;
+    std::optional<i32> EffectDef::* Slot;
+};
+
+struct SkillNumber {
+    const char* Name;
+    i32 SkillDef::* Slot;
+};
+
+constexpr EffectNumber kEffectNumbers[] = {
+    {"power", &EffectDef::Power}, {"amount", &EffectDef::Amount}, {"percent", &EffectDef::Percent},
+    {"per", &EffectDef::Per},     {"max", &EffectDef::Max},       {"turns", &EffectDef::Turns},
+    {"every", &EffectDef::Every},
+};
+
+constexpr SkillNumber kSkillNumbers[] = {
+    {"focusCost", &SkillDef::FocusCost},
+};
+
+bool DirectionOf(const std::vector<std::string>& higher, const std::vector<std::string>& lower,
+                 std::string_view field, bool& higherWins)
+{
+    for (const std::string& name : higher) {
+        if (name == field) {
+            higherWins = true;
+            return true;
+        }
+    }
+    for (const std::string& name : lower) {
+        if (name == field) {
+            higherWins = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IncomingWins(i32 incoming, i32 heldValue, bool higher)
+{
+    if (higher)
+        return incoming > heldValue;
+    return incoming < heldValue;
+}
+
+void MergeEffects(EffectDef& destination, const EffectDef& incoming,
+                  const std::vector<std::string>& higher, const std::vector<std::string>& lower)
+{
+    for (const EffectNumber& field : kEffectNumbers) {
+        std::optional<i32>& slot = destination.*(field.Slot);
+        const std::optional<i32>& next = incoming.*(field.Slot);
+        if (!slot.has_value() || !next.has_value())
+            continue;
+        bool higherWins = false;
+        if (!DirectionOf(higher, lower, field.Name, higherWins))
+            continue;
+        if (IncomingWins(*next, *slot, higherWins))
+            slot = *next;
+    }
+}
+
+// Numeric fields take the better value. Everything else (name, target, stat, scaling, status,
+// windup) stays on `held`, which is the earliest source.
+void MergeSkill(SkillDef& held, const SkillDef& incoming, const std::vector<std::string>& higher,
+                const std::vector<std::string>& lower)
+{
+    for (EffectDef& destination : held.Effects) {
+        const EffectDef* incomingEffect = nullptr;
+        for (const EffectDef& candidate : incoming.Effects) {
+            if (candidate.Id == destination.Id)
+                incomingEffect = &candidate;
+        }
+        if (incomingEffect != nullptr)
+            MergeEffects(destination, *incomingEffect, higher, lower);
+    }
+    for (const SkillNumber& field : kSkillNumbers) {
+        i32& slot = held.*(field.Slot);
+        const i32 next = incoming.*(field.Slot);
+        bool higherWins = false;
+        if (!DirectionOf(higher, lower, field.Name, higherWins))
+            continue;
+        if (IncomingWins(next, slot, higherWins))
+            slot = next;
+    }
+}
+
+void PushOrigin(HeroGrant& held, GrantSource source, const std::string& sourceId)
+{
+    GrantOrigin origin;
+    origin.Source = source;
+    origin.Id = sourceId;
+    held.Origins.push_back(std::move(origin));
+}
 
 bool ParseAim(std::string_view text, EffectAim& out)
 {
@@ -765,7 +865,57 @@ bool ReadSkillEffect(const Json& entry, const std::vector<EffectDef>& recipes, E
     return true;
 }
 
+bool IsSkillTuneKey(std::string_view key)
+{
+    return key == "focusCost" || key == "target";
+}
+
+bool EffectNamed(const SkillDef& skill, std::string_view id)
+{
+    for (const EffectDef& effect : skill.Effects)
+        if (effect.Id == id)
+            return true;
+    return false;
+}
+
+// focusCost and target sit on the skill. An effect that happens to use that id still wins,
+// and the value is read as that effect's tune.
+bool AssignSkillTune(SkillDef& skill, const std::string& key, const Json& value, std::string& error)
+{
+    if (key == "focusCost") {
+        i32 cost = 0;
+        std::string why;
+        if (!ReadInt(value, 0, 99, cost, why)) {
+            error = "'focusCost' " + why;
+            return false;
+        }
+        skill.FocusCost = cost;
+        return true;
+    }
+    if (skill.Kind != SkillKind::Active) {
+        error = "tune field " + Quote(key) + " is not used on a passive";
+        return false;
+    }
+    if (!value.is_string()) {
+        error = "'target' must be text";
+        return false;
+    }
+    const std::string text = value.get<std::string>();
+    if (text == "self")
+        skill.Target = SkillTarget::Self;
+    else if (text == "enemy")
+        skill.Target = SkillTarget::Enemy;
+    else if (text == "allEnemies")
+        skill.Target = SkillTarget::AllEnemies;
+    else {
+        error = "'target' must be \"self\", \"enemy\" or \"allEnemies\"";
+        return false;
+    }
+    return true;
+}
+
 // Layer 2 (a skill) or layer 3 (a grant). Only fields the effect already has can be set.
+// A key of focusCost or target, when no effect uses that id, sets the skill itself.
 bool ApplyTune(SkillDef& skill, const Json& tune, std::string& error)
 {
     if (!tune.is_object()) {
@@ -774,6 +924,11 @@ bool ApplyTune(SkillDef& skill, const Json& tune, std::string& error)
     }
     for (auto it = tune.begin(); it != tune.end(); ++it) {
         const std::string effectId = it.key();
+        if (IsSkillTuneKey(effectId) && !EffectNamed(skill, effectId)) {
+            if (!AssignSkillTune(skill, effectId, *it, error))
+                return false;
+            continue;
+        }
         EffectDef* effect = nullptr;
         for (EffectDef& candidate : skill.Effects) {
             if (candidate.Id == effectId)
@@ -823,6 +978,37 @@ bool HasOp(const SkillDef& skill, EffectOp op)
     return false;
 }
 
+bool CheckSkillShape(const SkillDef& skill, std::string& error)
+{
+    if (skill.Kind != SkillKind::Active)
+        return true;
+    bool selfOp = false;
+    bool foeOp = false;
+    for (const EffectDef& effect : skill.Effects) {
+        if (IsSelfOp(effect.Op))
+            selfOp = true;
+        if (IsFoeOp(effect.Op))
+            foeOp = true;
+    }
+    if (selfOp && foeOp) {
+        error = "a skill cannot both guard itself and hit a foe";
+        return false;
+    }
+    if (selfOp && skill.Target != SkillTarget::Self) {
+        error = "'target' must be \"self\"";
+        return false;
+    }
+    if (foeOp && skill.Target == SkillTarget::Self) {
+        error = "'target' must be \"enemy\" or \"allEnemies\"";
+        return false;
+    }
+    if (skill.Windup > 0 && !HasOp(skill, EffectOp::Damage)) {
+        error = "'windup' needs a damage effect";
+        return false;
+    }
+    return true;
+}
+
 bool ReadOneGrant(const Parsed& parsed, const Json& entry, SkillKind expected, bool checkKind,
                   SkillGrant& out, std::string& error)
 {
@@ -868,6 +1054,8 @@ bool ReadOneGrant(const Parsed& parsed, const Json& entry, SkillKind expected, b
     out.Resolved = *catalog;
     if (tune != nullptr && !ApplyTune(out.Resolved, *tune, error))
         return false;
+    if (!CheckSkillShape(out.Resolved, error))
+        return false;
     return true;
 }
 
@@ -901,8 +1089,72 @@ bool ReadGrantList(const Parsed& parsed, const Json& object, const char* key, Sk
     return true;
 }
 
+bool RequireDirection(const Json& table, const char* name, Parsed& parsed, std::string& error)
+{
+    const auto found = table.find(name);
+    if (found == table.end()) {
+        error = "tunable field " + Quote(name) + " has no better direction";
+        return false;
+    }
+    if (!found->is_string()) {
+        error = "tunable field " + Quote(name) + " better must be \"higher\" or \"lower\"";
+        return false;
+    }
+    const std::string direction = found->get<std::string>();
+    if (direction == "higher")
+        parsed.HigherFields.emplace_back(name);
+    else if (direction == "lower")
+        parsed.LowerFields.emplace_back(name);
+    else {
+        error = "tunable field " + Quote(name) + " better must be \"higher\" or \"lower\"";
+        return false;
+    }
+    return true;
+}
+
+bool KnownTunable(std::string_view name)
+{
+    for (const EffectNumber& field : kEffectNumbers) {
+        if (name == field.Name)
+            return true;
+    }
+    for (const SkillNumber& field : kSkillNumbers) {
+        if (name == field.Name)
+            return true;
+    }
+    return false;
+}
+
+// "better" is the only place a field is called higher or lower. Every numeric tune field
+// has to be listed. A missing name is a load error, not a guess.
+bool LoadBetter(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto table = root.find("better");
+    if (table == root.end() || !table->is_object()) {
+        error = "'better' must be an object of field directions";
+        return false;
+    }
+    for (const EffectNumber& field : kEffectNumbers) {
+        if (!RequireDirection(*table, field.Name, parsed, error))
+            return false;
+    }
+    for (const SkillNumber& field : kSkillNumbers) {
+        if (!RequireDirection(*table, field.Name, parsed, error))
+            return false;
+    }
+    for (auto it = table->begin(); it != table->end(); ++it) {
+        if (!KnownTunable(it.key())) {
+            error = "unknown tunable field " + Quote(it.key());
+            return false;
+        }
+    }
+    return true;
+}
+
 bool LoadEffects(const Json& root, Parsed& parsed, std::string& error)
 {
+    if (!LoadBetter(root, parsed, error))
+        return false;
     const auto list = root.find("effects");
     if (list == root.end() || !list->is_array()) {
         error = "'effects' must be a list";
@@ -1010,24 +1262,9 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 return fail(why);
         }
 
-        if (skill.Kind == SkillKind::Active) {
-            bool selfOp = false;
-            bool foeOp = false;
-            for (const EffectDef& effect : skill.Effects) {
-                if (IsSelfOp(effect.Op))
-                    selfOp = true;
-                if (IsFoeOp(effect.Op))
-                    foeOp = true;
-            }
-            if (selfOp && foeOp)
-                return fail("a skill cannot both guard itself and hit a foe");
-            if (selfOp && skill.Target != SkillTarget::Self)
-                return fail("'target' must be \"self\"");
-            if (foeOp && skill.Target == SkillTarget::Self)
-                return fail("'target' must be \"enemy\" or \"allEnemies\"");
-            if (skill.Windup > 0 && !HasOp(skill, EffectOp::Damage))
-                return fail("'windup' needs a damage effect");
-        }
+        std::string shape;
+        if (!CheckSkillShape(skill, shape))
+            return fail(shape);
 
         if (!RequireString(entry, "name", skill.Name, error) ||
             !RequireString(entry, "description", skill.Description, error))
@@ -1347,7 +1584,8 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
                         "\"consumable\"");
         if (item.Slot == GearSlot::Consumable) {
             if (!Absent(entry, "bonus", "a consumable", error) ||
-                !Absent(entry, "twoHanded", "a consumable", error))
+                !Absent(entry, "twoHanded", "a consumable", error) ||
+                !Absent(entry, "grants", "a consumable", error))
                 return fail(error);
             if (!OptionalInt(entry, "heal", 0, 9999, item.Heal, error) ||
                 !OptionalInt(entry, "focus", 0, 99, item.Focus, error))
@@ -1381,6 +1619,15 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         if (!ReadGrantList(parsed, entry, "grants", SkillKind::Active, false, false, item.Grants,
                            grantError))
             return fail(grantError);
+        if (item.Slot != GearSlot::Consumable) {
+            i32 activeGrants = 0;
+            for (const SkillGrant& listed : item.Grants) {
+                if (listed.Resolved.Kind == SkillKind::Active)
+                    ++activeGrants;
+            }
+            if (activeGrants > 1)
+                return fail("an item grants at most one active skill");
+        }
         if (!RequireString(entry, "name", item.Name, error) ||
             !RequireString(entry, "description", item.Description, error))
             return fail(error);
@@ -1776,7 +2023,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
                                     "classes", "enemies", "encounters", "items",
                                     "shop",    "combat",  "progress"};
-        if (!AllowKeys(root, {allowedTop[i]}, unknown)) {
+        const bool keysOk = std::string_view(names[i]) == "effects.json"
+                                ? AllowKeys(root, {"better", "effects"}, unknown)
+                                : AllowKeys(root, {allowedTop[i]}, unknown);
+        if (!keysOk) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
             return false;
         }
@@ -1878,6 +2128,8 @@ bool Database::Load(DataError* error)
     m_Shop = std::move(parsed.Shop);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
+    m_HigherFields = std::move(parsed.HigherFields);
+    m_LowerFields = std::move(parsed.LowerFields);
     ApplyTimes(times);
     ++m_Revision;
     NoteSuccess(error);
@@ -1990,6 +2242,37 @@ std::vector<const SkillDef*> Database::Passives(const ClassDef& klass) const
 {
     std::vector<const SkillDef*> out;
     CollectSkills(*this, klass, true, out);
+    return out;
+}
+
+std::vector<HeroGrant> Database::HeroGrants(const ClassDef& klass,
+                                            std::span<const std::string> wornItemIds) const
+{
+    std::vector<HeroGrant> out;
+    const auto add = [&](const SkillDef& skill, GrantSource source, const std::string& sourceId) {
+        for (HeroGrant& held : out) {
+            if (held.Skill.Id != skill.Id)
+                continue;
+            MergeSkill(held.Skill, skill, m_HigherFields, m_LowerFields);
+            PushOrigin(held, source, sourceId);
+            return;
+        }
+        HeroGrant created;
+        created.Skill = skill;
+        PushOrigin(created, source, sourceId);
+        out.push_back(std::move(created));
+    };
+    for (const SkillDef* active : ActiveSkills(klass))
+        add(*active, GrantSource::Class, klass.Id);
+    for (const SkillDef* passive : Passives(klass))
+        add(*passive, GrantSource::Class, klass.Id);
+    for (const std::string& wornId : wornItemIds) {
+        const ItemDef* piece = FindItem(wornId);
+        if (piece == nullptr)
+            continue;
+        for (const SkillGrant& listed : piece->Grants)
+            add(listed.Resolved, GrantSource::Item, piece->Id);
+    }
     return out;
 }
 

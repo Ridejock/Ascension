@@ -192,6 +192,10 @@ public:
     // Worn gear, added to the class stats before passives. Call it before Start, and again
     // before ApplyData when a reload changes a worn piece. Zero leaves the class line alone.
     void SetGear(StatBlock gear);
+    // Worn item ids, in slot order, whose grants join the class skills. Same timing as
+    // SetGear: the next Start, and ApplyData, read them. Ids are kept, so a reload resolves
+    // them again; an id that is gone adds nothing.
+    void SetWornItems(std::vector<std::string> itemIds);
 
     // Replaces the class stat line (level growth and class grants) before gear and passives.
     // The sandbox passes the hero's attributes. Leave it unset and Start keeps the class formula.
@@ -297,6 +301,10 @@ private:
     std::vector<SkillRank> m_PlayerRanks;
     i32 m_PowerPerRank = 0;
     StatBlock m_Gear;
+    std::vector<std::string> m_WornItems;
+    // Merged hero skills for this fight. Rebuilt in Build. Pointers into it last until the
+    // next Build.
+    std::vector<HeroGrant> m_HeroGrants;
     StatBlock m_BaseStats;
     bool m_HasBaseStats = false;
     BattleResult m_Result = BattleResult::Ongoing;

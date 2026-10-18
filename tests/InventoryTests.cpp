@@ -157,6 +157,10 @@ void TestEquipAndHands()
 
     Check(bag.Equip(FindStack(bag, "oathkeepers_plate"), why), "the plate equips");
     Check(bag.Equip(FindStack(bag, "wolfhide_charm"), why), "the charm equips");
+    const std::vector<std::string> wornIds = bag.WornIds();
+    Check(wornIds.size() == 3 && wornIds[0] == "notched_greataxe" &&
+              wornIds[1] == "oathkeepers_plate" && wornIds[2] == "wolfhide_charm",
+          "worn ids come in slot order and skip the blocked offhand");
     const StatBlock worn = bag.GearBonus();
     Check(worn.Strength == 6 && worn.Defense == 4 && worn.Agility == 1,
           "plate and charm stack with the axe: defense  -2+6, agility +2-1");

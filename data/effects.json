@@ -1,4 +1,14 @@
 {
+  "better": {
+    "power": "higher",
+    "amount": "higher",
+    "percent": "higher",
+    "per": "lower",
+    "max": "higher",
+    "turns": "higher",
+    "every": "lower",
+    "focusCost": "lower"
+  },
   "effects": [
     {
       "id": "stat",
