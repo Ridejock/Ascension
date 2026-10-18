@@ -214,8 +214,7 @@ public:
     // threshold starts phase 2.
     void SetEnemyHp(i32 hp);
 
-    // Applies a status from statuses.json. Tests use this for Exposed, which no sample skill
-    // inflicts yet.
+    // Applies a status from statuses.json. Tests place one before a blow.
     bool Inflict(CombatantSide side, std::string_view statusId, std::string& error);
 
     ActionResult UseSkill(std::string_view skillId);
@@ -237,6 +236,11 @@ private:
     struct AimRef {
         bool Player = false;
         i32 Index = 0;
+    };
+    // A status a damage effect spent on one aim. It stays up until the last onHit of that use.
+    struct StatusSpend {
+        AimRef Aim;
+        std::string StatusId;
     };
     struct HitLanded {
         i32 Taken = 0;
@@ -260,6 +264,12 @@ private:
     void CollectAims(const CombatantState& user, EffectAim aim, std::vector<AimRef>& out);
     [[nodiscard]] EffectAim AimOf(const SkillDef& skill, const EffectDef& effect) const;
     [[nodiscard]] CombatantState& Aimed(const AimRef& aim);
+    // A damage effect with no IfTargetHas always lands. Otherwise the aim must hold it.
+    [[nodiscard]] static bool EffectLands(const EffectDef& effect, const CombatantState& foe);
+    // Index of `aim` in `aims`, or aims.size() when it is not there.
+    [[nodiscard]] static usize AimSlot(std::span<const AimRef> aims, const AimRef& aim);
+    [[nodiscard]] static bool Spends(std::span<const StatusSpend> spends, const AimRef& aim,
+                                     std::string_view statusId);
     [[nodiscard]] std::vector<TurnSeat> Living() const;
     [[nodiscard]] TurnSeat CurrentSeat();
     void Retarget();

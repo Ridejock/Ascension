@@ -573,6 +573,8 @@ bool TriggerAllows(EffectTrigger trigger, EffectOp op)
 // here: onTurnStart heal ignores scaling, and onDamaged applyStatus ignores every.
 bool FieldUsed(EffectTrigger trigger, EffectOp op, std::string_view key)
 {
+    if (key == "ifTargetHas" || key == "consume")
+        return trigger == EffectTrigger::OnUse && op == EffectOp::Damage;
     if (trigger == EffectTrigger::Always && op == EffectOp::Stat)
         return key == "stat" || key == "amount";
     if (trigger == EffectTrigger::Always && op == EffectOp::StatPerMissingHp)
@@ -707,6 +709,27 @@ bool FieldBounds(EffectOp op, std::string_view key, i32& min, i32& max)
 bool AssignEffectField(EffectDef& effect, const std::string& key, const Json& fieldValue,
                        std::string& error)
 {
+    if (key == "consume") {
+        if (!fieldValue.is_boolean()) {
+            error = "'consume' must be true or false";
+            return false;
+        }
+        effect.Consume = fieldValue.get<bool>();
+        return true;
+    }
+    if (key == "ifTargetHas") {
+        if (!fieldValue.is_string()) {
+            error = "'ifTargetHas' must be a status id";
+            return false;
+        }
+        const std::string text = fieldValue.get<std::string>();
+        if (!IsId(text)) {
+            error = "'ifTargetHas' must be a status id";
+            return false;
+        }
+        effect.IfTargetHas = text;
+        return true;
+    }
     if (key == "stat" || key == "scaling" || key == "status") {
         if (!fieldValue.is_string()) {
             error = "'" + key + "' must be text";
@@ -779,6 +802,10 @@ bool AssignEffectField(EffectDef& effect, const std::string& key, const Json& fi
 
 bool RequireEffectFields(const EffectDef& effect, std::string& error)
 {
+    if (effect.Consume && !effect.IfTargetHas.has_value()) {
+        error = "'consume' needs 'ifTargetHas'";
+        return false;
+    }
     auto need = [&](bool present, const char* key) {
         if (present)
             return true;
@@ -2027,6 +2054,12 @@ bool StatusesExist(const Parsed& parsed, const std::vector<EffectDef>& effects,
                    const std::string& where, std::string& error)
 {
     for (const EffectDef& effect : effects) {
+        if (effect.IfTargetHas.has_value() &&
+            FindId(parsed.Statuses, *effect.IfTargetHas) == nullptr) {
+            error = where + ": effect " + Quote(effect.Id) + ": 'ifTargetHas' status " +
+                    Quote(*effect.IfTargetHas) + " does not exist";
+            return false;
+        }
         if (!effect.Status.has_value())
             continue;
         if (FindId(parsed.Statuses, *effect.Status) == nullptr) {
@@ -2130,6 +2163,14 @@ std::optional<std::string> EffectField(const TextScope& scope, const EffectDef& 
         return StatName(scope, effect.Stat);
     if (key == "scaling")
         return StatName(scope, effect.Scaling);
+    if (key == "ifTargetHas") {
+        if (!effect.IfTargetHas.has_value())
+            return std::nullopt;
+        const StatusDef* needed = FindId(scope.Statuses, *effect.IfTargetHas);
+        if (needed == nullptr)
+            return std::nullopt;
+        return needed->Name;
+    }
     if (!effect.Status.has_value())
         return std::nullopt;
     const StatusDef* applied = FindId(scope.Statuses, *effect.Status);
@@ -2393,6 +2434,12 @@ bool DescriptionsResolve(const Parsed& parsed, std::string& error)
 bool CrossCheck(const Parsed& parsed, std::string& error)
 {
     for (const EffectDef& recipe : parsed.Effects) {
+        if (recipe.IfTargetHas.has_value() &&
+            FindId(parsed.Statuses, *recipe.IfTargetHas) == nullptr) {
+            error = "effect " + Quote(recipe.Id) + ": 'ifTargetHas' status " +
+                    Quote(*recipe.IfTargetHas) + " does not exist";
+            return false;
+        }
         if (!recipe.Status.has_value())
             continue;
         if (FindId(parsed.Statuses, *recipe.Status) == nullptr) {

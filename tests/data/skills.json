@@ -227,6 +227,31 @@
       ]
     },
     {
+      "id": "shell_bash",
+      "name": "Shell Bash",
+      "description": "Leave the foe {crack.status}. A foe already {follow.ifTargetHas} takes the full weight and loses it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10 },
+        { "id": "follow", "trigger": "onUse", "op": "damage", "power": 20, "ifTargetHas": "exposed", "consume": true },
+        { "id": "crack", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
+      "id": "cash_in",
+      "name": "Cash In",
+      "description": "A foe who is {follow.ifTargetHas} takes the rest of the blow and loses it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "follow", "trigger": "onUse", "op": "damage", "power": 20, "ifTargetHas": "exposed", "consume": true },
+        { "id": "crack", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
       "id": "stone_skin",
       "name": "Stone Skin",
       "description": "The barrow closes over Varn. Defense rises for a short while.",

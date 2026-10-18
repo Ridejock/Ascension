@@ -1202,6 +1202,37 @@ CombatantState& Battle::Aimed(const AimRef& aim)
     return m_Enemies[static_cast<usize>(aim.Index)];
 }
 
+bool Battle::EffectLands(const EffectDef& effect, const CombatantState& foe)
+{
+    if (!effect.IfTargetHas.has_value())
+        return true;
+    for (const StatusInstance& held : foe.Statuses) {
+        if (held.Id == *effect.IfTargetHas)
+            return true;
+    }
+    return false;
+}
+
+usize Battle::AimSlot(std::span<const AimRef> aims, const AimRef& aim)
+{
+    for (usize slot = 0; slot < aims.size(); ++slot) {
+        if (aims[slot].Player == aim.Player && aims[slot].Index == aim.Index)
+            return slot;
+    }
+    return aims.size();
+}
+
+bool Battle::Spends(std::span<const StatusSpend> spends, const AimRef& aim,
+                    std::string_view statusId)
+{
+    for (const StatusSpend& spend : spends) {
+        if (spend.StatusId == statusId && spend.Aim.Player == aim.Player &&
+            spend.Aim.Index == aim.Index)
+            return true;
+    }
+    return false;
+}
+
 ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
 {
     if (user.Focus < skill.FocusCost)
@@ -1226,6 +1257,11 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
         m_Data != nullptr ? m_Data->GetStatuses() : std::span<const StatusDef>{};
 
     bool damageRan = false;
+    // Aims a damage effect landed on. onHit reaches only these, and two hits on one aim share
+    // one blow line. A status this use spends stays up until the last onHit, so later damage
+    // in the use still sees it, and that use does not apply it again.
+    std::vector<AimRef> struckAims;
+    std::vector<StatusSpend> spends;
     i32 taken = 0;
     i32 reflected = 0;
     i32 struck = 0;
@@ -1275,6 +1311,21 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
             const i32 dealt = StatusDealtPercent(user, catalog);
             for (const AimRef& aim : aims) {
                 CombatantState& foe = Aimed(aim);
+                if (!EffectLands(effect, foe))
+                    continue;
+                const usize slot = AimSlot(struckAims, aim);
+                if (slot == struckAims.size()) {
+                    struckAims.push_back(aim);
+                    StrikeNote blow;
+                    blow.Name = foe.Name;
+                    blows.push_back(std::move(blow));
+                }
+                if (effect.Consume && effect.IfTargetHas.has_value()) {
+                    StatusSpend spend;
+                    spend.Aim = aim;
+                    spend.StatusId = *effect.IfTargetHas;
+                    spends.push_back(std::move(spend));
+                }
                 StrikeQuery hit;
                 hit.Power = power;
                 hit.ScalingStat = scalingStat;
@@ -1286,17 +1337,12 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 const HitLanded landed = LandHit(user, foe, raw);
                 taken += landed.Taken;
                 reflected += landed.Reflected;
-                ++struck;
-                StrikeNote blow;
-                blow.Name = foe.Name;
-                blow.Taken = landed.Taken;
-                blows.push_back(std::move(blow));
+                blows[slot].Taken += landed.Taken;
                 if (!aim.Player)
                     EnterPhase(aim.Index, phaseNote);
                 if (userIndex >= 0)
                     EnterPhase(userIndex, phaseNote);
             }
-            damageRan = !aims.empty();
         } else if (effect.Op == EffectOp::Guard) {
             user.GuardPercent = effect.Amount.value_or(0);
             user.ReflectPercent = 0;
@@ -1362,12 +1408,27 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
         }
     }
 
+    struck = static_cast<i32>(blows.size());
+    damageRan = !struckAims.empty();
+
     if (damageRan) {
         for (const EffectDef& follow : skill.Effects) {
             if (follow.Trigger != EffectTrigger::OnHit)
                 continue;
             std::vector<AimRef> aims;
             CollectAims(user, AimOf(skill, follow), aims);
+            // A miss is not a hit: an aim no damage effect struck gets no onHit. Spending a
+            // status also blocks this use from applying that same status to that aim.
+            std::vector<AimRef> reached;
+            for (const AimRef& aim : aims) {
+                if (AimSlot(struckAims, aim) == struckAims.size())
+                    continue;
+                if (follow.Op == EffectOp::ApplyStatus && follow.Status.has_value() &&
+                    Spends(spends, aim, *follow.Status))
+                    continue;
+                reached.push_back(aim);
+            }
+            aims = std::move(reached);
             if (follow.Op == EffectOp::StunIfWindingUp) {
                 for (const AimRef& aim : aims) {
                     CombatantState& foe = Aimed(aim);
@@ -1409,6 +1470,32 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     extra += ".";
                 }
             }
+        }
+    }
+
+    for (const StatusSpend& spend : spends) {
+        CombatantState& foe = Aimed(spend.Aim);
+        bool removed = false;
+        std::vector<StatusInstance>::iterator held = foe.Statuses.begin();
+        while (held != foe.Statuses.end()) {
+            if (held->Id != spend.StatusId) {
+                ++held;
+                continue;
+            }
+            held = foe.Statuses.erase(held);
+            removed = true;
+        }
+        if (!removed || m_Data == nullptr)
+            continue;
+        const StatusDef* gone = m_Data->FindStatus(spend.StatusId);
+        extra += " ";
+        extra += foe.Name;
+        if (gone != nullptr) {
+            extra += " loses ";
+            extra += gone->Name;
+            extra += ".";
+        } else {
+            extra += " recovers.";
         }
     }
 

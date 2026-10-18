@@ -1124,6 +1124,88 @@ usize CountId(std::span<const std::string> ids, std::string_view id)
     return count;
 }
 
+void CheckLine(const ActionResult& result, i32 damage, const char* text, const char* what)
+{
+    const bool ok = result.Accepted && result.Damage == damage && result.Text == text;
+    Check(ok, what);
+    if (!ok)
+        std::printf("    damage %d text: %s\n", result.Damage, result.Text.c_str());
+}
+
+bool Holds(const CombatantState& who, std::string_view id)
+{
+    for (const StatusInstance& held : who.Statuses) {
+        if (held.Id == id)
+            return true;
+    }
+    return false;
+}
+
+void TestConditionalDamage()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "classes.json",
+                  "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"]",
+                  "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\", "
+                  "\"shell_bash\", \"cash_in\"]");
+    Database data(copy.Path);
+    Check(data.Load(), "the conditional roster loads");
+    std::string error;
+
+    Battle open(data, Sides({CombatantSide::Player}));
+    Check(open.Start("fighter", 1, "bandit", error), "the bash fight starts");
+    const ActionResult first = open.UseSkill("shell_bash");
+    CheckLine(first, 6, "Fighter uses Shell Bash for 6. Exposed.",
+              "the opener hits once and the follow-up does not land");
+    Check(open.Enemy().Hp == 58 && Holds(open.Enemy(), "exposed") &&
+              open.Enemy().Statuses.size() == 1 && open.Enemy().Statuses[0].TurnsLeft == 2,
+          "the opener applies Exposed");
+    const ActionResult cash = open.UseSkill("shell_bash");
+    CheckLine(cash, 27, "Fighter uses Shell Bash for 27. Bandit loses Exposed.",
+              "both hits land while Exposed is up, on one blow line");
+    Check(open.Enemy().Hp == 31 && open.Enemy().Statuses.empty(),
+          "the cash-in removes Exposed and does not apply it again");
+    const ActionResult again = open.UseSkill("shell_bash");
+    CheckLine(again, 6, "Fighter uses Shell Bash for 6. Exposed.", "the next use opens again");
+    Check(Holds(open.Enemy(), "exposed"), "the third use applies Exposed");
+
+    Battle miss(data, Sides({CombatantSide::Player}));
+    Check(miss.Start("fighter", 1, "bandit", error), "the miss fight starts");
+    const ActionResult whiff = miss.UseSkill("cash_in");
+    CheckLine(whiff, 0, "Fighter uses Cash In.",
+              "a conditional miss deals nothing and does not apply onHit");
+    Check(miss.Enemy().Hp == 64 && miss.Enemy().Statuses.empty(),
+          "a miss does not consume or leave a status");
+    Check(miss.Inflict(CombatantSide::Enemy, "exposed", error), "exposed can be placed");
+    const ActionResult spent = miss.UseSkill("cash_in");
+    CheckLine(spent, 20, "Fighter uses Cash In for 20. Bandit loses Exposed.",
+              "the condition lands, consumes Exposed, and does not reapply it");
+    Check(miss.Enemy().Hp == 44 && miss.Enemy().Statuses.empty(),
+          "the spent status is gone after the use");
+
+    Battle ranked(data, Sides({CombatantSide::Player}));
+    Check(ranked.Start("fighter", 1, "bandit", error), "the ranked fight starts");
+    std::vector<SkillRank> rows;
+    SkillRank row;
+    row.Id = "shell_bash";
+    row.Rank = 4;
+    rows.push_back(std::move(row));
+    ranked.SetPlayerRanks(data.GetProgress().PowerPerRank, std::move(rows));
+    Check(ranked.Inflict(CombatantSide::Enemy, "exposed", error), "the ranked target is exposed");
+    const ActionResult boosted = ranked.UseSkill("shell_bash");
+    CheckLine(boosted, 42, "Fighter uses Shell Bash for 42. Bandit loses Exposed.",
+              "each damage effect gets the rank bonus");
+
+    Battle furious(data, Sides({CombatantSide::Player}));
+    Check(furious.Start("fighter", 1, "bandit", error), "the fury fight starts");
+    Check(furious.Inflict(CombatantSide::Player, "fury", error) &&
+              furious.Inflict(CombatantSide::Enemy, "exposed", error),
+          "fury and exposed are both up");
+    const ActionResult both = furious.UseSkill("shell_bash");
+    CheckLine(both, 41, "Fighter uses Shell Bash for 41. Bandit loses Exposed.",
+              "fury multiplies both damage effects");
+}
+
 void TestItemGrantsInFight()
 {
     TempCopy copy;
@@ -1249,6 +1331,7 @@ int main()
     TestGrantCopies();
     TestStunResist();
     TestSummonFallback();
+    TestConditionalDamage();
     TestItemGrantsInFight();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;

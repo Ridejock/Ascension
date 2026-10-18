@@ -82,7 +82,7 @@ void TestSample()
     Check(error.Message.empty(), "a successful load has no error");
     Check(data.GetRevision() == 1, "the first load is revision 1");
     Check(data.GetStats().size() == 5, "five stats");
-    Check(data.GetSkills().size() == 20, "twenty skills");
+    Check(data.GetSkills().size() == 22, "twenty-two skills");
     Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
               data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1 &&
               data.GetRules().FocusBase == 4 && data.GetRules().FocusPerTurn == 1 &&
@@ -246,7 +246,7 @@ void TestSample()
                   enemy.Description.find("Cairn") == std::string::npos,
               "descriptions say barrow, not cairn");
     }
-    Check(data.GetStatuses().size() == 4, "four statuses");
+    Check(data.GetStatuses().size() == 5, "five statuses");
     const StatusDef* bleed = data.FindStatus("bleed");
     const StatusDef* exposed = data.FindStatus("exposed");
     const StatusDef* enraged = data.FindStatus("enraged");
@@ -260,6 +260,9 @@ void TestSample()
           "enraged adds 30 percent dealt and 15 percent taken");
     Check(stunned != nullptr && stunned->SkipAction && stunned->Turns == 1,
           "stunned skips the next action");
+    const StatusDef* furyStatus = data.FindStatus("fury");
+    Check(furyStatus != nullptr && furyStatus->DamageDealtPercent == 50 && furyStatus->Turns == 4,
+          "fury adds 50 percent dealt for four turns");
     const ItemDef* sword = data.FindItem("rusty_sword");
     const ItemDef* axe = data.FindItem("notched_greataxe");
     const ItemDef* shield = data.FindItem("oak_shield");
@@ -1089,6 +1092,110 @@ i32 BracedDescriptions(const Database& data)
     return bad;
 }
 
+void TestConditionalFields()
+{
+    {
+        Database data(kSample);
+        DataError error;
+        Check(data.Load(&error), "the conditional skill loads");
+        const SkillDef* shell = data.FindSkill("shell_bash");
+        const EffectDef* hit = EffectOf(shell, "hit");
+        const EffectDef* follow = EffectOf(shell, "follow");
+        const EffectDef* crack = EffectOf(shell, "crack");
+        Check(hit != nullptr && hit->Power == 10 && !hit->IfTargetHas.has_value() &&
+                  !hit->Consume && follow != nullptr && follow->Power == 20 &&
+                  follow->IfTargetHas == "exposed" && follow->Consume &&
+                  !follow->Scaling.has_value() && crack != nullptr &&
+                  crack->Trigger == EffectTrigger::OnHit && crack->Status == "exposed",
+              "shell bash keeps ifTargetHas and consume on the follow-up only");
+        const std::string text = shell != nullptr ? data.DescribeSkill(*shell) : std::string();
+        Check(text.find("Exposed") != std::string::npos && text.find('{') == std::string::npos,
+              "ifTargetHas resolves to the status name");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": "
+                      "10, \"scaling\": \"strength\", \"target\": \"target\" }",
+                      "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": "
+                      "10, \"scaling\": \"strength\", \"target\": \"target\", \"consume\": true }");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "consume without ifTargetHas is rejected");
+        CheckHas(error.Message, "skills.json", "the consume error names the file");
+        CheckHas(error.Message, "strike", "the consume error names the skill");
+        CheckHas(error.Message, "hit", "the consume error names the effect");
+        CheckHas(error.Message, "consume", "the consume error names the field");
+        CheckHas(error.Message, "ifTargetHas", "the consume error names the missing condition");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": "
+                      "10, \"scaling\": \"strength\", \"target\": \"target\" }",
+                      "{ \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", \"power\": "
+                      "10, \"scaling\": \"strength\", \"target\": \"target\", \"ifTargetHas\": "
+                      "\"expsoed\" }");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "an unknown ifTargetHas status is rejected");
+        CheckHas(error.Message, "skills.json", "the status error names the file");
+        CheckHas(error.Message, "strike", "the status error names the skill");
+        CheckHas(error.Message, "ifTargetHas", "the status error names the field");
+        CheckHas(error.Message, "expsoed", "the status error names the id");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, "
+            "\"ifTargetHas\": \"exposed\" }");
+        ExpectUnused(copy.Path, "skills.json", "second_wind", "mend", "ifTargetHas",
+                     "a heal rejects ifTargetHas");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": "
+                      "50 }",
+                      "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": "
+                      "50, \"consume\": true }");
+        ExpectUnused(copy.Path, "skills.json", "brace", "ward", "consume",
+                     "a guard rejects consume");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "\"percent\": 50,\n          \"power\": 10,\n          \"scaling\": "
+                      "\"defense\"",
+                      "\"percent\": 50,\n          \"power\": 10,\n          \"scaling\": "
+                      "\"defense\",\n          \"ifTargetHas\": \"exposed\"");
+        ExpectUnused(copy.Path, "skills.json", "riposte", "back", "ifTargetHas",
+                     "a reflect rejects ifTargetHas");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"stun\", \"trigger\": \"onHit\", \"op\": \"stunIfWindingUp\", "
+                      "\"status\": \"stunned\" }",
+                      "{ \"id\": \"stun\", \"trigger\": \"onHit\", \"op\": \"stunIfWindingUp\", "
+                      "\"status\": \"stunned\", \"ifTargetHas\": \"exposed\" }");
+        ExpectUnused(copy.Path, "skills.json", "heavy_blow", "stun", "ifTargetHas",
+                     "an onHit effect rejects ifTargetHas");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "skills.json",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onHit\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3 }",
+                      "{ \"id\": \"bleed\", \"trigger\": \"onHit\", \"op\": \"applyStatus\", "
+                      "\"status\": \"bleed\", \"every\": 3, \"consume\": true }");
+        ExpectUnused(copy.Path, "skills.json", "slash", "bleed", "consume",
+                     "an onHit effect rejects consume");
+    }
+}
+
 void TestDescriptionsResolve()
 {
     Database data(kSample);
@@ -1372,6 +1479,7 @@ int main()
     TestValidation();
     TestLayers();
     TestUnusedFields();
+    TestConditionalFields();
     TestResists();
     TestItemGrants();
     TestDescriptionsResolve();

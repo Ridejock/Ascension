@@ -32,6 +32,14 @@
       "skipAction": true,
       "turns": 1,
       "maxStacks": 1
+    },
+    {
+      "id": "fury",
+      "name": "Fury",
+      "description": "Deals {dealt} percent more damage. Lasts three turns.",
+      "damageDealtPercent": 50,
+      "turns": 4,
+      "maxStacks": 1
     }
   ]
 }
