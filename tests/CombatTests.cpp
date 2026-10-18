@@ -12,6 +12,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Check.h"
+#include "FoeAlert.h"
 
 namespace {
 
@@ -1306,6 +1307,186 @@ void TestItemGrantsInFight()
           "a reload drops the sword's cleave from the fight");
 }
 
+// Test-only foes on a copy of tests/data. The frozen roster stays free of these ids.
+void AddPostFoes(const fs::path& root)
+{
+    ReplaceInFile(root / "statuses.json",
+                  "      \"damageDealtPercent\": 50,\n      \"turns\": 4,\n      "
+                  "\"maxStacks\": 1\n    }\n  ]\n}",
+                  "      \"damageDealtPercent\": 50,\n      \"turns\": 4,\n      "
+                  "\"maxStacks\": 1\n    },\n    {\n      \"id\": \"steadfast\",\n      "
+                  "\"name\": \"Steadfast\",\n      \"description\": \"Cannot be stunned for a "
+                  "short while.\",\n      \"resists\": [\"stunned\"],\n      \"turns\": 3,\n      "
+                  "\"maxStacks\": 1\n    }\n  ]\n}");
+    ReplaceInFile(root / "skills.json",
+                  "        { \"id\": \"shell\", \"trigger\": \"onUse\", \"op\": \"harden\", "
+                  "\"amount\": 6, \"turns\": 2 }\n      ]\n    }\n  ]\n}",
+                  "        { \"id\": \"shell\", \"trigger\": \"onUse\", \"op\": \"harden\", "
+                  "\"amount\": 6, \"turns\": 2 }\n      ]\n    },\n    {\n      \"id\": "
+                  "\"test_shell\",\n      \"name\": \"Test Shell\",\n      \"description\": \"A "
+                  "shell closes. Blows barely land for a short while.\",\n      \"kind\": "
+                  "\"active\",\n      \"target\": \"self\",\n      \"focusCost\": 0,\n      "
+                  "\"effects\": [\n        { \"id\": \"shell\", \"trigger\": \"onUse\", \"op\": "
+                  "\"harden\", \"amount\": 150, \"turns\": 2 }\n      ]\n    },\n    {\n      "
+                  "\"id\": \"test_tap\",\n      \"name\": \"Test Tap\",\n      \"description\": "
+                  "\"A light tap.\",\n      \"kind\": \"active\",\n      \"target\": \"enemy\",\n "
+                  "     \"focusCost\": 0,\n      \"effects\": [\n        { \"id\": \"hit\", "
+                  "\"trigger\": \"onUse\", \"op\": \"damage\", \"power\": 1 }\n      ]\n    },\n   "
+                  " {\n      \"id\": \"test_bellow\",\n      \"name\": \"Test Bellow\",\n      "
+                  "\"description\": \"A roar that sets the feet.\",\n      \"kind\": "
+                  "\"active\",\n      \"target\": \"self\",\n      \"focusCost\": 0,\n      "
+                  "\"effects\": [\n        { \"id\": \"set\", \"trigger\": \"onUse\", \"op\": "
+                  "\"applyStatus\", \"status\": \"steadfast\" }\n      ]\n    },\n    {\n      "
+                  "\"id\": \"test_draw\",\n      \"name\": \"Test Draw\",\n      \"description\": "
+                  "\"A telegraphed swing.\",\n      \"kind\": \"active\",\n      \"target\": "
+                  "\"enemy\",\n      \"focusCost\": 0,\n      \"windup\": 1,\n      \"effects\": "
+                  "[\n        { \"id\": \"hit\", \"trigger\": \"onUse\", \"op\": \"damage\", "
+                  "\"power\": 1 }\n      ]\n    }\n  ]\n}");
+    ReplaceInFile(
+        root / "enemies.json",
+        "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      \"gold\": 0\n    "
+        "}\n  ]\n}",
+        "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      \"gold\": 0\n    "
+        "},\n    {\n      \"id\": \"shell_post\",\n      \"name\": \"Shell Post\",\n      "
+        "\"description\": \"A post that closes a stone shell, then taps.\",\n      \"level\": "
+        "1,\n      \"stats\": {\n        \"vitality\": 30,\n        \"strength\": 0,\n        "
+        "\"defense\": 0,\n        \"agility\": 1,\n        \"focus\": 0\n      },\n      "
+        "\"skills\": [\"test_shell\", \"test_tap\"],\n      \"pattern\": [\"test_shell\", "
+        "\"test_tap\", \"test_tap\"],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    "
+        "{\n "
+        "     \"id\": \"steadfast_post\",\n      \"name\": \"Steadfast Post\",\n      "
+        "\"description\": \"A post that sets its feet, then draws.\",\n      \"level\": 1,\n      "
+        "\"stats\": {\n        \"vitality\": 30,\n        \"strength\": 0,\n        \"defense\": "
+        "0,\n        \"agility\": 1,\n        \"focus\": 0\n      },\n      \"skills\": "
+        "[\"test_bellow\", \"test_draw\"],\n      \"pattern\": [\"test_bellow\", "
+        "\"test_draw\"],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n      "
+        "\"id\": \"open_post\",\n      \"name\": \"Open Post\",\n      \"description\": \"A post "
+        "that draws with nothing holding the stun off.\",\n      \"level\": 1,\n      \"stats\": "
+        "{\n        \"vitality\": 30,\n        \"strength\": 0,\n        \"defense\": 0,\n        "
+        "\"agility\": 1,\n        \"focus\": 0\n      },\n      \"skills\": [\"test_draw\"],\n     "
+        " \"pattern\": [\"test_draw\"],\n      \"experience\": 0,\n      \"gold\": 0\n    }\n  "
+        "]\n}");
+}
+
+void TestSteadfastBlocksStun()
+{
+    TempCopy copy;
+    AddPostFoes(copy.Path);
+    Database data(copy.Path);
+    Check(data.Load(), "the steadfast post loads");
+    const StatusDef* steadfast = data.FindStatus("steadfast");
+    Check(steadfast != nullptr && steadfast->Resists.size() == 1 &&
+              steadfast->Resists[0] == "stunned" && steadfast->Turns == 3,
+          "steadfast resists stunned for a short while");
+
+    Battle held(data, Sides({CombatantSide::Enemy, CombatantSide::Player, CombatantSide::Enemy,
+                             CombatantSide::Player}));
+    std::string error;
+    Check(held.Start("fighter", 1, "steadfast_post", error), "the steadfast post fight starts");
+    const ActionResult bellow = held.EnemyAct();
+    Check(bellow.Accepted && bellow.Text.find("Steadfast.") != std::string::npos &&
+              ResistsStatus(held.Enemy(), "stunned", data.GetStatuses()),
+          "the bellow applies steadfast");
+    Check(held.UseSkill("strike").Accepted, "a strike spends the turn before the draw");
+    const ActionResult draw = held.EnemyAct();
+    Check(draw.Accepted && draw.Damage == 0 && held.Enemy().WindupSkill == "test_draw",
+          "the draw is telegraphed");
+    const ActionResult heavy = held.UseSkill("heavy_blow");
+    Check(heavy.Accepted && heavy.Damage > 0 &&
+              heavy.Text.find("shrugs off the stun") != std::string::npos &&
+              held.Enemy().WindupSkill == "test_draw",
+          "steadfast blocks the stun and leaves the wind-up running");
+    bool stunned = false;
+    for (const StatusInstance& status : held.Enemy().Statuses) {
+        if (status.Id == "stunned")
+            stunned = true;
+    }
+    Check(!stunned, "steadfast does not let stunned land");
+
+    Battle open(data, Sides({CombatantSide::Enemy, CombatantSide::Player}));
+    Check(open.Start("fighter", 1, "open_post", error), "the open post fight starts");
+    Check(open.EnemyAct().Accepted && open.Enemy().WindupSkill == "test_draw",
+          "the open post starts the same draw");
+    const ActionResult stunnedBlow = open.UseSkill("heavy_blow");
+    Check(stunnedBlow.Accepted && stunnedBlow.Text.find("is stunned.") != std::string::npos &&
+              open.Enemy().WindupSkill.empty(),
+          "the same draw is stunned when steadfast is not up");
+}
+
+void TestShellDefenseExpires()
+{
+    TempCopy copy;
+    AddPostFoes(copy.Path);
+    Database data(copy.Path);
+    Check(data.Load(), "the shell post loads");
+    Battle battle(data,
+                  Sides({CombatantSide::Enemy, CombatantSide::Player, CombatantSide::Enemy,
+                         CombatantSide::Player, CombatantSide::Enemy, CombatantSide::Player}));
+    std::string error;
+    Check(battle.Start("fighter", 1, "shell_post", error), "the shell post fight starts");
+    const ActionResult shell = battle.EnemyAct();
+    Check(shell.Accepted && battle.Enemy().BonusDefense == 150 &&
+              battle.Enemy().BonusDefenseTurns == 2,
+          "the shell raises defense by 150 for two of the holder's turns");
+    const ActionResult first = battle.UseSkill("strike");
+    Check(first.Accepted && first.Damage == 1 && battle.Enemy().BonusDefense == 150 &&
+              battle.Enemy().BonusDefenseTurns == 2,
+          "a blow during the shell lands for 1, and the hero's turn does not tick it");
+    Check(battle.EnemyAct().Accepted && battle.Enemy().BonusDefense == 150 &&
+              battle.Enemy().BonusDefenseTurns == 1,
+          "the shell ticks down on the foe's next turn and is still up");
+    const ActionResult second = battle.UseSkill("strike");
+    Check(second.Accepted && second.Damage == 1 && battle.Enemy().BonusDefenseTurns == 1,
+          "the second hero turn still faces the shell");
+    Check(battle.EnemyAct().Accepted && battle.Enemy().BonusDefense == 0 &&
+              battle.Enemy().BonusDefenseTurns == 0,
+          "the shell expires at the start of the foe's following turn");
+    const ActionResult third = battle.UseSkill("strike");
+    Check(third.Accepted && third.Damage == 18, "once the shell has expired a strike lands for 18");
+}
+
+std::string UpperAlert(std::string_view text)
+{
+    std::string out(text);
+    for (char& code : out) {
+        if (code >= 'a' && code <= 'z')
+            code = static_cast<char>(code - 'a' + 'A');
+    }
+    return out;
+}
+
+void TestFoeBuffAlert()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    CombatantState quiet;
+    Check(FoeGuardAlert(quiet).empty() && FoeDefenseAlert(data, quiet).empty(),
+          "a foe with no guard and no shell has no buff alert");
+    CombatantState raised;
+    raised.GuardPercent = 75;
+    raised.BonusDefense = 150;
+    raised.BonusDefenseTurns = 2;
+    const std::string guard = FoeGuardAlert(raised);
+    const std::string defense = FoeDefenseAlert(data, raised);
+    Check(guard == "Guard 75%" && UpperAlert(guard) == "GUARD 75%",
+          "a raised guard reads GUARD 75%");
+    Check(defense == "Defense +150 (2)" && UpperAlert(defense) == "DEFENSE +150 (2)",
+          "a defense buff reads DEFENSE +150 (2) from the Defense stat");
+    raised.BonusDefenseTurns = 0;
+    raised.BonusDefense = 150;
+    Check(FoeDefenseAlert(data, raised).empty(), "a shell with no turns left is not shown");
+
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "stats.json", "\"name\": \"Defense\"", "\"name\": \"Armor\"");
+    Database renamed(copy.Path);
+    Check(renamed.Load(), "a renamed defense stat loads");
+    CombatantState named;
+    named.BonusDefense = 12;
+    named.BonusDefenseTurns = 1;
+    Check(FoeDefenseAlert(renamed, named) == "Armor +12 (1)",
+          "the defense alert uses the stat's name from stats.json");
+}
+
 } // namespace
 
 int main()
@@ -1333,6 +1514,9 @@ int main()
     TestSummonFallback();
     TestConditionalDamage();
     TestItemGrantsInFight();
+    TestSteadfastBlocksStun();
+    TestShellDefenseExpires();
+    TestFoeBuffAlert();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

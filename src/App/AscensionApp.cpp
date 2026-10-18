@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <string>
 
+#include "FoeAlert.h"
 #include "GearLine.h"
 
 #include <SDL3/SDL.h>
@@ -232,8 +233,8 @@ std::string StatusLine(const Database& data, const CombatantState& who)
     return line;
 }
 
-// Wind-up, a summoned add that is about to join, and statuses. The y that comes back is
-// just under the last line.
+// Wind-up, a raised guard, a defense buff that is still counting down, a summoned add
+// that is about to join, and statuses. The y that comes back is just under the last line.
 f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const CombatantState& who,
                   const Emerald::Vec2& origin, f32 wrap, int scale)
 {
@@ -251,6 +252,18 @@ f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const Com
         if (who.WindupLeft <= 0)
             windLine += " incoming";
         alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(windLine), kError,
+                                        scale, wrap);
+        alertY += 4.0f;
+    }
+    const std::string guardAlert = FoeGuardAlert(who);
+    if (!guardAlert.empty()) {
+        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(guardAlert), kError,
+                                        scale, wrap);
+        alertY += 4.0f;
+    }
+    const std::string defenseAlert = FoeDefenseAlert(data, who);
+    if (!defenseAlert.empty()) {
+        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(defenseAlert), kError,
                                         scale, wrap);
         alertY += 4.0f;
     }

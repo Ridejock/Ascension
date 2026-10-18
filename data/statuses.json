@@ -41,6 +41,14 @@
       "damageDealtPercent": 50,
       "turns": 4,
       "maxStacks": 1
+    },
+    {
+      "id": "steadfast",
+      "name": "Steadfast",
+      "description": "Cannot be stunned for a short while.",
+      "resists": ["stunned"],
+      "turns": 3,
+      "maxStacks": 1
     }
   ]
 }

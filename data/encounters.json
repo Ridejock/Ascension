@@ -34,6 +34,16 @@
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
       "enemies": ["oathkeeper_varn"]
+    },
+    {
+      "id": "cairn_warden",
+      "name": "Cairn Warden",
+      "enemies": ["cairn_warden"]
+    },
+    {
+      "id": "barrow_brute",
+      "name": "Barrow Brute",
+      "enemies": ["barrow_brute"]
     }
   ]
 }
