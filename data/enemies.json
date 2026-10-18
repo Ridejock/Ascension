@@ -51,16 +51,17 @@
     {
       "id": "bone_archer",
       "name": "Bone Archer",
-      "description": "A barrow archer who draws on the dead. The shot is obvious before it lands.",
+      "description": "A barrow archer who draws on the dead. The shot is obvious before it lands. A bone bolt flies after the draw, even if the shot never does.",
       "level": 5,
       "stats": {
-        "vitality": 26,
+        "vitality": 27,
         "strength": 12,
         "defense": 3,
         "agility": 4,
         "focus": 0
       },
-      "skills": ["aimed_shot"],
+      "skills": ["aimed_shot", "bone_bolt"],
+      "pattern": ["aimed_shot", "bone_bolt"],
       "experience": 22,
       "gold": 8
     },
