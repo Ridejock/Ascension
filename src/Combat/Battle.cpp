@@ -915,7 +915,7 @@ void Battle::EnterPhase(i32 index, std::string& note)
     }
     if (!note.empty())
         note += " ";
-    note += foe.Name + " enters phase 2.";
+    note += foe.Name + " enters phase " + std::to_string(foe.Phase) + ".";
 }
 
 void Battle::ArmSummon(i32 index, std::string& note)

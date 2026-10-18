@@ -506,11 +506,35 @@ void TestNextFoeStaysWhileChoosing()
     Check(hero.IndexAfterNextFoe(2, 0) == 2, "an empty roster does not move");
 }
 
+void TestStartUsesFirstStarter()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "classes.json", "{\n      \"id\": \"fighter\",",
+                  "{\n      \"id\": \"ranger\",\n      \"name\": \"Ranger\",\n      "
+                  "\"description\": \"A second starter.\",\n      \"starter\": true,\n      "
+                  "\"stats\": {\"vitality\": 1, \"strength\": 1, \"defense\": 1, \"agility\": 1, "
+                  "\"focus\": 1},\n      \"growth\": {\"vitality\": 1, \"strength\": 1, "
+                  "\"defense\": 1, \"agility\": 1, \"focus\": 1},\n      \"skills\": "
+                  "[\"strike\"],\n      \"passives\": []\n    },\n    {\n      \"id\": "
+                  "\"fighter\",");
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "a roster whose first class is a new starter loads");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    Hero hero;
+    std::string why;
+    Check(hero.Start(data, why), "start follows the starter flag");
+    Check(why.empty() && hero.ClassId() == "ranger",
+          "Hero::Start picks the first starter in the file");
+}
+
 } // namespace
 
 int main()
 {
     TestCurveAndChoice();
+    TestStartUsesFirstStarter();
     TestRanksAndEvolution();
     TestRankPower();
     TestRankLandsOnTheBlow();

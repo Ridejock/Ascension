@@ -3,7 +3,7 @@
     {
       "id": "fighter",
       "name": "Fighter",
-      "description": "A front-line combatant. At level 5, a Fighter becomes a Berserker or a Guardian.",
+      "description": "A front-line combatant. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
       "stats": {
         "vitality": 18,
@@ -25,7 +25,7 @@
     {
       "id": "berserker",
       "name": "Berserker",
-      "description": "Trades caution for blood. Offered when a Fighter reaches level 5.",
+      "description": "Trades caution for blood. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "fighter",
       "evolveLevel": 5,
       "bonus": {
@@ -44,7 +44,7 @@
     {
       "id": "guardian",
       "name": "Guardian",
-      "description": "Plants their feet and keeps everyone else standing. Offered at level 5.",
+      "description": "Plants their feet and keeps everyone else standing. Offered at level {evolveLevel}.",
       "evolvesFrom": "fighter",
       "evolveLevel": 5,
       "bonus": {

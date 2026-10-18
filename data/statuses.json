@@ -3,7 +3,7 @@
     {
       "id": "bleed",
       "name": "Bleed",
-      "description": "Loses 3 health at the start of each of their turns, for 3 turns. A second application stacks it once.",
+      "description": "Loses {perTurn} health at the start of each of their turns, for {turns} turns. A second application stacks it once.",
       "damagePerTurn": 3,
       "turns": 3,
       "maxStacks": 2
@@ -11,7 +11,7 @@
     {
       "id": "exposed",
       "name": "Exposed",
-      "description": "Takes 25 percent more damage. Lasts 2 turns.",
+      "description": "Takes {taken} percent more damage. Lasts {turns} turns.",
       "damageTakenPercent": 25,
       "turns": 2,
       "maxStacks": 1
@@ -19,7 +19,7 @@
     {
       "id": "enraged",
       "name": "Enraged",
-      "description": "Deals 30 percent more damage and takes 15 percent more. Cannot be stunned. The sample applies it for the rest of a fight.",
+      "description": "Deals {dealt} percent more damage and takes {taken} percent more. Cannot be stunned. The sample applies it for the rest of a fight.",
       "damageDealtPercent": 30,
       "damageTakenPercent": 15,
       "resists": ["stunned"],
@@ -37,7 +37,7 @@
     {
       "id": "fury",
       "name": "Fury",
-      "description": "Deals 50 percent more damage. Lasts three turns.",
+      "description": "Deals {dealt} percent more damage. Lasts three turns.",
       "damageDealtPercent": 50,
       "turns": 4,
       "maxStacks": 1

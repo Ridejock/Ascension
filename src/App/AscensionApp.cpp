@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <string>
 
+#include "GearLine.h"
+
 #include <SDL3/SDL.h>
 
 #include "Emerald/Math/Mat4.h"
@@ -140,29 +142,13 @@ std::string PassiveLine(const Database& data, const SkillDef& passive)
     return "Passive " + passive.Name;
 }
 
-void AppendSigned(std::string& line, const char* label, i32 value)
+// The keeper's first word, for the help key and the "waits between battles" note.
+std::string KeeperWord(const ShopDef& shop)
 {
-    if (value == 0)
-        return;
-    if (!line.empty())
-        line += "  ";
-    line += label;
-    if (value > 0)
-        line += " +";
-    else
-        line += " ";
-    line += std::to_string(value);
-}
-
-std::string BonusText(const StatBlock& bonus)
-{
-    std::string line;
-    AppendSigned(line, "STR", bonus.Strength);
-    AppendSigned(line, "DEF", bonus.Defense);
-    AppendSigned(line, "AGI", bonus.Agility);
-    AppendSigned(line, "FOC", bonus.Focus);
-    AppendSigned(line, "VIT", bonus.Vitality);
-    return line;
+    const usize space = shop.Keeper.find(' ');
+    if (space == std::string::npos)
+        return shop.Keeper;
+    return shop.Keeper.substr(0, space);
 }
 
 std::string WornLine(const Database& data, const Inventory& bag)
@@ -450,9 +436,9 @@ void AscensionApp::BeginFight()
     if (m_Battle->Actor() == CombatantSide::Enemy) {
         const i32 acting = m_Battle->ActorIndex();
         const auto foes = m_Battle->Enemies();
-        const std::string& name =
-            acting >= 0 && acting < static_cast<i32>(foes.size()) ? foes[static_cast<usize>(acting)].Name
-                                                                  : m_Battle->Enemy().Name;
+        const std::string& name = acting >= 0 && acting < static_cast<i32>(foes.size())
+                                      ? foes[static_cast<usize>(acting)].Name
+                                      : m_Battle->Enemy().Name;
         Note(name + " moves first.");
     } else {
         Note("You move first.");
@@ -520,7 +506,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
     if (event.key.scancode == SDL_SCANCODE_I) {
         if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
-            Note("Finish the fight. Pell waits between battles.");
+            Note("Finish the fight. " + KeeperWord(m_Data.GetShop()) + " waits between battles.");
             return;
         }
         m_Camp = !m_Camp;
@@ -570,18 +556,18 @@ void AscensionApp::OnEvent(const SDL_Event& event)
             return;
         }
         if (spending) {
-            const char* stats[] = {"vitality", "strength", "defense", "agility", "focus"};
-            const char* labels[] = {"Vitality", "Strength", "Defense", "Agility", "Focus"};
-            if (digit < 5) {
-                if (!m_Hero.SpendClassPoint(stats[digit], why)) {
+            const std::span<const StatDef> stats = m_Data.GetStats();
+            if (digit >= 0 && static_cast<usize>(digit) < stats.size()) {
+                const StatDef& stat = stats[static_cast<usize>(digit)];
+                if (!m_Hero.SpendClassPoint(stat.Id, why)) {
                     Note(why);
                     return;
                 }
-                Note(std::string(labels[digit]) + " +1. " + std::to_string(m_Hero.ClassPool()) +
+                Note(stat.Name + " +1. " + std::to_string(m_Hero.ClassPool()) +
                      " class points left.");
                 return;
             }
-            if (digit == 5 && m_Hero.ChoicePending()) {
+            if (digit == static_cast<int>(stats.size()) && m_Hero.ChoicePending()) {
                 if (!m_Hero.ResetBuild(why)) {
                     Note(why);
                     return;
@@ -811,8 +797,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const CombatantState& enemy = m_Battle->Enemy();
     const std::span<const CombatantState> pack = m_Battle->Enemies();
     const i32 packCount = static_cast<i32>(pack.size());
-    const i32 actorSlot =
-        m_Battle->Result() == BattleResult::Ongoing ? m_Battle->ActorIndex() : -1;
+    const i32 actorSlot = m_Battle->Result() == BattleResult::Ongoing ? m_Battle->ActorIndex() : -1;
     const i32 encounterTotal = static_cast<i32>(m_Data.GetEncounters().size());
     const bool playerTurn =
         m_Battle->Result() == BattleResult::Ongoing && m_Battle->Actor() == CombatantSide::Player;
@@ -883,7 +868,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
                 if (starter != nullptr) {
                     y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                               Upper(starter->Description), kDim, 1,
+                                               Upper(m_Data.Describe(*starter)), kDim, 1,
                                                leftSize.x - 56.0f);
                     y += 8.0f;
                 }
@@ -892,16 +877,16 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                    "ANY STARTER. CLASS POINTS STAY IN THE POOL.", kDim, 1,
                                    leftSize.x - 56.0f);
         } else if (spending) {
-            const char* labels[] = {"VITALITY", "STRENGTH", "DEFENSE", "AGILITY", "FOCUS"};
+            const std::span<const StatDef> stats = m_Data.GetStats();
             const StatBlock attributes = m_Hero.Attributes();
-            const i32 amounts[] = {attributes.Vitality, attributes.Strength, attributes.Defense,
-                                   attributes.Agility, attributes.Focus};
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
                                    "POOL " + std::to_string(m_Hero.ClassPool()), kInk, 2);
             y += Emerald::DebugTextLineHeight(2) + 4.0f;
-            for (int stat = 0; stat < 5; ++stat) {
-                const std::string line = std::to_string(stat + 1) + "  " + labels[stat] + "  " +
-                                         std::to_string(amounts[stat]);
+            for (usize index = 0; index < stats.size(); ++index) {
+                const StatDef& stat = stats[index];
+                const std::string line = std::to_string(static_cast<int>(index) + 1) + "  " +
+                                         Upper(stat.Name) + "  " +
+                                         std::to_string(attributes.Get(stat.Id));
                 Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, kInk, 2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
             }
@@ -919,7 +904,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
                 y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                           Upper(evolution->Description), kDim, 1,
+                                           Upper(m_Data.Describe(*evolution)), kDim, 1,
                                            leftSize.x - 56.0f);
                 y += 2.0f;
                 Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
@@ -987,7 +972,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             line += SourceTag(m_Data, grant);
             Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), color, 2);
             y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(DescribeSkill(skill)),
+            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
+                                       Upper(m_Data.DescribeSkill(skill, m_Hero.RankOf(skill.Id))),
                                        kDim, 1, leftSize.x - 56.0f);
             y += 4.0f;
         }
@@ -1015,10 +1001,10 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         for (const HeroGrant& passiveGrant : grants) {
             if (passiveGrant.Skill.Kind != SkillKind::Passive)
                 continue;
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                   Upper(PassiveLine(m_Data, passiveGrant.Skill) +
-                                         SourceTag(m_Data, passiveGrant)),
-                                   kFrame, 1);
+            Emerald::DrawDebugText(
+                renderer, {left.x + 28.0f, y},
+                Upper(PassiveLine(m_Data, passiveGrant.Skill) + SourceTag(m_Data, passiveGrant)),
+                kFrame, 1);
             y += Emerald::DebugTextLineHeight(1) + 2.0f;
         }
     }
@@ -1029,8 +1015,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
         std::string foeTitle = enemy.Name;
         if (m_DirectEnemy.empty() && encounterTotal > 0) {
-            foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
-                        std::to_string(encounterTotal);
+            foeTitle +=
+                "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
         }
         Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(foeTitle), kInk, 3);
         y += Emerald::DebugTextLineHeight(3) + 4.0f;
@@ -1053,7 +1039,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         y = DrawFoeAlerts(renderer, m_Data, enemy, {right.x + 28.0f, y}, rightSize.x - 56.0f, 2);
         y += 8.0f;
         if (foe != nullptr) {
-            y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(foe->Description),
+            y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(m_Data.Describe(*foe)),
                                        kDim, 2, rightSize.x - 56.0f);
             y += 10.0f;
         }
@@ -1061,8 +1047,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         y = right.y + 16.0f;
         std::string packTitle = m_Battle->EncounterName();
         if (m_DirectEnemy.empty() && encounterTotal > 0) {
-            packTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" +
-                         std::to_string(encounterTotal);
+            packTitle +=
+                "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
         }
         Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(packTitle), kInk, 2);
         y += Emerald::DebugTextLineHeight(2) + 8.0f;
@@ -1130,8 +1116,9 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         y = cardTop + cardHeight + 10.0f;
         const EnemyDef* marked = m_Data.FindEnemy(enemy.Id);
         if (marked != nullptr) {
-            y = Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(marked->Description),
-                                       kDim, 1, rightSize.x - 32.0f);
+            y = Emerald::DrawDebugText(renderer, {right.x + 16.0f, y},
+                                       Upper(m_Data.Describe(*marked)), kDim, 1,
+                                       rightSize.x - 32.0f);
             y += 8.0f;
         }
     }
@@ -1140,8 +1127,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         order = "Acts first";
     else if (enemy.Stats.Agility < player.Stats.Agility)
         order = "Acts second";
-    const std::string orderLine =
-        "AGILITY " + std::to_string(enemy.Stats.Agility) + "  " + order;
+    const std::string orderLine = "AGILITY " + std::to_string(enemy.Stats.Agility) + "  " + order;
     if (packCount <= 1)
         Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(orderLine), kDim, 2);
     else
@@ -1192,12 +1178,22 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += std::to_string(static_cast<int>(i) + 1) + " ";
                 help += starter != nullptr ? starter->Name : starters[i];
             }
-            help += "    I PELL    ESC QUIT";
+            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
         } else if (spending) {
-            help = "1 VITALITY    2 STRENGTH    3 DEFENSE    4 AGILITY    5 FOCUS";
-            if (m_Hero.ChoicePending())
-                help += "    6 RESET BUILD";
-            help += "    I PELL    ESC QUIT";
+            const std::span<const StatDef> stats = m_Data.GetStats();
+            for (usize index = 0; index < stats.size(); ++index) {
+                if (!help.empty())
+                    help += "    ";
+                help += std::to_string(static_cast<int>(index) + 1);
+                help += " ";
+                help += stats[index].Name;
+            }
+            if (m_Hero.ChoicePending()) {
+                help += "    ";
+                help += std::to_string(static_cast<int>(stats.size()) + 1);
+                help += " RESET BUILD";
+            }
+            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
         } else if (choosing) {
             const std::vector<std::string> choices = m_Hero.ChoiceIds();
             for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
@@ -1212,7 +1208,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += std::to_string(static_cast<int>(choices.size()) + 1);
                 help += " RESET BUILD";
             }
-            help += "    I PELL    ESC QUIT";
+            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
         } else {
             if (shownSkills == 1)
                 help = "1 SKILL    ";
@@ -1235,7 +1231,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += "C ITEMS    ";
             help += "SPACE WAIT    ";
             if (fightOver)
-                help += "I PELL    ";
+                help += "I " + KeeperWord(m_Data.GetShop()) + "    ";
             help +=
                 "R FIGHT    N NEXT FOE    ESC QUIT    REV " + std::to_string(m_Data.GetRevision());
         }
@@ -1246,22 +1242,9 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     renderer.End();
 }
 
-std::string StockLine(const ItemDef& item)
+std::string StockLine(const Database& data, const ItemDef& item)
 {
-    std::string line = item.Name + "   " + std::to_string(item.Value) + " gold";
-    if (item.Slot == GearSlot::Consumable) {
-        if (item.Heal > 0)
-            line += "   heal " + std::to_string(item.Heal);
-        if (item.Focus > 0)
-            line += "   focus +" + std::to_string(item.Focus);
-        return line;
-    }
-    const std::string bonus = BonusText(item.Bonus);
-    if (!bonus.empty())
-        line += "   " + bonus;
-    if (item.TwoHanded)
-        line += "   two handed";
-    return line;
+    return item.Name + "   " + std::to_string(item.Value) + " gold" + GearLine(data, item, true);
 }
 
 void AscensionApp::DrinkAt(i32 bagIndex)
@@ -1464,7 +1447,10 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
                 rowText += "EMPTY";
             else {
                 const ItemDef* piece = m_Data.FindItem(worn);
-                rowText += piece != nullptr ? piece->Name : worn;
+                if (piece == nullptr)
+                    rowText += worn;
+                else
+                    rowText += piece->Name + GearLine(m_Data, *piece, false);
             }
         }
         Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(rowText),
@@ -1482,8 +1468,10 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
             const ItemDef* held = m_Data.FindItem(stack.Id);
             rowText += held != nullptr ? held->Name : stack.Id;
             rowText += " x" + std::to_string(stack.Count);
-            if (held != nullptr)
+            if (held != nullptr) {
                 rowText += "   sell " + std::to_string(SellPrice(shop, held->Value));
+                rowText += GearLine(m_Data, *held, true);
+            }
         }
         Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(rowText),
                                marked ? kFrame : kDim, 1, leftSize.x - 48.0f);
@@ -1500,13 +1488,13 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
         if (goods == nullptr)
             rowText += shop.Stock[static_cast<usize>(row)];
         else
-            rowText += StockLine(*goods);
+            rowText += StockLine(m_Data, *goods);
         Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, Upper(rowText),
                                marked ? kFrame : kInk, 1, rightSize.x - 48.0f);
         y += Emerald::DebugTextLineHeight(1) + 6.0f;
     }
 
-    Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, "OLD PELL'S PROVISIONS", kFrame, 2);
+    Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, Upper(shop.Name), kFrame, 2);
     f32 logY = height - 96.0f;
     for (const std::string& note : m_Log) {
         Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(note), kDim, 1, width - 96.0f);

@@ -825,9 +825,10 @@ void TestPackAim()
         }
     }
     Check(tuned != nullptr && grantedCleave != nullptr &&
-              DescribeSkill(*tuned).find("Hits the marked enemy.") != std::string::npos &&
-              DescribeSkill(*tuned).find("every enemy") == std::string::npos &&
-              DescribeSkill(*grantedCleave).find("Hits the marked enemy.") != std::string::npos,
+              data.DescribeSkill(*tuned).find("Hits the marked enemy.") != std::string::npos &&
+              data.DescribeSkill(*tuned).find("every enemy") == std::string::npos &&
+              data.DescribeSkill(*grantedCleave).find("Hits the marked enemy.") !=
+                  std::string::npos,
           "cleave's description follows the effect target");
 
     Battle wounds(data, Sides({CombatantSide::Player}));
@@ -1163,7 +1164,8 @@ void TestItemGrantsInFight()
 
     Battle berserker(data, Sides({CombatantSide::Player}));
     berserker.SetWornItems({"rusty_sword", "oathkeepers_plate"});
-    Check(berserker.Start("berserker", 5, "wolf", error) && berserker.PlayerSkillIds().size() == 6 &&
+    Check(berserker.Start("berserker", 5, "wolf", error) &&
+              berserker.PlayerSkillIds().size() == 6 &&
               CountId(berserker.PlayerSkillIds(), "cleave") == 1,
           "class and gear share one cleave and keep the class hotkey count");
     const i32 classFocus = berserker.Player().Focus;
@@ -1187,8 +1189,7 @@ void TestItemGrantsInFight()
     Battle guardian(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
     guardian.SetWornItems({"wolfhide_charm"});
     const ClassDef* guardianClass = data.FindClass("guardian");
-    const i32 classDefense =
-        guardianClass != nullptr ? data.StatsAt(*guardianClass, 5).Defense : 0;
+    const i32 classDefense = guardianClass != nullptr ? data.StatsAt(*guardianClass, 5).Defense : 0;
     Check(guardian.Start("guardian", 5, "wolf", error), "the guardian wears the charm");
     Check(guardian.Player().Stats.Defense == classDefense + 3,
           "best defense is the class 3, not the charm's 1, and it is applied once");

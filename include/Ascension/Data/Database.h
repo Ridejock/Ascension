@@ -107,6 +107,17 @@ public:
     // the parent's stats at EvolveLevel, plus Bonus, plus Growth for each level past that.
     [[nodiscard]] StatBlock StatsAt(const ClassDef& klass, i32 level) const;
 
+    // Descriptions with {placeholders} resolved from this entity (see README). A placeholder
+    // the entity does not have fails Load. DescribeSkill then adds one sentence for each
+    // effect that lands on an aim (damage, a status, a stun), using the effect's target, or
+    // the skill's target when the effect doesn't set one. `rank` scales damage and reflect
+    // power by (rank - 1) * powerPerRank, the same addition a fight uses. Rank 1 is the base.
+    [[nodiscard]] std::string DescribeSkill(const SkillDef& skill, i32 rank = 1) const;
+    [[nodiscard]] std::string Describe(const ClassDef& def) const;
+    [[nodiscard]] std::string Describe(const EnemyDef& def) const;
+    [[nodiscard]] std::string Describe(const StatusDef& def) const;
+    [[nodiscard]] std::string Describe(const ItemDef& def) const;
+
 private:
     struct FileWatch {
         std::filesystem::path Path;
@@ -138,10 +149,5 @@ private:
     std::string m_LastError;
     u32 m_Revision = 0;
 };
-
-// The skill's own description, then one sentence for each effect that lands on an aim
-// (damage, a status, a stun). That sentence uses the effect's target, or the skill's target
-// when the effect doesn't set one. A retune of `target` changes this text with the behavior.
-[[nodiscard]] std::string DescribeSkill(const SkillDef& skill);
 
 } // namespace Ascension

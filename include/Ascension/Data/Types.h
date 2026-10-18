@@ -307,7 +307,7 @@ struct ItemDef {
     std::vector<SkillGrant> Grants;
 };
 
-// Old Pell's Provisions, and the bag it sells into. BagSlots is how many stacks the hero can
+// The shop, and the bag it sells into. BagSlots is how many stacks the hero can
 // carry. StackSize is the most of one item a single stack holds. Selling pays
 // value * SellNumerator / SellDenominator, rounded down.
 struct ShopDef {
