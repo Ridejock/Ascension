@@ -238,6 +238,8 @@ void TestSample()
               encounters[4].Enemies.size() == 3 && encounters[4].Enemies[0] == "wolf" &&
               encounters[4].Enemies[2] == "wolf",
           "the wolf pack is three wolves");
+    Check(encounters[0].Zone.empty() && encounters[6].Zone.empty(),
+          "sample fights leave the zone blank");
     Check(data.FindEnemy("mire_lurker") == nullptr && data.FindEnemy("oathbreaker") == nullptr &&
               data.FindEnemy("cairn_guard") == nullptr && data.FindEnemy("cairn_warden") == nullptr,
           "mire lurker, oathbreaker and the cairn names are gone");
@@ -591,6 +593,31 @@ void TestValidation()
                       "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"note\": "
                       "\"pack\",\n      \"enemies\": [\"wolf\", \"wolf\", \"wolf\"]");
         TestRejected(copy.Path, "encounters.json", "note", "an encounter rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "encounters.json",
+                      "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"enemies\": "
+                      "[\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"zone\": "
+                      "\"Outer Barrow\",\n      \"enemies\": [\"wolf\", \"wolf\", \"wolf\"]");
+        Database zoned(copy.Path);
+        DataError error;
+        Check(zoned.Load(&error), "an encounter may name a zone");
+        const EncounterDef* pack = zoned.FindEncounter("wolf_pack");
+        const EncounterDef* wolf = zoned.FindEncounter("wolf");
+        Check(pack != nullptr && pack->Zone == "Outer Barrow" && wolf != nullptr &&
+                  wolf->Zone.empty(),
+              "the zone is that fight's text, and a fight without one stays blank");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "encounters.json",
+                      "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"enemies\": "
+                      "[\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"id\": \"wolf_pack\",\n      \"name\": \"Wolf Pack\",\n      \"zone\": "
+                      "\"\",\n      \"enemies\": [\"wolf\", \"wolf\", \"wolf\"]");
+        TestRejected(copy.Path, "encounters.json", "zone", "an empty zone is rejected");
     }
     {
         TempCopy copy;

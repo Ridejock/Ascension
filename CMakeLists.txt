@@ -149,6 +149,8 @@ if(ASCENSION_BUILD_TESTS)
 
     add_executable(AscensionCombatTests tests/CombatTests.cpp tests/Check.h)
     target_link_libraries(AscensionCombatTests PRIVATE AscensionCombat)
+    target_include_directories(AscensionCombatTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/App")
     target_compile_definitions(AscensionCombatTests PRIVATE
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionCombatTests)

@@ -134,6 +134,40 @@
       "skills": ["rubble_strike"],
       "experience": 0,
       "gold": 0
+    },
+    {
+      "id": "cairn_warden",
+      "name": "Cairn Warden",
+      "description": "A cairn that stands up. While its stone is closed, a blow is wasted; the turn is better spent on breath or guard.",
+      "level": 7,
+      "stats": {
+        "vitality": 80,
+        "strength": 14,
+        "defense": 8,
+        "agility": 2,
+        "focus": 0
+      },
+      "skills": ["cairn_shell", "cairn_slam", "cairn_settle"],
+      "pattern": ["cairn_shell", "cairn_slam", "cairn_slam", "cairn_settle"],
+      "experience": 30,
+      "gold": 14
+    },
+    {
+      "id": "barrow_brute",
+      "name": "Barrow Brute",
+      "description": "A huge barrow thrall. When it bellows, its next big swing cannot be stunned; only a guard takes the weight.",
+      "level": 8,
+      "stats": {
+        "vitality": 95,
+        "strength": 14,
+        "defense": 6,
+        "agility": 3,
+        "focus": 0
+      },
+      "skills": ["bellow", "overhead", "brute_maul"],
+      "pattern": ["bellow", "overhead", "brute_maul"],
+      "experience": 40,
+      "gold": 20
     }
   ]
 }

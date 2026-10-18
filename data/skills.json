@@ -260,6 +260,74 @@
         { "id": "follow", "trigger": "onUse", "op": "damage", "power": 20, "ifTargetHas": "exposed", "consume": true },
         { "id": "crack", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
       ]
+    },
+    {
+      "id": "cairn_shell",
+      "name": "Cairn Shell",
+      "description": "A shell of cairn stone closes. Blows barely land for a short while.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "shell", "trigger": "onUse", "op": "harden", "amount": 150, "turns": 2 }
+      ]
+    },
+    {
+      "id": "cairn_slam",
+      "name": "Cairn Slam",
+      "description": "Two fists of cairn stone, one after the other. A raised guard only meets the first.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "strength" },
+        { "id": "hit2", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "cairn_settle",
+      "name": "Settle",
+      "description": "The stones grind back into place and close a little of the damage.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 10 }
+      ]
+    },
+    {
+      "id": "bellow",
+      "name": "Bellow",
+      "description": "A roar that sets the feet: {set.status} for a short while.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "set", "trigger": "onUse", "op": "applyStatus", "status": "steadfast" }
+      ]
+    },
+    {
+      "id": "overhead",
+      "name": "Overhead",
+      "description": "A two-handed overhead swing. It is telegraphed, and a steadfast swing cannot be stunned.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "windup": 1,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 60, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "brute_maul",
+      "name": "Brute Maul",
+      "description": "A clubbing swing.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
+      ]
     }
   ]
 }

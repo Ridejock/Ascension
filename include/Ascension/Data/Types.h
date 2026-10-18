@@ -287,10 +287,13 @@ struct EnemyDef {
 };
 
 // A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack).
-// The sandbox walks this list. One id is still a normal single-enemy fight.
+// The sandbox walks this list. One id is still a normal single-enemy fight. Zone is the
+// campaign stretch drawn above the foe name. Empty means that line is absent. The log
+// never includes it.
 struct EncounterDef {
     std::string Id;
     std::string Name;
+    std::string Zone;
     std::vector<std::string> Enemies;
 };
 
