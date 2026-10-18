@@ -1568,8 +1568,16 @@ bool LoadEncounters(const Json& root, Parsed& parsed, std::string& error)
         if (FindId(parsed.Encounters, encounter.Id) != nullptr)
             return fail("there is another encounter with this id");
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "name", "enemies"}, unknown))
+        if (!AllowKeys(entry, {"id", "name", "enemies", "zone"}, unknown))
             return fail("unknown field " + Quote(unknown));
+        const auto zoneField = entry.find("zone");
+        if (zoneField != entry.end()) {
+            if (!zoneField->is_string())
+                return fail("'zone' must be a string");
+            encounter.Zone = zoneField->get<std::string>();
+            if (encounter.Zone.empty())
+                return fail("'zone' must not be empty");
+        }
         std::string listed;
         if (!ReadIdList(entry, "enemies", encounter.Enemies, listed, true))
             return fail(listed);

@@ -72,7 +72,7 @@ ctest --test-dir build/debug --output-on-failure
 | `statuses.json` | Bleed, Exposed, Enraged, Stunned, and Steadfast |
 | `classes.json` | Fighter, and the level-5 evolutions Berserker and Guardian |
 | `enemies.json` | The roster (level, stats, skills, experience, gold) and which one is the boss |
-| `encounters.json` | Each fight: a name and a list of one to three enemy ids. The same id may repeat |
+| `encounters.json` | Each fight: a name, an optional zone, and a list of one to three enemy ids. The same id may repeat |
 | `items.json` | Gear (weapon, offhand, armor, accessory) and consumables. Each names an `icon` and a `rarity` |
 | `rarities.json` | Rarity id, display name, and `#RRGGBB` color |
 | `shop.json` | Old Pell's Provisions: the bag, stack size, sell rate, and Pell's stock |
@@ -147,7 +147,7 @@ Run the game. The Wolf is faster, so it bites first. Then:
 | `N` | The next encounter in `encounters.json`. While a path is open the fight does not start and the encounter stays put |
 | Escape | Quit |
 
-The encounters, in order, are Wolf, Bandit, Tomb Moth, Bone Archer, Wolf Pack, Barrow Sentry, the boss Oathkeeper Varn, then the Cairn Warden and the Barrow Brute. The corner of the name shows the place in that list. A single enemy fills the right panel. A pack draws one column per enemy (a rectangle, the name, health, a wind-up, a guard or defense buff, and a status). The marked enemy is framed and labeled TARGET. The enemy whose turn it is is labeled ACTS, and the banner uses that name. Varn is marked BOSS. The Wolf Pack is three Dire Wolves. The fight ends when every enemy is dead, and the reward is 8 XP and 3 gold from each (24 XP and 9 gold).
+The encounters, in order, are Wolf, Bandit, Tomb Moth, Bone Archer, Wolf Pack, Barrow Sentry, the boss Oathkeeper Varn, then the Cairn Warden and the Barrow Brute. The corner of the name shows the place in that list. When an encounter sets `zone`, that text is drawn above the foe name. The Cairn Warden and the Barrow Brute set it to Outer Barrow. A fight with no zone leaves the line off, and the log does not include it. A single enemy fills the right panel. A pack draws one column per enemy (a rectangle, the name, health, a wind-up, a guard or defense buff, and a status). The marked enemy is framed and labeled TARGET. The enemy whose turn it is is labeled ACTS, and the banner uses that name. Varn is marked BOSS. The Wolf Pack is three Dire Wolves. The fight ends when every enemy is dead, and the reward is 8 XP and 3 gold from each (24 XP and 9 gold).
 
 After a win that reaches level 5 the skill list is replaced by the choice, and the next fight waits. `1` is Berserker. `2` is Guardian. `3` is Reset build. Reset clears skill ranks, puts the class attribute grants back in a pool, and lists every starter class. `1` is Fighter in the sample. After that, `1` through `5` spend the pool on vitality, strength, defense, agility, and focus, and `6` resets again. The path keys return once the pool is empty. Reset is not offered anywhere else. The new skills show once a path is picked. `R` then fights the same encounter again, and `N` is what moves on. Pressing `N` before the choice does not skip ahead. Wolf, Bandit, Tomb Moth, and Bone Archer are 8 + 18 + 14 + 22 XP, which is level 5. The next fight is the Wolf Pack (24 XP, still level 5). The Barrow Sentry after that (40 XP) reaches level 6. Varn is the level-6 boss. The Cairn Warden (30 XP and 14 gold) and the Barrow Brute (40 XP and 20 gold) are the next two fights, both met at level 8.
 

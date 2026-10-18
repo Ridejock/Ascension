@@ -78,6 +78,29 @@ std::string PoolText(std::string_view label, i32 current, i32 maximum)
     return std::string(label) + " " + std::to_string(current) + "/" + std::to_string(maximum);
 }
 
+// The stretch named on this encounter. Blank for a fight with no zone, and for a foe
+// started on its own rather than from the encounter list.
+std::string FightZone(const Database& data, i32 index, bool loneEnemy)
+{
+    if (loneEnemy)
+        return {};
+    const std::span<const EncounterDef> encounters = data.GetEncounters();
+    if (index < 0 || index >= static_cast<i32>(encounters.size()))
+        return {};
+    return encounters[static_cast<usize>(index)].Zone;
+}
+
+// Draws `zone` and returns where the next line starts. An empty zone leaves `at` alone,
+// so a fight that names none keeps its title where it was.
+f32 DrawZone(Emerald::Renderer2D& renderer, const std::string& zone, const Emerald::Vec2& at,
+             int scale)
+{
+    if (zone.empty())
+        return at.y;
+    Emerald::DrawDebugText(renderer, at, Upper(zone), kDim, scale);
+    return at.y + Emerald::DebugTextLineHeight(scale) + 2.0f;
+}
+
 std::string AddsLine(const Database& data, const ClassDef& evolution)
 {
     std::string line = "Adds";
@@ -814,6 +837,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const i32 packCount = static_cast<i32>(pack.size());
     const i32 actorSlot = m_Battle->Result() == BattleResult::Ongoing ? m_Battle->ActorIndex() : -1;
     const i32 encounterTotal = static_cast<i32>(m_Data.GetEncounters().size());
+    const std::string zone = FightZone(m_Data, m_EnemyIndex, !m_DirectEnemy.empty());
     const bool playerTurn =
         m_Battle->Result() == BattleResult::Ongoing && m_Battle->Actor() == CombatantSide::Player;
 
@@ -1027,6 +1051,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     if (packCount <= 1) {
         DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
         y = right.y + 24.0f;
+        y = DrawZone(renderer, zone, {right.x + 140.0f, y}, 1);
         const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
         std::string foeTitle = enemy.Name;
         if (m_DirectEnemy.empty() && encounterTotal > 0) {
@@ -1060,6 +1085,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         }
     } else {
         y = right.y + 16.0f;
+        y = DrawZone(renderer, zone, {right.x + 16.0f, y}, 1);
         std::string packTitle = m_Battle->EncounterName();
         if (m_DirectEnemy.empty() && encounterTotal > 0) {
             packTitle +=
