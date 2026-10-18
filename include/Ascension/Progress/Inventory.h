@@ -46,6 +46,9 @@ public:
     // Sum of the worn pieces' bonuses, including negatives. A two-handed weapon skips the
     // offhand piece, so a shield left there adds nothing. Unknown ids add nothing.
     [[nodiscard]] StatBlock GearBonus() const;
+    // Ids of the worn pieces that count, in slot order (weapon, offhand, armor, accessory).
+    // The same pieces GearBonus adds: an offhand under a two-handed weapon is left out.
+    [[nodiscard]] std::vector<std::string> WornIds() const;
 
     // Bag indexes of every consumable stack, in bag order. The fight's number keys use the
     // ones that fit after the skills. The item picker uses the whole list.

@@ -17,6 +17,25 @@ struct DataError {
     std::string Message;
 };
 
+// Where one of the hero's skills comes from. Id is the class id or the item id.
+enum class GrantSource : u8 { Class, Item };
+
+struct GrantOrigin {
+    GrantSource Source = GrantSource::Class;
+    std::string Id;
+};
+
+// One skill the hero has in a fight. One entry per skill id, in first-source order: class
+// actives, class passives, then each worn item. Skill is the merged copy. Each tunable
+// numeric field keeps the best value across every source; which way is better is the
+// "better" table in effects.json. A non-numeric tune (target, stat, scaling, status) keeps
+// the first source. Origins lists every source that granted the id, first source first.
+// This is a snapshot: ask again after a reload.
+struct HeroGrant {
+    SkillDef Skill;
+    std::vector<GrantOrigin> Origins;
+};
+
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
 // encounters, items, shop, combat, progress), checked against each other. Load once, then
 // call CheckForChanges from
@@ -78,6 +97,11 @@ public:
     [[nodiscard]] std::vector<const SkillDef*> ActiveSkills(const ClassDef& klass) const;
     [[nodiscard]] std::vector<const SkillDef*> Passives(const ClassDef& klass) const;
 
+    // Class grants, then each worn item's grants. Unknown item ids add nothing. Ranks are
+    // keyed by skill id, so a merged copy keeps the one rank already earned.
+    [[nodiscard]] std::vector<HeroGrant> HeroGrants(const ClassDef& klass,
+                                                    std::span<const std::string> wornItemIds) const;
+
     // Stats at `level` (clamped to 1..99). A base class is Stats + Growth * (level - 1). An
     // evolution below its EvolveLevel is still the parent. At the evolve level and after, it is
     // the parent's stats at EvolveLevel, plus Bonus, plus Growth for each level past that.
@@ -107,6 +131,10 @@ private:
     ShopDef m_Shop;
     CombatRules m_Rules;
     ProgressRules m_Progress;
+    // Field names from effects.json "better". The merge reads these; it does not decide
+    // higher or lower from the field's name.
+    std::vector<std::string> m_HigherFields;
+    std::vector<std::string> m_LowerFields;
     std::string m_LastError;
     u32 m_Revision = 0;
 };

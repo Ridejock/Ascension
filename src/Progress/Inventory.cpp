@@ -124,6 +124,19 @@ StatBlock Inventory::GearBonus() const
     return bonus;
 }
 
+std::vector<std::string> Inventory::WornIds() const
+{
+    std::vector<std::string> ids;
+    const bool blocked = OffhandBlocked();
+    const std::string* worn[] = {&m_Weapon, &m_Offhand, &m_Armor, &m_Accessory};
+    for (const std::string* id : worn) {
+        if ((blocked && id == &m_Offhand) || id->empty())
+            continue;
+        ids.push_back(*id);
+    }
+    return ids;
+}
+
 std::vector<i32> Inventory::ConsumableSlots() const
 {
     std::vector<i32> slots;

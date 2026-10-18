@@ -12,6 +12,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Progress/Hero.h"
+#include "Ascension/Progress/Inventory.h"
 #include "Check.h"
 
 namespace {
@@ -449,6 +450,28 @@ void TestResetKeepsPoints()
           "the next fight uses the redistributed attributes");
 }
 
+void TestResetClearsItemPractice()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    Hero hero = StartHero(data);
+    Inventory bag;
+    std::string why;
+    Check(bag.Start(data, why), "the bag starts");
+    Check(bag.Give("rusty_sword", 1, why) && bag.Equip(0, why), "the sword is worn");
+    hero.NoteUse("cleave");
+    hero.NoteUse("cleave");
+    hero.NoteUse("cleave");
+    hero.NoteUse("strike");
+    Check(hero.UsesOf("cleave") == 3 && hero.RankOf("cleave") == 2 && hero.UsesOf("strike") == 1,
+          "an item skill ranks by its id, the same as a class skill");
+    Check(hero.GrantXp(60).LevelAfter == 5, "level 5 opens a reset");
+    Check(hero.ResetBuild(why) && why.empty(), "the reset runs");
+    Check(hero.UsesOf("cleave") == 0 && hero.UsesOf("strike") == 0 && hero.RankOf("cleave") == 1,
+          "a reset clears item-skill practice along with class skills");
+    Check(bag.Equipped(GearSlot::Weapon) == "rusty_sword", "a reset does not touch worn gear");
+}
+
 void TestNextFoeStaysWhileChoosing()
 {
     Database data(kSample);
@@ -494,6 +517,7 @@ int main()
     TestHotReload();
     TestChoiceBlocksTheNextFight();
     TestResetKeepsPoints();
+    TestResetClearsItemPractice();
     TestNextFoeStaysWhileChoosing();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;

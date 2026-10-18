@@ -72,10 +72,11 @@ public:
     // The evolution's bonus is recorded as its own attribute source.
     bool Choose(std::string_view evolutionId, std::string& error);
 
-    // Clears practiced skill uses and returns every class attribute grant to the unspent pool.
-    // Level, XP, and the points earned by leveling stay. Succeeds only while an evolution
-    // choice is open. The player then picks a starter with ChooseStarter and spends the pool
-    // with SpendClassPoint. Nothing else clears skill uses.
+    // Clears every practiced skill use, including uses of a skill that only gear grants, and
+    // returns every class attribute grant to the unspent pool. Level, XP, and the points
+    // earned by leveling stay. Gear is not on the hero, so a reset does not touch it.
+    // Succeeds only while an evolution choice is open. The player then picks a starter with
+    // ChooseStarter and spends the pool with SpendClassPoint. Nothing else clears skill uses.
     bool ResetBuild(std::string& error);
 
     // True after a reset, until a starter class is picked.

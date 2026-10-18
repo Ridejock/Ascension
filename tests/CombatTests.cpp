@@ -1097,6 +1097,132 @@ void TestSummonFallback()
           "a free seat still summons on the next call");
 }
 
+void GiveGearGrants(const fs::path& root)
+{
+    ReplaceInFile(root / "items.json", "\"bonus\": { \"strength\": 1 },",
+                  "\"bonus\": { \"strength\": 1 }, \"grants\": [{ \"skill\": \"cleave\", "
+                  "\"tune\": { \"focusCost\": 1, \"hit\": { \"power\": 5, \"target\": "
+                  "\"target\" } } }],");
+    ReplaceInFile(root / "items.json", "\"bonus\": { \"defense\": 6, \"agility\": -1 },",
+                  "\"bonus\": { \"defense\": 6, \"agility\": -1 }, \"grants\": [{ \"skill\": "
+                  "\"cleave\", \"tune\": { \"focusCost\": 6, \"hit\": { \"power\": 12 } } }],");
+    ReplaceInFile(root / "items.json", "\"bonus\": { \"agility\": 2 },",
+                  "\"bonus\": { \"agility\": 2 }, \"grants\": [{ \"skill\": \"bulwark\", "
+                  "\"tune\": { \"def\": { \"amount\": 1 }, \"focus\": { \"amount\": 4 } } }, "
+                  "{ \"skill\": \"bloodlust\", \"tune\": { \"fury\": { \"amount\": 3, \"per\": 5, "
+                  "\"max\": 2 } } }],");
+}
+
+usize CountId(std::span<const std::string> ids, std::string_view id)
+{
+    usize count = 0;
+    for (const std::string& row : ids) {
+        if (row == id)
+            ++count;
+    }
+    return count;
+}
+
+void TestItemGrantsInFight()
+{
+    TempCopy copy;
+    GiveGearGrants(copy.Path);
+    Database data(copy.Path);
+    Check(data.Load(), "the copy with gear grants loads");
+    std::string error;
+
+    Battle bare(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    Check(bare.Start("fighter", 1, "wolf", error) && bare.PlayerSkillIds().size() == 4 &&
+              !bare.UseSkill("cleave").Accepted,
+          "unworn gear grants nothing");
+    bare.SetWornItems({"rusty_sword", "oathkeepers_plate"});
+    Check(bare.PlayerSkillIds().size() == 4, "worn ids wait for the next build");
+    Check(bare.ApplyData(error) && CountId(bare.PlayerSkillIds(), "cleave") == 1 &&
+              bare.PlayerSkillIds().size() == 5 && bare.PlayerSkillIds()[4] == "cleave",
+          "a reload picks up the sword and the plate as one cleave");
+
+    Battle swordOnly(data, Sides({CombatantSide::Player}));
+    swordOnly.SetWornItems({"rusty_sword"});
+    Check(swordOnly.Start("fighter", 1, "wolf", error), "the sword alone meets the wolf");
+    const i32 swordFocus = swordOnly.Player().Focus;
+    const ActionResult swordHit = swordOnly.UseSkill("cleave");
+    Check(swordHit.Accepted && swordOnly.Player().Focus == swordFocus - 1,
+          "the sword's cleave spends 1 focus");
+
+    Battle merged(data, Sides({CombatantSide::Player}));
+    merged.SetWornItems({"rusty_sword", "oathkeepers_plate"});
+    Check(merged.Start("fighter", 1, "wolf", error), "the sword and plate meet the wolf");
+    const i32 mergedFocus = merged.Player().Focus;
+    const ActionResult first = merged.UseSkill("cleave");
+    Check(CountId(merged.PlayerSkillIds(), "cleave") == 1 && first.Accepted &&
+              merged.Player().Focus == mergedFocus - 1 && first.Damage == swordHit.Damage + 7,
+          "one cleave: the lower focus cost, and the plate's higher power");
+    merged.SetPlayerRanks(2, {SkillRank{"cleave", 3}});
+    const ActionResult ranked = merged.UseSkill("cleave");
+    Check(ranked.Accepted && ranked.Damage == first.Damage + 4, "the one cleave ranks by its id");
+
+    Battle berserker(data, Sides({CombatantSide::Player}));
+    berserker.SetWornItems({"rusty_sword", "oathkeepers_plate"});
+    Check(berserker.Start("berserker", 5, "wolf", error) && berserker.PlayerSkillIds().size() == 6 &&
+              CountId(berserker.PlayerSkillIds(), "cleave") == 1,
+          "class and gear share one cleave and keep the class hotkey count");
+    const i32 classFocus = berserker.Player().Focus;
+    const ActionResult classBlow = berserker.UseSkill("cleave");
+    const i32 afterOne = berserker.Player().Focus;
+    berserker.SetPlayerRanks(2, {SkillRank{"cleave", 3}});
+    const ActionResult classRanked = berserker.UseSkill("cleave");
+    Check(classBlow.Accepted && afterOne == classFocus - 1 && classRanked.Accepted &&
+              classRanked.Damage == classBlow.Damage + 4,
+          "the shared cleave spends the lower cost and has one rank");
+
+    Battle charm(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    charm.SetWornItems({"wolfhide_charm"});
+    Check(charm.Start("fighter", 1, "wolf", error), "the charmed fighter meets the wolf");
+    Check(charm.Player().Stats.Defense == bare.Player().Stats.Defense + 1,
+          "the charm is the only bulwark, so its defense amount of 1 is the skill");
+    Check(charm.UseSkill("brace").Accepted && charm.EnemyAct().Accepted &&
+              charm.Player().Focus == charm.Player().MaxFocus,
+          "the charm's 4 focus refund fills the pool");
+
+    Battle guardian(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    guardian.SetWornItems({"wolfhide_charm"});
+    const ClassDef* guardianClass = data.FindClass("guardian");
+    const i32 classDefense =
+        guardianClass != nullptr ? data.StatsAt(*guardianClass, 5).Defense : 0;
+    Check(guardian.Start("guardian", 5, "wolf", error), "the guardian wears the charm");
+    Check(guardian.Player().Stats.Defense == classDefense + 3,
+          "best defense is the class 3, not the charm's 1, and it is applied once");
+    Check(guardian.UseSkill("brace").Accepted && guardian.EnemyAct().Accepted &&
+              guardian.Player().Focus == guardian.Player().MaxFocus,
+          "best focus refund is the charm's 4");
+
+    Battle sword(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    sword.SetWornItems({"rusty_sword"});
+    Check(sword.Start("fighter", 1, "wolf", error) && sword.PlayerSkillIds().size() == 5,
+          "the sword alone adds cleave");
+    const u32 revision = data.GetRevision();
+    ReplaceInFile(copy.Path / "items.json", "\"items\": [", "\"items\": {");
+    DataError reloadError;
+    Check(data.CheckForChanges(&reloadError) == 0, "a broken items file waits");
+    Check(data.CheckForChanges(&reloadError) == 0, "a broken items file does not replace the data");
+    Check(data.GetRevision() == revision, "a failed reload keeps the revision");
+    CheckHas(data.GetLastError(), "items.json", "the error names the file");
+    Check(sword.ApplyData(error) && sword.PlayerSkillIds().size() == 5,
+          "the fight keeps the sword's cleave when the reload fails");
+    ReplaceInFile(copy.Path / "items.json", "\"items\": {", "\"items\": [");
+    Check(data.CheckForChanges(&reloadError) == 0, "the restored file waits");
+    Check(data.CheckForChanges(&reloadError) == 1, "the restored file reloads");
+    ReplaceInFile(copy.Path / "items.json",
+                  "\"grants\": [{ \"skill\": \"cleave\", \"tune\": { \"focusCost\": 1, \"hit\": { "
+                  "\"power\": 5, \"target\": \"target\" } } }],",
+                  "");
+    Check(data.CheckForChanges(&reloadError) == 0, "dropping the grant waits");
+    Check(data.CheckForChanges(&reloadError) == 1, "dropping the grant reloads");
+    Check(sword.ApplyData(error) && sword.PlayerSkillIds().size() == 4 &&
+              !sword.UseSkill("cleave").Accepted,
+          "a reload drops the sword's cleave from the fight");
+}
+
 } // namespace
 
 int main()
@@ -1122,6 +1248,7 @@ int main()
     TestGrantCopies();
     TestStunResist();
     TestSummonFallback();
+    TestItemGrantsInFight();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
