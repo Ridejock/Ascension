@@ -642,4 +642,16 @@ bool CheckPlaytestStartup(const PlaytestOptions& options, std::string& error)
     return ApplyPlaytest(hero, inventory, data, options, setup, error);
 }
 
+std::string StartupFailureText(std::string_view startError, std::string_view loadError,
+                               const char* fightBlock)
+{
+    if (!startError.empty())
+        return std::string(startError);
+    if (!loadError.empty())
+        return std::string(loadError);
+    if (fightBlock != nullptr && fightBlock[0] != '\0')
+        return std::string(fightBlock);
+    return "Could not load data/.";
+}
+
 } // namespace Ascension

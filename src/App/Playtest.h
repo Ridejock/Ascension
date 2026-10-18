@@ -101,4 +101,10 @@ enum class EvolutionPick { Waiting, Chosen, Failed };
 // Failure is the process error for a bad playtest command, before the window is created.
 [[nodiscard]] bool CheckPlaytestStartup(const PlaytestOptions& options, std::string& error);
 
+// The line drawn when no fight is on screen. A start error, a load error, and a fight
+// block (Hero::NextFightBlock) each keep the sentence already produced. The generic
+// load line is only used when all three are empty. `fightBlock` may be null.
+[[nodiscard]] std::string StartupFailureText(std::string_view startError,
+                                             std::string_view loadError, const char* fightBlock);
+
 } // namespace Ascension

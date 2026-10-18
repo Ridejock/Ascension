@@ -427,6 +427,70 @@ void TestDataFolderHotReload()
     Check(CheckPlaytestStartup(options, why), "startup accepts the copied folder");
 }
 
+void TestStartupFailureText()
+{
+    Database data = Sample();
+    Hero hero;
+    Inventory bag;
+    PlaytestSetup setup;
+    std::string why;
+
+    PlaytestOptions pending;
+    pending.Level = 5;
+    pending.ClassId = "fighter";
+    Check(ApplyPlaytest(hero, bag, data, pending, setup, why), "level 5 fighter sets up");
+    Check(why.empty() && hero.Level() == 5 && hero.ClassId() == "fighter" && hero.ChoicePending(),
+          "the path is still open after setup");
+    const char* block = hero.NextFightBlock();
+    Check(block != nullptr, "the next fight is blocked");
+    const std::string shown = StartupFailureText("", "", block);
+    Check(shown == block, "the window uses the fight-block sentence");
+    Check(shown != "Could not load data/.", "a pending path is not a load failure");
+
+    const char* load = "classes.json: class 'berserker': skill 'smash' does not exist";
+    Check(StartupFailureText("", load, block) == load, "a load error keeps the file and the field");
+    const char* start = "enemy 'no_such_foe' does not exist";
+    Check(StartupFailureText(start, load, block) == start,
+          "a start error stays ahead of a load error");
+    Check(StartupFailureText("", "", nullptr) == "Could not load data/.",
+          "an empty failure still says the data could not be loaded");
+    Check(StartupFailureText("", "", "") == "Could not load data/.",
+          "an empty fight block is not a sentence");
+
+    PlaytestOptions command;
+    command.Level = 5;
+    command.ClassId = "fighter";
+    Check(CheckPlaytestStartup(command, why) && why.empty(),
+          "level 5 fighter still passes the check that runs before the window");
+
+    Check(hero.ResetBuild(why) && hero.ChoosingStarter(), "a reset asks for a class");
+    const char* classBlock = hero.NextFightBlock();
+    Check(classBlock != nullptr && StartupFailureText("", "", classBlock) == classBlock,
+          "a class choice keeps its own sentence");
+    Check(hero.ChooseStarter("fighter", why) && hero.ClassPool() > 0, "the pool is waiting");
+    const char* poolBlock = hero.NextFightBlock();
+    Check(poolBlock != nullptr && std::string(poolBlock) != classBlock &&
+              StartupFailureText("", "", poolBlock) == poolBlock,
+          "unspent class points keep their own sentence");
+
+    TempCopy copy;
+    WriteFile(copy.Path / "classes.json", "{ not json");
+    PlaytestOptions broken;
+    broken.DataDir = copy.Path;
+    Check(!CheckPlaytestStartup(broken, why), "broken data fails before the window");
+    CheckHas(why, "classes.json", "that failure names the file");
+    CheckHas(why, "not valid JSON", "that failure says the JSON is broken");
+    Check(StartupFailureText("", why, block) == why, "the window would keep that load error");
+
+    const fs::path missingDir = fs::temp_directory_path() / "ascension-playtest-missing-panel";
+    const std::string missingName = missingDir.string();
+    PlaytestOptions folder;
+    folder.DataDir = missingDir;
+    Check(!CheckPlaytestStartup(folder, why), "a missing folder fails before the window");
+    CheckHas(why, missingName.c_str(), "the missing folder is named");
+    Check(StartupFailureText(why, "", block) == why, "the window would keep the folder sentence");
+}
+
 } // namespace
 
 int main()
@@ -436,6 +500,7 @@ int main()
     TestVarnSetupAndChoose();
     TestWolfPackAndLoneEnemy();
     TestDataFolderHotReload();
+    TestStartupFailureText();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
