@@ -4,7 +4,7 @@
 #   cmake --build --preset release --target package
 #   -> build/release/Ascension-<version>-windows-x64.zip   (or linux-x64)
 #
-# The zip holds the executable, its compiled shaders, data/, README.txt, LICENSE.txt,
+# The zip holds the executable, its compiled shaders, data/, assets/, README.txt, LICENSE.txt,
 # THIRD_PARTY_LICENSES.txt and .itch.toml (Play launches the executable).
 
 set(package_dir "${CMAKE_BINARY_DIR}/package")
@@ -67,6 +67,7 @@ _add_notice("dr_mp3 (https://github.com/mackron/dr_libs)" "${package_dir}/dr_mp3
 install(TARGETS Ascension RUNTIME DESTINATION . COMPONENT Game)
 install(DIRECTORY "$<TARGET_FILE_DIR:Ascension>/shaders/" DESTINATION shaders COMPONENT Game)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/" DESTINATION data COMPONENT Game)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/" DESTINATION assets COMPONENT Game)
 install(FILES "${package_dir}/README.txt" "${package_dir}/LICENSE.txt" "${notices}"
               "${package_dir}/.itch.toml"
         DESTINATION . COMPONENT Game)

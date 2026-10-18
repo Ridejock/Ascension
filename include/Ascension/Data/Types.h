@@ -291,10 +291,34 @@ struct EncounterDef {
 
 enum class GearSlot : u8 { Weapon, Offhand, Armor, Accessory, Consumable };
 
+// One named rectangle in the icon sheet. x, y, width, and height are pixels of the sheet,
+// origin at the top-left. The same rectangle is used for the accent sheet.
+struct IconDef {
+    std::string Id;
+    i32 X = 0;
+    i32 Y = 0;
+    i32 Width = 0;
+    i32 Height = 0;
+};
+
+// One row of rarities.json. Red, green, and blue are the #RRGGBB color: the accent layer is
+// multiplied by it, and the item name is drawn in it. A later row can add a flag (unique: at
+// most one of that item, with fixed stats) without a new drawing path. The item already names
+// its own icon, so a unique piece can have a dedicated picture.
+struct RarityDef {
+    std::string Id;
+    std::string Name;
+    u8 Red = 0;
+    u8 Green = 0;
+    u8 Blue = 0;
+};
+
 struct ItemDef {
     std::string Id;
     std::string Name;
     std::string Description;
+    std::string Icon;   // id in the icon sheet
+    std::string Rarity; // id in rarities.json
     GearSlot Slot = GearSlot::Weapon;
     StatBlock Bonus;
     i32 Value = 0;          // gold to buy one

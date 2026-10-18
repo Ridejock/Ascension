@@ -636,10 +636,12 @@ void TestLayers()
     ReplaceInFile(copy.Path / "items.json",
                   "\"id\": \"wolfhide_charm\",\n      \"name\": \"Wolfhide Charm\",\n      "
                   "\"description\": \"A twist of wolfhide. The step comes easier.\",\n      "
+                  "\"icon\": \"ring\",\n      \"rarity\": \"uncommon\",\n      "
                   "\"slot\": \"accessory\",\n      \"bonus\": { \"agility\": 2 },\n      "
                   "\"value\": 35",
                   "\"id\": \"wolfhide_charm\",\n      \"name\": \"Wolfhide Charm\",\n      "
                   "\"description\": \"A twist of wolfhide. The step comes easier.\",\n      "
+                  "\"icon\": \"ring\",\n      \"rarity\": \"uncommon\",\n      "
                   "\"slot\": \"accessory\",\n      \"bonus\": { \"agility\": 2 },\n      "
                   "\"grants\": [{ \"skill\": \"bulwark\", \"tune\": { \"focus\": { \"amount\": 4 } "
                   "} }],\n      \"value\": 35");
@@ -1193,6 +1195,119 @@ void TestBadDescriptions()
     }
 }
 
+bool IconsResolve(const Database& data)
+{
+    if (data.GetItems().empty() || data.GetRarities().empty() || data.GetIcons().empty())
+        return false;
+    if (!fs::is_regular_file(data.GetIconSheet()))
+        return false;
+    for (const ItemDef& item : data.GetItems()) {
+        if (data.FindIcon(item.Icon) == nullptr || data.FindRarity(item.Rarity) == nullptr)
+            return false;
+    }
+    return true;
+}
+
+void CheckSampleIcons(const Database& data, const char* where)
+{
+    Check(IconsResolve(data), where);
+    const RarityDef* common = data.FindRarity("common");
+    const RarityDef* uncommon = data.FindRarity("uncommon");
+    const RarityDef* rare = data.FindRarity("rare");
+    const RarityDef* epic = data.FindRarity("epic");
+    const RarityDef* legendary = data.FindRarity("legendary");
+    Check(common != nullptr && common->Name == "Common" && common->Red == 157 &&
+              common->Green == 163 && common->Blue == 173,
+          "common is #9DA3AD");
+    Check(uncommon != nullptr && uncommon->Red == 94 && uncommon->Green == 196 &&
+              uncommon->Blue == 94,
+          "uncommon is #5EC45E");
+    Check(rare != nullptr && rare->Red == 74 && rare->Green == 144 && rare->Blue == 226,
+          "rare is #4A90E2");
+    Check(epic != nullptr && epic->Red == 163 && epic->Green == 91 && epic->Blue == 217,
+          "epic is #A35BD9");
+    Check(legendary != nullptr && legendary->Red == 240 && legendary->Green == 144 &&
+              legendary->Blue == 46,
+          "legendary is #F0902E");
+    const ItemDef* sword = data.FindItem("rusty_sword");
+    const ItemDef* axe = data.FindItem("notched_greataxe");
+    const ItemDef* shield = data.FindItem("oak_shield");
+    const ItemDef* plate = data.FindItem("oathkeepers_plate");
+    const ItemDef* charm = data.FindItem("wolfhide_charm");
+    const ItemDef* potion = data.FindItem("minor_potion");
+    const ItemDef* tonic = data.FindItem("focus_tonic");
+    const IconDef* swordIcon = data.FindIcon("sword");
+    Check(sword != nullptr && sword->Icon == "sword" && sword->Rarity == "common" &&
+              swordIcon != nullptr && swordIcon->X == 0 && swordIcon->Y == 0 &&
+              swordIcon->Width == 16 && swordIcon->Height == 16,
+          "the rusty sword uses the sword icon at the sheet origin");
+    Check(axe != nullptr && axe->Icon == "axe" && axe->Rarity == "uncommon",
+          "the greataxe is an uncommon axe");
+    Check(shield != nullptr && shield->Icon == "shield" && shield->Rarity == "common",
+          "the oak shield is a common shield");
+    Check(plate != nullptr && plate->Icon == "chest_plate" && plate->Rarity == "uncommon",
+          "the plate is an uncommon chest plate");
+    Check(charm != nullptr && charm->Icon == "ring" && charm->Rarity == "uncommon",
+          "the charm is an uncommon ring");
+    Check(potion != nullptr && potion->Icon == "potion" && potion->Rarity == "common" &&
+              tonic != nullptr && tonic->Icon == "potion" && tonic->Rarity == "common",
+          "both drinks use the potion icon");
+}
+
+void TestIcons()
+{
+    {
+        Database data(kSample);
+        DataError error;
+        Check(data.Load(&error), "tests/data loads icons and rarities");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        if (data.IsLoaded())
+            CheckSampleIcons(data, "every tests/data item icon and rarity resolves");
+    }
+    {
+        Database shipped(ASCENSION_SHIPPED_DATA_DIR);
+        DataError error;
+        Check(shipped.Load(&error), "data/ loads icons and rarities");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        if (shipped.IsLoaded())
+            CheckSampleIcons(shipped, "every data/ item icon and rarity resolves");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"icon\": \"sword\"", "\"icon\": \"nope\"");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "an unknown icon is rejected");
+        CheckHas(error.Message, "items.json", "the error names the file");
+        CheckHas(error.Message, "rusty_sword", "the error names the item");
+        CheckHas(error.Message, "nope", "the error names the icon");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"rarity\": \"common\"", "\"rarity\": \"mythic\"");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "an unknown rarity is rejected");
+        CheckHas(error.Message, "items.json", "the error names the file");
+        CheckHas(error.Message, "rusty_sword", "the error names the item");
+        CheckHas(error.Message, "mythic", "the error names the rarity");
+    }
+    {
+        TempCopy copy;
+        fs::remove(copy.Path / "rarities.json");
+        TestRejected(copy.Path, "rarities.json", "could not be read",
+                     "a missing rarity file fails");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "rarities.json", "\"color\": \"#9DA3AD\"",
+                      "\"color\": \"green\"");
+        TestRejected(copy.Path, "rarities.json", "color", "a rarity color must be #RRGGBB");
+    }
+}
+
 void TestTunedAndRankedText()
 {
     {
@@ -1261,6 +1376,7 @@ int main()
     TestItemGrants();
     TestDescriptionsResolve();
     TestShippedDescriptions();
+    TestIcons();
     TestBadDescriptions();
     TestTunedAndRankedText();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);

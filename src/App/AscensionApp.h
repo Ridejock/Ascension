@@ -44,6 +44,8 @@ private:
     void ClampCamp();
     void HandleCamp(SDL_Scancode scancode);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // The icon sheet and its accent layer. Nearest filtering, so a scaled pixel stays a square.
+    void EnsureIcons();
     // --choose, once the evolution choice is open and a fight is not underway.
     // False when that pick failed and the run is stopping.
     bool TakeAutoPath();
@@ -72,6 +74,8 @@ private:
     i32 m_CampRow = 0;
     bool m_Picking = false;
     i32 m_PickRow = 0;
+    Emerald::AssetHandle<Emerald::TextureAtlas> m_Icons;
+    Emerald::AssetHandle<Emerald::Texture> m_Accents;
 };
 
 } // namespace Ascension
