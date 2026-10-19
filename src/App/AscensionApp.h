@@ -54,6 +54,7 @@ private:
     bool TakeAutoPath();
     // One scripted key per frame. The press goes through OnEvent, so the window
     // does not need focus. The run ends after the last key unless --frames is longer.
+    // Window key-downs are ignored until the script ends.
     void PlayScriptedKey();
 
     // Declared before m_Data: the database is opened on this command's folder.
@@ -61,6 +62,9 @@ private:
     std::ofstream m_Transcript;
     usize m_KeyCursor = 0;
     usize m_PickCursor = 0;
+    // True while PlayScriptedKey is inside its own OnEvent. Other key-downs in that
+    // moment belong to the window, not the script.
+    bool m_ApplyingScript = false;
 
     Database m_Data;
     Hero m_Hero;

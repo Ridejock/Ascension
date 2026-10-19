@@ -117,4 +117,46 @@ enum class SkillOptionPick { Waiting, Chosen, Failed };
 [[nodiscard]] std::string StartupFailureText(std::string_view startError,
                                              std::string_view loadError, const char* fightBlock);
 
+// Where a fight stands for the N key. None is the gap before the first battle.
+enum class FightStanding { None, Ongoing, Victory, Defeat };
+
+// N advances only once the fight is over. An ongoing battle stays on the current foe.
+[[nodiscard]] inline bool NextFightAllowed(FightStanding standing)
+{
+    return standing != FightStanding::Ongoing;
+}
+
+// True for a press that aims or spends the player's turn. N, R, and I are not in that set.
+[[nodiscard]] inline bool KeyNeedsPlayerTurn(SDL_Scancode scancode)
+{
+    if (scancode == SDL_SCANCODE_SPACE || scancode == SDL_SCANCODE_LEFT ||
+        scancode == SDL_SCANCODE_RIGHT || scancode == SDL_SCANCODE_C)
+        return true;
+    const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
+    return digit >= 0 && digit < 8;
+}
+
+// What to do with one key while a --keys script is running.
+enum class ScriptedPress { Play, IgnoreWindow, WaitForTurn };
+
+// ScriptRunning is true while scripted presses remain. FromScript is true only for the
+// press the script itself is applying. A focused window's own key must not join that
+// stream. A combat key waits when the foe's turn has not finished.
+struct ScriptedPressQuery {
+    bool ScriptRunning = false;
+    bool FromScript = false;
+    bool FightOngoing = false;
+    bool PlayerTurn = true;
+    bool NeedsPlayerTurn = false;
+};
+
+[[nodiscard]] inline ScriptedPress DecideScriptedPress(const ScriptedPressQuery& query)
+{
+    if (query.ScriptRunning && !query.FromScript)
+        return ScriptedPress::IgnoreWindow;
+    if (query.FightOngoing && query.NeedsPlayerTurn && !query.PlayerTurn)
+        return ScriptedPress::WaitForTurn;
+    return ScriptedPress::Play;
+}
+
 } // namespace Ascension

@@ -572,6 +572,50 @@ void TestStartupFailureText()
     Check(StartupFailureText(why, "", block) == why, "the window would keep the folder sentence");
 }
 
+void TestNextFightAndScriptedKeys()
+{
+    Check(NextFightAllowed(FightStanding::None), "N advances before the first fight");
+    Check(NextFightAllowed(FightStanding::Victory), "N advances after a victory");
+    Check(NextFightAllowed(FightStanding::Defeat), "N advances after a defeat");
+    Check(!NextFightAllowed(FightStanding::Ongoing), "N does not advance while a foe is alive");
+
+    ScriptedPressQuery window;
+    window.ScriptRunning = true;
+    Check(DecideScriptedPress(window) == ScriptedPress::IgnoreWindow,
+          "a focused window cannot insert a key into a script");
+    window.FromScript = true;
+    Check(DecideScriptedPress(window) == ScriptedPress::Play, "the script's own press is played");
+
+    ScriptedPressQuery combat;
+    combat.ScriptRunning = true;
+    combat.FromScript = true;
+    combat.FightOngoing = true;
+    combat.PlayerTurn = false;
+    combat.NeedsPlayerTurn = true;
+    Check(DecideScriptedPress(combat) == ScriptedPress::WaitForTurn,
+          "a combat key waits while it is still the foe's turn");
+    combat.PlayerTurn = true;
+    Check(DecideScriptedPress(combat) == ScriptedPress::Play,
+          "a combat key plays on the player's turn");
+
+    ScriptedPressQuery nextFight = combat;
+    nextFight.PlayerTurn = false;
+    nextFight.NeedsPlayerTurn = false;
+    Check(DecideScriptedPress(nextFight) == ScriptedPress::Play,
+          "N is delivered even when it is the foe's turn");
+    nextFight.FightOngoing = false;
+    Check(DecideScriptedPress(nextFight) == ScriptedPress::Play, "N plays once the fight is over");
+
+    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_2), "a skill key needs the player's turn");
+    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_RIGHT), "aiming needs the player's turn");
+    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_SPACE), "waiting needs the player's turn");
+    Check(!KeyNeedsPlayerTurn(SDL_SCANCODE_N), "N is not a combat key");
+    Check(!KeyNeedsPlayerTurn(SDL_SCANCODE_R), "restart is not a combat key");
+
+    ScriptedPressQuery idle;
+    Check(DecideScriptedPress(idle) == ScriptedPress::Play, "with no script, a window key plays");
+}
+
 } // namespace
 
 int main()
@@ -583,6 +627,7 @@ int main()
     TestDataFolderHotReload();
     TestPickFlag();
     TestStartupFailureText();
+    TestNextFightAndScriptedKeys();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
