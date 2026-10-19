@@ -41,8 +41,8 @@
       "skills": ["rage", "cleave"],
       "passives": ["bloodlust"],
       "picks": [
-        { "level": 6, "options": ["rend", { "skill": "brace", "tune": { "ward": { "amount": 75 } } }] },
-        { "level": 8, "options": ["rally", { "skill": "heavy_blow", "tune": { "hit": { "power": 15 } } }] }
+        { "level": 6, "options": ["rend", { "skill": "brace", "tune": { "ward": { "amount": 75 }, "focusCost": 1 } }] },
+        { "level": 8, "options": ["rally", { "skill": "second_wind", "tune": { "focusCost": 2 } }] }
       ]
     },
     {

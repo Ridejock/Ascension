@@ -1472,6 +1472,73 @@ void TestShippedDescriptions()
     if (!data.IsLoaded())
         return;
     Check(BracedDescriptions(data) == 0, "shipped descriptions resolve with no braces");
+
+    const SkillDef* wind = data.FindSkill("second_wind");
+    const EffectDef* mend = wind != nullptr ? wind->FindEffect("mend") : nullptr;
+    const EffectDef* opened = wind != nullptr ? wind->FindEffect("open") : nullptr;
+    Check(wind != nullptr && wind->FocusCost == 3 && mend != nullptr && mend->Power == 8 &&
+              mend->Scaling == "focus" && opened != nullptr &&
+              opened->Op == EffectOp::ApplyStatus && opened->Status == "exposed",
+          "second wind costs 3, heals 8 plus Focus, and applies Exposed");
+    const std::string windText = wind != nullptr ? data.DescribeSkill(*wind) : std::string();
+    Check(windText.find("higher Focus mends more") != std::string::npos &&
+              windText.find("You are Exposed while you recover") != std::string::npos,
+          "second wind names Focus and Exposed");
+
+    const SkillDef* riposte = data.FindSkill("riposte");
+    const EffectDef* riposteWard = riposte != nullptr ? riposte->FindEffect("ward") : nullptr;
+    Check(riposte != nullptr && riposteWard != nullptr && riposteWard->Amount == 70 &&
+              data.DescribeSkill(*riposte).find("Guard 70 percent") != std::string::npos,
+          "riposte guards 70 percent");
+
+    const SkillDef* rend = data.FindSkill("rend");
+    const EffectDef* rendHit = rend != nullptr ? rend->FindEffect("hit") : nullptr;
+    const EffectDef* gash = rend != nullptr ? rend->FindEffect("gash") : nullptr;
+    const EffectDef* cut = rend != nullptr ? rend->FindEffect("cut") : nullptr;
+    const EffectDef* cutAgain = rend != nullptr ? rend->FindEffect("cut2") : nullptr;
+    Check(rend != nullptr && rend->FocusCost == 2 && rendHit != nullptr && rendHit->Power == 8 &&
+              gash != nullptr && gash->Power == 14 && gash->IfTargetHas == "bleed" &&
+              !gash->Consume && cut != nullptr && cut->Status == "bleed" && cutAgain != nullptr &&
+              cutAgain->Status == "bleed",
+          "rend costs 2, gashes a bleeding foe without spending it, and applies Bleed twice");
+    const std::string rendText = rend != nullptr ? data.DescribeSkill(*rend) : std::string();
+    Check(rendText.find("Bleed, twice over") != std::string::npos, "rend names Bleed twice over");
+
+    const ClassDef* berserker = data.FindClass("berserker");
+    const bool berserkerPicks = berserker != nullptr && berserker->Picks.size() == 2 &&
+                                berserker->Picks[0].Options.size() == 2 &&
+                                berserker->Picks[1].Options.size() == 2;
+    const SkillGrant* braceOption = berserkerPicks ? &berserker->Picks[0].Options[1] : nullptr;
+    const EffectDef* braceWard =
+        braceOption != nullptr ? braceOption->Resolved.FindEffect("ward") : nullptr;
+    const SkillGrant* windOption = berserkerPicks ? &berserker->Picks[1].Options[1] : nullptr;
+    const EffectDef* tunedOpen =
+        windOption != nullptr ? windOption->Resolved.FindEffect("open") : nullptr;
+    Check(berserkerPicks && berserker->Picks[0].Level == 6 &&
+              berserker->Picks[0].Options[0].Id == "rend" && braceOption != nullptr &&
+              braceOption->Id == "brace" && braceWard != nullptr && braceWard->Amount == 75 &&
+              braceOption->Resolved.FocusCost == 1,
+          "the berserker brace upgrade guards 75 at 1 focus");
+    Check(berserkerPicks && berserker->Picks[1].Level == 8 &&
+              berserker->Picks[1].Options[0].Id == "rally" && windOption != nullptr &&
+              windOption->Id == "second_wind" && windOption->Resolved.FocusCost == 2 &&
+              tunedOpen != nullptr && tunedOpen->Status == "exposed",
+          "the berserker level-8 pick is Rally or Second Wind at 2 focus");
+
+    const ClassDef* guardian = data.FindClass("guardian");
+    const bool guardianPicks = guardian != nullptr && guardian->Picks.size() == 2 &&
+                               guardian->Picks[0].Options.size() == 2 &&
+                               guardian->Picks[1].Options.size() == 2;
+    const EffectDef* wallWard =
+        guardianPicks ? guardian->Picks[0].Options[1].Resolved.FindEffect("ward") : nullptr;
+    Check(guardianPicks && guardian->Picks[0].Level == 6 &&
+              guardian->Picks[0].Options[0].Id == "riposte" &&
+              guardian->Picks[0].Options[1].Id == "shield_wall" && wallWard != nullptr &&
+              wallWard->Amount == 90 && guardian->Picks[1].Level == 8 &&
+              guardian->Picks[1].Options[0].Id == "rally" &&
+              guardian->Picks[1].Options[1].Id == "rage" &&
+              guardian->Picks[1].Options[1].Resolved.FocusCost == 2,
+          "guardian picks stay Riposte or Shield Wall, then Rally or Rage");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
