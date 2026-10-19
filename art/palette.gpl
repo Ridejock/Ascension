@@ -45,3 +45,10 @@ Columns: 8
 151 138 117	wstone0
 189 175 149	wstone1
 223 213 188	wstone2
+ 71  84  71	gstone0
+113 123 108	gstone1
+155 162 137	gstone2
+153 104  56	dirt0
+189 139  49	dirt1
+213 177 125	dirt2
+ 33  45  28	gstone_d
