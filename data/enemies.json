@@ -155,7 +155,7 @@
     {
       "id": "barrow_brute",
       "name": "Barrow Brute",
-      "description": "A huge barrow thrall. When it bellows, its next big swing cannot be stunned; only a guard takes the weight.",
+      "description": "A huge barrow thrall. When it bellows, it cannot be stunned or Exposed until the next big swing lands; only a guard takes the weight.",
       "level": 8,
       "stats": {
         "vitality": 95,
@@ -165,7 +165,7 @@
         "focus": 0
       },
       "skills": ["bellow", "overhead", "brute_maul"],
-      "pattern": ["bellow", "overhead", "brute_maul"],
+      "pattern": ["bellow", "brute_maul", "overhead", "brute_maul"],
       "experience": 40,
       "gold": 20
     }
