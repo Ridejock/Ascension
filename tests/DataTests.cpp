@@ -1267,6 +1267,201 @@ void TestDescriptionsResolve()
           "rows use stat names, and a worn row skips the handling words");
 }
 
+void RejectClass(const fs::path& dir, const char* klass, const char* part, const char* what)
+{
+    Database data(dir);
+    DataError error;
+    Check(!data.Load(&error), what);
+    CheckHas(error.Message, "classes.json", what);
+    CheckHas(error.Message, klass, what);
+    CheckHas(error.Message, part, what);
+}
+
+// Replaces the guardian's skill list with `tail`, which starts at "skills".
+void SetGuardianTail(const fs::path& dir, std::string_view tail)
+{
+    ReplaceInFile(dir / "classes.json",
+                  "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": [\"bulwark\"]",
+                  tail);
+}
+
+void TestSkillPicks()
+{
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 5, \"options\": "
+                        "[\"cleave\", \"bite\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "between 6 and 99",
+                    "a pick at the evolve level is rejected");
+        Database again(copy.Path);
+        DataError error;
+        Check(!again.Load(&error), "the evolve-level pick still fails");
+        CheckHas(error.Message, "after the evolve level", "the error says picks come after evolve");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "classes.json",
+                      "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"],\n"
+                      "      \"passives\": []",
+                      "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"],\n"
+                      "      \"passives\": [],\n      \"picks\": [\n        { \"level\": 1, "
+                      "\"options\": [\"cleave\", \"riposte\"] }\n      ]");
+        RejectClass(copy.Path, "class 'fighter'", "between 2 and 99",
+                    "a base class pick starts above level 1");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 8, \"options\": "
+                        "[\"cleave\", \"bite\"] },\n        { \"level\": 7, \"options\": "
+                        "[\"rage\", \"flutter\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "between 9 and 99",
+                    "a pick below the previous level is rejected");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "two or three", "one option is rejected");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\", \"rage\", \"bite\", \"flutter\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "two or three", "four options are rejected");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\", \"no_such_skill\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "no_such_skill",
+                    "an unknown pick skill is named");
+        Database again(copy.Path);
+        DataError error;
+        Check(!again.Load(&error), "the unknown skill still fails");
+        CheckHas(error.Message, "does not exist", "the error says the skill does not exist");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\", \"bulwark\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "passive", "a passive cannot be a pick option");
+        Database again(copy.Path);
+        DataError error;
+        Check(!again.Load(&error), "the passive option still fails");
+        CheckHas(error.Message, "bulwark", "the error names the passive");
+        CheckHas(error.Message, "list it under skills", "the error says to list it under skills");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\", \"bite\"] },\n        { \"level\": 8, \"options\": "
+                        "[\"cleave\", \"flutter\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "offered by an earlier pick",
+                    "the same skill in two picks is rejected");
+        Database again(copy.Path);
+        DataError error;
+        Check(!again.Load(&error), "the repeated option still fails");
+        CheckHas(error.Message, "cleave", "the error names the repeated skill");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\", \"shield_wall\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "already a class skill",
+                    "an untuned copy of a class skill is rejected");
+        Database again(copy.Path);
+        DataError error;
+        Check(!again.Load(&error), "the untuned class skill still fails");
+        CheckHas(error.Message, "shield_wall", "the error names the class skill");
+        CheckHas(error.Message, "give the option a tune", "the error asks for a tune");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(copy.Path,
+                        "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                        "[\"bulwark\"],\n      \"picks\": [\n        { \"level\": 6, \"options\": "
+                        "[\"cleave\", \"brace\"] }\n      ]");
+        RejectClass(copy.Path, "class 'guardian'", "brace",
+                    "an untuned copy of a parent skill is rejected");
+        Database again(copy.Path);
+        DataError error;
+        Check(!again.Load(&error), "the untuned parent skill still fails");
+        CheckHas(error.Message, "already a class skill",
+                 "the parent skill counts as a class skill");
+    }
+    {
+        TempCopy copy;
+        SetGuardianTail(
+            copy.Path,
+            "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": [\"bulwark\"],\n"
+            "      \"picks\": [\n"
+            "        { \"level\": 6, \"options\": [\"bite\", { \"skill\": \"brace\", \"tune\": "
+            "{ \"ward\": { \"amount\": 75 } } }, { \"skill\": \"shield_wall\", \"tune\": {} }] },\n"
+            "        { \"level\": 8, \"options\": [\"cleave\", { \"skill\": \"heavy_blow\", "
+            "\"tune\": { \"focusCost\": 1, \"hit\": { \"power\": 10 } } }] }\n"
+            "      ]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "tuned upgrades and new options load");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        const ClassDef* guardian = data.FindClass("guardian");
+        Check(guardian != nullptr && guardian->Picks.size() == 2 && guardian->Picks[0].Level == 6 &&
+                  guardian->Picks[0].Options.size() == 3 && guardian->Picks[0].Options[1].Tuned &&
+                  guardian->Picks[0].Options[2].Tuned && !guardian->Picks[0].Options[0].Tuned,
+              "a tune key marks the option, and an empty tune still counts");
+        const std::vector<std::string> picked{"brace", "heavy_blow",  "cleave",
+                                              "bite",  "shield_wall", "no_such_skill"};
+        std::vector<HeroGrant> grants;
+        if (guardian != nullptr)
+            grants = data.HeroGrants(*guardian, {}, picked);
+        const HeroGrant* brace = FindGrant(grants, "brace");
+        const EffectDef* ward = brace != nullptr ? brace->Skill.FindEffect("ward") : nullptr;
+        Check(brace != nullptr && ward != nullptr && ward->Amount == 75 &&
+                  brace->Origins.size() == 1 && HasOrigin(*brace, GrantSource::Class, "guardian"),
+              "the higher guard wins, and the class is tagged once");
+        const HeroGrant* wall = FindGrant(grants, "shield_wall");
+        const EffectDef* wallWard = wall != nullptr ? wall->Skill.FindEffect("ward") : nullptr;
+        Check(wall != nullptr && wallWard != nullptr && wallWard->Amount == 75 &&
+                  wall->Origins.size() == 1,
+              "an empty tune leaves the class guard and does not tag the class twice");
+        const HeroGrant* heavy = FindGrant(grants, "heavy_blow");
+        const EffectDef* hit = heavy != nullptr ? heavy->Skill.FindEffect("hit") : nullptr;
+        Check(heavy != nullptr && heavy->Skill.FocusCost == 1 && hit != nullptr && hit->Power == 18,
+              "the lower focus cost wins, and the higher power stays on the class skill");
+        const HeroGrant* cleave = FindGrant(grants, "cleave");
+        const EffectDef* cleaveHit = cleave != nullptr ? cleave->Skill.FindEffect("hit") : nullptr;
+        usize cleaves = 0;
+        usize bites = 0;
+        for (const HeroGrant& grant : grants) {
+            if (grant.Skill.Id == "cleave")
+                ++cleaves;
+            if (grant.Skill.Id == "bite")
+                ++bites;
+        }
+        Check(cleaves == 1 && bites == 1 && cleave != nullptr && cleaveHit != nullptr &&
+                  cleaveHit->Power == 8 && cleave->Skill.FocusCost == 4 &&
+                  FindGrant(grants, "flutter") == nullptr,
+              "a kept new skill is added once, and an unknown id adds nothing");
+    }
+}
+
 void TestShippedDescriptions()
 {
     Database data(ASCENSION_SHIPPED_DATA_DIR);
@@ -1509,6 +1704,7 @@ int main()
     TestConditionalFields();
     TestResists();
     TestItemGrants();
+    TestSkillPicks();
     TestDescriptionsResolve();
     TestShippedDescriptions();
     TestIcons();

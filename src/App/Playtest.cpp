@@ -346,12 +346,35 @@ bool CheckChooseId(const Hero& hero, const Database& data, std::string_view clas
     return false;
 }
 
+bool CheckPickIds(const Hero& hero, const Database& data, std::span<const std::string> ids,
+                  std::string& error)
+{
+    for (const std::string& id : ids) {
+        if (data.FindSkill(id) == nullptr) {
+            error = "skill '" + id + "' does not exist";
+            return false;
+        }
+    }
+    // Walk the picks this level can already resolve, on a copy, so a bad id fails before
+    // the window and the hero passed in is left unpicked.
+    Hero probe = hero;
+    for (const std::string& id : ids) {
+        if (!probe.PickPending())
+            break;
+        if (!probe.Pick(id, error))
+            return false;
+    }
+    error.clear();
+    return true;
+}
+
 } // namespace
 
 bool PlaytestOptions::UsesData() const
 {
     return !DataDir.empty() || Level.has_value() || !ClassId.empty() || !Fight.Id.empty() ||
-           Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty();
+           Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty() ||
+           !PickIds.empty();
 }
 
 bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOptions& options,
@@ -488,6 +511,14 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.ChooseId = std::string(value);
+        } else if (flag == "--pick") {
+            if (!TakeValue(args, index, attached, flag, value, error))
+                return false;
+            if (value.empty()) {
+                error = "--pick needs an id";
+                return false;
+            }
+            options.PickIds.emplace_back(value);
         } else {
             error = "unknown flag '" + std::string(flag) + "'";
             return false;
@@ -586,6 +617,8 @@ bool ApplyPlaytest(Hero& hero, Inventory& inventory, const Database& data,
     }
     if (!CheckChooseId(hero, data, options.ChooseId, error))
         return false;
+    if (!CheckPickIds(hero, data, options.PickIds, error))
+        return false;
     error.clear();
     return true;
 }
@@ -605,6 +638,23 @@ EvolutionPick PickEvolution(Hero& hero, std::string_view classId, std::string& e
     }
     error.clear();
     return EvolutionPick::Chosen;
+}
+
+SkillOptionPick PickSkillOption(Hero& hero, std::string_view skillId, std::string& error)
+{
+    if (skillId.empty() || !hero.IsReady() || !hero.PickPending()) {
+        error.clear();
+        return SkillOptionPick::Waiting;
+    }
+    std::string why;
+    if (!hero.Pick(skillId, why)) {
+        error = why.find(skillId) == std::string::npos
+                    ? "skill '" + std::string(skillId) + "' is not offered"
+                    : std::move(why);
+        return SkillOptionPick::Failed;
+    }
+    error.clear();
+    return SkillOptionPick::Chosen;
 }
 
 bool CheckPlaytestStartup(const PlaytestOptions& options, std::string& error)

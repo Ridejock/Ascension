@@ -203,14 +203,52 @@ std::string WornLine(const Database& data, const Inventory& bag)
     return line;
 }
 
-// The hero's skills right now: class grants, then worn gear. Empty when the class is gone.
+// The hero's skills right now: class grants, kept picks, then worn gear. Empty when the
+// class is gone.
 std::vector<HeroGrant> CurrentGrants(const Database& data, std::string_view classId,
-                                     const Inventory& inventory)
+                                     const Inventory& inventory,
+                                     std::span<const std::string> pickedIds)
 {
     const ClassDef* heroClass = data.FindClass(classId);
     if (heroClass == nullptr)
         return {};
-    return data.HeroGrants(*heroClass, inventory.WornIds());
+    return data.HeroGrants(*heroClass, inventory.WornIds(), pickedIds);
+}
+
+bool ClassHasActive(const Database& data, std::string_view classId, std::string_view skillId)
+{
+    const ClassDef* klass = data.FindClass(classId);
+    if (klass == nullptr)
+        return false;
+    for (const SkillDef* skill : data.ActiveSkills(*klass)) {
+        if (skill->Id == skillId)
+            return true;
+    }
+    return false;
+}
+
+std::string SkillName(const Database& data, std::string_view id)
+{
+    const SkillDef* skill = data.FindSkill(id);
+    if (skill == nullptr)
+        return std::string(id);
+    return skill->Name;
+}
+
+// The option as the class offers it, tune included. Null when that id is not a pick.
+const SkillGrant* OfferedGrant(const Database& data, std::string_view classId,
+                               std::string_view skillId)
+{
+    const ClassDef* klass = data.FindClass(classId);
+    if (klass == nullptr)
+        return nullptr;
+    for (const SkillPick* pick : data.PicksOf(*klass)) {
+        for (const SkillGrant& option : pick->Options) {
+            if (option.Id == skillId)
+                return &option;
+        }
+    }
+    return nullptr;
 }
 
 // "  [Rusty Sword]" for a skill a worn piece gives. A class skill with no other source has
@@ -382,18 +420,29 @@ void AscensionApp::AwardVictory()
         Note(std::to_string(gold) + " gold.");
     if (grant.LevelAfter > grant.LevelBefore)
         Note("Level " + std::to_string(grant.LevelAfter) + ".");
-    if (!grant.ChoiceOpened)
-        return;
-    std::string line = "Choose a path.";
-    const std::vector<std::string> choices = m_Hero.ChoiceIds();
-    for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-        const ClassDef* evolution = m_Data.FindClass(choices[i]);
-        line += " " + std::to_string(static_cast<int>(i) + 1) + " ";
-        line += evolution != nullptr ? evolution->Name : choices[i];
-        line += ".";
+    if (grant.ChoiceOpened) {
+        std::string line = "Choose a path.";
+        const std::vector<std::string> choices = m_Hero.ChoiceIds();
+        for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+            const ClassDef* evolution = m_Data.FindClass(choices[i]);
+            line += " " + std::to_string(static_cast<int>(i) + 1) + " ";
+            line += evolution != nullptr ? evolution->Name : choices[i];
+            line += ".";
+        }
+        Note(line);
     }
-    Note(line);
-    TakeAutoPath();
+    if (grant.PickOpened) {
+        std::string line = "Choose a skill.";
+        const std::vector<std::string> options = m_Hero.PickOptions();
+        for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+            line += " " + std::to_string(static_cast<int>(i) + 1) + " ";
+            line += SkillName(m_Data, options[i]);
+            line += ".";
+        }
+        Note(line);
+    }
+    if (grant.ChoiceOpened || grant.PickOpened)
+        TakeAutoPath();
 }
 
 void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
@@ -460,6 +509,7 @@ void AscensionApp::BeginFight()
 
     m_Battle->SetGear(m_Inventory.GearBonus());
     m_Battle->SetWornItems(m_Inventory.WornIds());
+    m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
@@ -576,7 +626,9 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         const bool pickingClass = m_Hero.ChoosingStarter();
         const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
         const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
-        if (!pickingClass && !spending && !choosingPath)
+        const bool pickingSkill =
+            m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+        if (!pickingClass && !spending && !choosingPath && !pickingSkill)
             return;
         if (digit < 0 || digit >= kMaxHotkeys)
             return;
@@ -614,6 +666,19 @@ void AscensionApp::OnEvent(const SDL_Event& event)
                 Note("Build reset. Skill ranks cleared. Pick a starter class.");
                 PushRanks();
             }
+            return;
+        }
+        if (pickingSkill) {
+            const std::vector<std::string> options = m_Hero.PickOptions();
+            if (digit >= static_cast<int>(options.size()))
+                return;
+            const std::string& optionId = options[static_cast<usize>(digit)];
+            if (!m_Hero.Pick(optionId, why)) {
+                Note(why);
+                return;
+            }
+            Note(SkillName(m_Data, optionId) + " chosen.");
+            PushRanks();
             return;
         }
         const std::vector<std::string> choices = m_Hero.ChoiceIds();
@@ -710,11 +775,28 @@ bool AscensionApp::TakeAutoPath()
         Quit();
         return false;
     }
-    if (pick != EvolutionPick::Chosen)
-        return true;
-    const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
-    Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
-    PushRanks();
+    if (pick == EvolutionPick::Chosen) {
+        const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
+        Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
+        PushRanks();
+    }
+    while (m_PickCursor < m_Play.PickIds.size() && m_Hero.PickPending()) {
+        const std::string& id = m_Play.PickIds[m_PickCursor];
+        const SkillOptionPick kept = PickSkillOption(m_Hero, id, why);
+        if (kept == SkillOptionPick::Failed) {
+            Note(why);
+            std::fprintf(stderr, "%s\n", why.c_str());
+            if (m_Battle == nullptr)
+                m_StartError = std::move(why);
+            Quit();
+            return false;
+        }
+        if (kept != SkillOptionPick::Chosen)
+            break;
+        ++m_PickCursor;
+        Note(SkillName(m_Data, id) + " chosen.");
+        PushRanks();
+    }
     return true;
 }
 
@@ -783,6 +865,7 @@ void AscensionApp::OnUpdate(f32 dt)
     }
     m_Battle->SetGear(m_Inventory.GearBonus());
     m_Battle->SetWornItems(m_Inventory.WornIds());
+    m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     if (!m_Battle->ApplyData(why)) {
         Note(why);
@@ -879,7 +962,10 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const bool fightOver = m_Battle->Result() != BattleResult::Ongoing;
     const bool pickingClass = fightOver && m_Hero.ChoosingStarter();
     const bool spending = fightOver && !pickingClass && m_Hero.ClassPool() > 0;
-    const bool choosing = fightOver && (m_Hero.ChoicePending() || pickingClass || spending);
+    const bool choosingPath = fightOver && m_Hero.ChoicePending() && !pickingClass && !spending;
+    const bool pickingSkill =
+        fightOver && m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+    const bool choosing = choosingPath || pickingClass || spending || pickingSkill;
     y = left.y + 188.0f;
     if (!choosing) {
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(WornLine(m_Data, m_Inventory)),
@@ -893,6 +979,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             heading = "CHOOSE A CLASS";
         else if (spending)
             heading = "SPEND CLASS POINTS";
+        else if (pickingSkill)
+            heading = "CHOOSE A SKILL";
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, heading, kFrame, 2);
         y += Emerald::DebugTextLineHeight(2) + 2.0f;
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "THE NEXT FIGHT WAITS.", kInk, 1);
@@ -931,6 +1019,31 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             }
             if (m_Hero.ChoicePending()) {
                 Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "6  RESET BUILD", kDim, 1);
+            }
+        } else if (pickingSkill) {
+            const std::vector<std::string> options = m_Hero.PickOptions();
+            for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const SkillGrant* offered = OfferedGrant(m_Data, m_Hero.ClassId(), options[i]);
+                const SkillDef* skill =
+                    offered != nullptr ? &offered->Resolved : m_Data.FindSkill(options[i]);
+                const std::string name = SkillName(m_Data, options[i]);
+                const std::string line = std::to_string(static_cast<int>(i) + 1) + "  " + name;
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), kInk, 2);
+                y += Emerald::DebugTextLineHeight(2) + 2.0f;
+                if (skill != nullptr) {
+                    y = Emerald::DrawDebugText(
+                        renderer, {left.x + 28.0f, y},
+                        Upper(m_Data.DescribeSkill(*skill, m_Hero.RankOf(skill->Id))), kDim, 1,
+                        leftSize.x - 56.0f);
+                    y += 2.0f;
+                }
+                if (ClassHasActive(m_Data, m_Hero.ClassId(), options[i])) {
+                    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper("Upgrades " + name),
+                                           kInk, 1);
+                    y += Emerald::DebugTextLineHeight(1) + 8.0f;
+                } else {
+                    y += 6.0f;
+                }
             }
         } else {
             const std::vector<std::string> choices = m_Hero.ChoiceIds();
@@ -993,7 +1106,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
         y += Emerald::DebugTextLineHeight(2) + 8.0f;
         // The same list, in the same order, that Battle builds its hotkeys from.
-        const std::vector<HeroGrant> grants = CurrentGrants(m_Data, m_Hero.ClassId(), m_Inventory);
+        const std::vector<HeroGrant> grants =
+            CurrentGrants(m_Data, m_Hero.ClassId(), m_Inventory, m_Hero.PickedIds());
         usize hotkey = 0;
         for (const HeroGrant& grant : grants) {
             if (grant.Skill.Kind != SkillKind::Active)
@@ -1180,6 +1294,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         banner = "CHOOSE A CLASS";
     } else if (spending) {
         banner = "SPEND CLASS POINTS";
+    } else if (pickingSkill) {
+        banner = "CHOOSE A SKILL";
     } else if (choosing) {
         banner = "CHOOSE A PATH";
     } else if (m_Picking) {
@@ -1233,6 +1349,15 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += "    ";
                 help += std::to_string(static_cast<int>(stats.size()) + 1);
                 help += " RESET BUILD";
+            }
+            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
+        } else if (pickingSkill) {
+            const std::vector<std::string> options = m_Hero.PickOptions();
+            for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                if (!help.empty())
+                    help += "    ";
+                help += std::to_string(static_cast<int>(i) + 1) + " ";
+                help += SkillName(m_Data, options[i]);
             }
             help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
         } else if (choosing) {
@@ -1735,6 +1860,9 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     if (m_Hero.ChoicePending()) {
         help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
                "X SELL    U UNEQUIP    I CLOSE    CHOOSE A PATH BEFORE THE NEXT FIGHT    ESC QUIT";
+    } else if (m_Hero.PickPending()) {
+        help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
+               "X SELL    U UNEQUIP    I CLOSE    PICK A SKILL BEFORE THE NEXT FIGHT    ESC QUIT";
     }
     Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, help, kDim, 1, width - 96.0f);
 }

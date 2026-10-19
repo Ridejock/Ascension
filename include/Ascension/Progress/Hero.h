@@ -15,6 +15,7 @@ struct XpGrant {
     i32 LevelBefore = 1;
     i32 LevelAfter = 1;
     bool ChoiceOpened = false;
+    bool PickOpened = false; // this grant reached a skill pick that was not open before
 };
 
 // One class's attribute grant, as it sits on the character. Id is the class that gave it.
@@ -59,8 +60,21 @@ public:
     // power.
     [[nodiscard]] i32 RankAfterUse(std::string_view skillId) const;
 
-    // Active skills of the current class, parent first. Empty if the class is gone.
+    // Active skills of the current class, parent first, then the kept pick options in pick
+    // order. An upgrade of a class skill is not listed twice. Empty if the class is gone.
     [[nodiscard]] std::vector<std::string> SkillIds() const;
+
+    // True when the class (or its parent) has a pick at or below the current level and none of
+    // its options is kept yet. Picks resolve one at a time, lowest level first. Nothing is
+    // offered while a starter class is still being picked.
+    [[nodiscard]] bool PickPending() const;
+    // The open pick's option skill ids, in file order (the order of the number keys).
+    [[nodiscard]] std::vector<std::string> PickOptions() const;
+    // Keep that option of the open pick. The other options are gone for this run.
+    bool Pick(std::string_view skillId, std::string& error);
+    // Kept option ids the current class still offers, in pick order. A reload that drops an
+    // option drops it here too, and that pick opens again. Pass this to Battle::SetPickedSkills.
+    [[nodiscard]] std::vector<std::string> PickedIds() const;
 
     // True while this is still a base class and at least one of its evolutions is offered
     // at the current level. File order, which is the order of the number keys.
@@ -72,9 +86,10 @@ public:
     // The evolution's bonus is recorded as its own attribute source.
     bool Choose(std::string_view evolutionId, std::string& error);
 
-    // Clears every practiced skill use, including uses of a skill that only gear grants, and
-    // returns every class attribute grant to the unspent pool. Level, XP, and the points
-    // earned by leveling stay. Gear is not on the hero, so a reset does not touch it.
+    // Clears every practiced skill use, including uses of a skill that only gear grants, every
+    // kept skill pick, and returns every class attribute grant to the unspent pool. Level, XP,
+    // and the points earned by leveling stay. Gear is not on the hero, so a reset does not
+    // touch it. A pick the class still offers opens again after the new path is chosen.
     // Succeeds only while an evolution choice is open. The player then picks a starter with
     // ChooseStarter and spends the pool with SpendClassPoint. Nothing else clears skill uses.
     bool ResetBuild(std::string& error);
@@ -132,6 +147,7 @@ private:
     i32 m_Xp = 0;
     std::vector<std::string> m_Practiced;
     std::vector<i32> m_Uses;
+    std::vector<std::string> m_Picked; // kept option ids, in the order they were picked
     // Set by a reset. Level steps and class sources are then remembered here instead of being
     // derived from the class formula, so a new starter does not rewrite the points already earned.
     bool m_Custom = false;

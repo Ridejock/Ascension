@@ -6,6 +6,15 @@ namespace {
 
 constexpr i32 kXpCap = 999999;
 
+bool Lists(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& held : ids) {
+        if (held == id)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool Hero::Start(const Database& data, std::string& error)
@@ -22,6 +31,7 @@ bool Hero::Start(const Database& data, std::string& error)
     m_Xp = 0;
     m_Practiced.clear();
     m_Uses.clear();
+    m_Picked.clear();
     m_Custom = false;
     m_ChoosingStarter = false;
     m_ClassPool = 0;
@@ -115,7 +125,77 @@ std::vector<std::string> Hero::SkillIds() const
         return ids;
     for (const SkillDef* skill : m_Data->ActiveSkills(*klass))
         ids.push_back(skill->Id);
+    for (const std::string& kept : PickedIds()) {
+        if (!Lists(ids, kept))
+            ids.push_back(kept);
+    }
     return ids;
+}
+
+std::vector<std::string> Hero::PickedIds() const
+{
+    std::vector<std::string> ids;
+    if (m_Data == nullptr)
+        return ids;
+    const ClassDef* klass = m_Data->FindClass(m_ClassId);
+    if (klass == nullptr)
+        return ids;
+    for (const SkillPick* pick : m_Data->PicksOf(*klass)) {
+        for (const SkillGrant& option : pick->Options) {
+            if (Lists(m_Picked, option.Id) && !Lists(ids, option.Id))
+                ids.push_back(option.Id);
+        }
+    }
+    return ids;
+}
+
+bool Hero::PickPending() const
+{
+    return !PickOptions().empty();
+}
+
+std::vector<std::string> Hero::PickOptions() const
+{
+    std::vector<std::string> ids;
+    if (m_Data == nullptr || m_ChoosingStarter)
+        return ids;
+    const ClassDef* klass = m_Data->FindClass(m_ClassId);
+    if (klass == nullptr)
+        return ids;
+    const i32 level = Level();
+    const SkillPick* open = nullptr;
+    for (const SkillPick* pick : m_Data->PicksOf(*klass)) {
+        if (pick->Level > level)
+            continue;
+        bool kept = false;
+        for (const SkillGrant& option : pick->Options)
+            kept = kept || Lists(m_Picked, option.Id);
+        if (kept)
+            continue;
+        if (open == nullptr || pick->Level < open->Level)
+            open = pick;
+    }
+    if (open == nullptr)
+        return ids;
+    for (const SkillGrant& option : open->Options)
+        ids.push_back(option.Id);
+    return ids;
+}
+
+bool Hero::Pick(std::string_view skillId, std::string& error)
+{
+    const std::vector<std::string> options = PickOptions();
+    if (options.empty()) {
+        error = "no skill pick is open";
+        return false;
+    }
+    if (!Lists(options, skillId)) {
+        error = "skill '" + std::string(skillId) + "' is not offered";
+        return false;
+    }
+    m_Picked.emplace_back(skillId);
+    error.clear();
+    return true;
 }
 
 bool Hero::ChoicePending() const
@@ -199,6 +279,7 @@ bool Hero::ResetBuild(std::string& error)
     m_ChoosingStarter = true;
     m_Practiced.clear();
     m_Uses.clear();
+    m_Picked.clear();
     error.clear();
     return true;
 }
@@ -333,9 +414,11 @@ const char* Hero::NextFightBlock() const
         return "Choose a class before the next fight.";
     if (m_ClassPool > 0)
         return "Spend class points before the next fight.";
-    if (!ChoicePending())
-        return nullptr;
-    return "Choose a path before the next fight.";
+    if (ChoicePending())
+        return "Choose a path before the next fight.";
+    if (PickPending())
+        return "Pick a skill before the next fight.";
+    return nullptr;
 }
 
 i32 Hero::IndexAfterNextFoe(i32 index, i32 count) const
@@ -354,11 +437,13 @@ XpGrant Hero::GrantXp(i32 amount)
         return grant;
     }
     const bool pending = ChoicePending();
+    const bool picking = PickPending();
     const i64 sum = static_cast<i64>(m_Xp) + amount;
     m_Xp = sum > kXpCap ? kXpCap : static_cast<i32>(sum);
     grant.Amount = amount;
     grant.LevelAfter = Level();
     grant.ChoiceOpened = !pending && ChoicePending();
+    grant.PickOpened = !picking && PickPending();
     NoteLevelSteps();
     return grant;
 }

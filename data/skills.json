@@ -328,6 +328,31 @@
       "effects": [
         { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
       ]
+    },
+    {
+      "id": "rend",
+      "name": "Rend",
+      "description": "Tear a wound open: {cut.status}. A foe that is already bleeding takes a deeper cut, and the bleeding stops.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" },
+        { "id": "gash", "trigger": "onUse", "op": "damage", "power": 18, "ifTargetHas": "bleed", "consume": true },
+        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "rally",
+      "name": "Rally",
+      "description": "Set your guard and catch your breath in one motion.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 12 }
+      ]
     }
   ]
 }

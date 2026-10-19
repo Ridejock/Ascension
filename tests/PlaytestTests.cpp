@@ -234,7 +234,8 @@ void TestBadIds()
           "wolf is the encounter, which is the single wolf");
 
     foe.Fight.Id = "rubble_shard";
-    Check(ResolveFight(data, foe.Fight, resolved, why), "a summoned foe with no encounter resolves");
+    Check(ResolveFight(data, foe.Fight, resolved, why),
+          "a summoned foe with no encounter resolves");
     Check(resolved.Kind == FightKind::Enemy && resolved.Id == "rubble_shard" &&
               resolved.EnemyIndex == IndexOf(data, "rubble_shard"),
           "a roster id that is not an encounter stays a single enemy");
@@ -427,6 +428,86 @@ void TestDataFolderHotReload()
     Check(CheckPlaytestStartup(options, why), "startup accepts the copied folder");
 }
 
+void TestPickFlag()
+{
+    PlaytestOptions parsed;
+    std::string why;
+    Check(Parse({"--pick", "riposte", "--pick=rally"}, parsed, why), "--pick repeats");
+    Check(parsed.PickIds.size() == 2 && parsed.PickIds[0] == "riposte" &&
+              parsed.PickIds[1] == "rally",
+          "the ids stay in the order they were passed");
+    Check(parsed.UsesData(), "a pick alone asks for data");
+    Check(!Parse({"--pick"}, parsed, why), "a bare --pick fails");
+    CheckHas(why, "--pick needs a value", "a missing value is named");
+    Check(!Parse({"--pick="}, parsed, why), "an empty --pick fails");
+    CheckHas(why, "--pick needs an id", "an empty id is named");
+
+    PlaytestOptions unknown;
+    unknown.PickIds.push_back("no_such_skill");
+    Check(!CheckPlaytestStartup(unknown, why), "an unknown --pick fails before the window");
+    CheckHas(why, "no_such_skill", "the unknown skill is named");
+    CheckHas(why, "does not exist", "the error says the skill does not exist");
+
+    PlaytestOptions idle;
+    idle.Level = 6;
+    idle.ClassId = "guardian";
+    idle.PickIds.push_back("riposte");
+    Check(CheckPlaytestStartup(idle, why) && why.empty(),
+          "a skill id is accepted when no pick is open yet");
+
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "classes.json",
+                  "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": [\"bulwark\"]",
+                  "\"skills\": [\"shield_wall\"],\n      \"passives\": [\"bulwark\"],\n"
+                  "      \"picks\": [\n"
+                  "        { \"level\": 6, \"options\": [\"riposte\", \"cleave\"] }\n"
+                  "      ]");
+    PlaytestOptions refused;
+    refused.DataDir = copy.Path;
+    refused.Level = 6;
+    refused.ClassId = "guardian";
+    refused.PickIds.push_back("bite");
+    Check(!CheckPlaytestStartup(refused, why), "a skill the open pick does not offer fails");
+    CheckHas(why, "bite", "that failure names the skill");
+
+    PlaytestOptions accepted = refused;
+    accepted.PickIds = {"riposte"};
+    Check(CheckPlaytestStartup(accepted, why) && why.empty(),
+          "an offered skill passes the startup check");
+
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "the pick folder loads");
+    Hero hero;
+    Inventory bag;
+    PlaytestSetup setup;
+    Check(ApplyPlaytest(hero, bag, data, accepted, setup, why), "level 6 guardian is ready");
+    Check(hero.Level() == 6 && hero.ClassId() == "guardian" && hero.PickPending() &&
+              hero.PickedIds().empty(),
+          "startup validates --pick without keeping it");
+    Check(PickSkillOption(hero, "riposte", why) == SkillOptionPick::Chosen, "--pick keeps riposte");
+    Check(!hero.PickPending() && hero.PickedIds().size() == 1 && hero.PickedIds()[0] == "riposte",
+          "the kept id is riposte");
+    Check(PickSkillOption(hero, "cleave", why) == SkillOptionPick::Waiting,
+          "a later --pick waits until another pick is open");
+
+    Hero early;
+    Check(early.Start(data, why), "a fresh fighter starts");
+    Check(PickSkillOption(early, "riposte", why) == SkillOptionPick::Waiting,
+          "--pick does nothing before the pick level");
+    early.GrantXp(62);
+    Check(early.Choose("guardian", why), "guardian is chosen at level 5");
+    Check(PickSkillOption(early, "riposte", why) == SkillOptionPick::Waiting,
+          "level 5 is still before the pick");
+    early.GrantXp(90 - 62);
+    Check(early.Level() == 6 && early.PickPending(), "level 6 opens the pick");
+    Check(PickSkillOption(early, "bite", why) == SkillOptionPick::Failed,
+          "an id outside the open pick fails");
+    CheckHas(why, "bite", "the failure names the id");
+    Check(early.PickPending() && early.ClassId() == "guardian", "a failed pick leaves the choice");
+    Check(PickSkillOption(early, "cleave", why) == SkillOptionPick::Chosen, "cleave is kept");
+}
+
 void TestStartupFailureText()
 {
     Database data = Sample();
@@ -500,6 +581,7 @@ int main()
     TestVarnSetupAndChoose();
     TestWolfPackAndLoneEnemy();
     TestDataFolderHotReload();
+    TestPickFlag();
     TestStartupFailureText();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
