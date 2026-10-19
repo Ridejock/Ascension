@@ -1,0 +1,366 @@
+{
+ "tile_size": 16,
+ "source": "OpenRTP (finalbossblues, CC0), remapped to Emerald palette",
+ "tiles": {
+  "floor_stone": {
+   "x": 0,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_stone_alt": {
+   "x": 16,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_slab_grey": {
+   "x": 32,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_slab_dark": {
+   "x": 48,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_cobble_mauve": {
+   "x": 64,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_cobble_green": {
+   "x": 80,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_carved_slab": {
+   "x": 96,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "floor_brick_light": {
+   "x": 112,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_nw": {
+   "x": 128,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_n": {
+   "x": 144,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_ne": {
+   "x": 160,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_w": {
+   "x": 176,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_c": {
+   "x": 192,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_e": {
+   "x": 208,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_sw": {
+   "x": 224,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_s": {
+   "x": 240,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_se": {
+   "x": 0,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_inner_nw": {
+   "x": 16,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_inner_ne": {
+   "x": 32,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_inner_sw": {
+   "x": 48,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_top_inner_se": {
+   "x": 64,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_upper_a": {
+   "x": 80,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_upper_b": {
+   "x": 96,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_upper_c": {
+   "x": 112,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_lower_a": {
+   "x": 128,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_lower_b": {
+   "x": 144,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_lower_c": {
+   "x": 160,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "wall_face_carved_upper": {
+   "x": 176,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "ledge_upper_l": {
+   "x": 192,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "ledge_upper_r": {
+   "x": 208,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "ledge_lower_l": {
+   "x": 224,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "ledge_lower_m": {
+   "x": 240,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "ledge_lower_r": {
+   "x": 0,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "stairs_stone_l": {
+   "x": 16,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "stairs_stone_m": {
+   "x": 32,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "stairs_stone_r": {
+   "x": 48,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "stairs_earth_l": {
+   "x": 64,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "stairs_earth_m": {
+   "x": 80,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "stairs_earth_r": {
+   "x": 96,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rubble_small": {
+   "x": 112,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rubble_flat": {
+   "x": 128,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rubble_brown": {
+   "x": 144,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "boulder": {
+   "x": 160,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "boulder_big_2x2": {
+   "x": 176,
+   "y": 32,
+   "w": 32,
+   "h": 32
+  },
+  "rock_pile_2x2_cairn_placeholder": {
+   "x": 208,
+   "y": 32,
+   "w": 32,
+   "h": 32
+  },
+  "stone_spire_1x2_standing_stone_placeholder": {
+   "x": 240,
+   "y": 32,
+   "w": 16,
+   "h": 32
+  },
+  "stone_spire_small": {
+   "x": 0,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "rock_arch_2x1": {
+   "x": 16,
+   "y": 64,
+   "w": 32,
+   "h": 16
+  },
+  "peak_grey_2x1_mound_placeholder": {
+   "x": 48,
+   "y": 64,
+   "w": 32,
+   "h": 16
+  },
+  "gravestone_cross": {
+   "x": 80,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "gravestone": {
+   "x": 96,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "tomb_door_3x2": {
+   "x": 112,
+   "y": 64,
+   "w": 48,
+   "h": 32
+  },
+  "ruin_portal_3x2": {
+   "x": 160,
+   "y": 64,
+   "w": 48,
+   "h": 32
+  },
+  "pillar_1x2": {
+   "x": 208,
+   "y": 64,
+   "w": 16,
+   "h": 32
+  },
+  "pillar_ext_1x2": {
+   "x": 224,
+   "y": 64,
+   "w": 16,
+   "h": 32
+  },
+  "torch_stand_1x2": {
+   "x": 240,
+   "y": 64,
+   "w": 16,
+   "h": 32
+  },
+  "torch_wall": {
+   "x": 0,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "vines": {
+   "x": 16,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "pot": {
+   "x": 32,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "bucket": {
+   "x": 48,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  }
+ }
+}
