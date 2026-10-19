@@ -1,0 +1,9 @@
+OpenRTP Tiles ("Open RPG Fantasy Tilesets", openRPG_Tilesets_5.24.22.zip)
+Artist: finalbossblues
+Source: https://finalbossblues.itch.io/openrtp-tiles
+
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+
+"The art in this pack is released to the public domain under a CC0 license. There are no restrictions whatsoever on its use, and no credit is necessary."
+
+Full legal text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
