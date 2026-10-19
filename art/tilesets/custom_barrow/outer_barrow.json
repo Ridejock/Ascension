@@ -1,0 +1,606 @@
+{
+ "tile_size": 16,
+ "license": "CC0 - original Emerald art (drawn from barrow_maps.txt)",
+ "tiles": {
+  "heath": {
+   "x": 0,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath2": {
+   "x": 16,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath3": {
+   "x": 32,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "grass": {
+   "x": 48,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "path": {
+   "x": 64,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "rocky": {
+   "x": 80,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_c": {
+   "x": 96,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_n": {
+   "x": 112,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_s": {
+   "x": 128,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_w": {
+   "x": 144,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_e": {
+   "x": 160,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_nw": {
+   "x": 176,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_ne": {
+   "x": 192,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_sw": {
+   "x": 208,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_se": {
+   "x": 224,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_inner_nw": {
+   "x": 240,
+   "y": 0,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_inner_ne": {
+   "x": 0,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_inner_sw": {
+   "x": 16,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_inner_se": {
+   "x": 32,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_diag_ne_sw": {
+   "x": 48,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "heath_in_grass_diag_nw_se": {
+   "x": 64,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_c": {
+   "x": 80,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_n": {
+   "x": 96,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_s": {
+   "x": 112,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_w": {
+   "x": 128,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_e": {
+   "x": 144,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_nw": {
+   "x": 160,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_ne": {
+   "x": 176,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_sw": {
+   "x": 192,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_se": {
+   "x": 208,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_inner_nw": {
+   "x": 224,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_inner_ne": {
+   "x": 240,
+   "y": 16,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_inner_sw": {
+   "x": 0,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_inner_se": {
+   "x": 16,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_diag_ne_sw": {
+   "x": 32,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "path_in_heath_diag_nw_se": {
+   "x": 48,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_c": {
+   "x": 64,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_n": {
+   "x": 80,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_s": {
+   "x": 96,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_w": {
+   "x": 112,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_e": {
+   "x": 128,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_nw": {
+   "x": 144,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_ne": {
+   "x": 160,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_sw": {
+   "x": 176,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_se": {
+   "x": 192,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_inner_nw": {
+   "x": 208,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_inner_ne": {
+   "x": 224,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_inner_sw": {
+   "x": 240,
+   "y": 32,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_inner_se": {
+   "x": 0,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_diag_ne_sw": {
+   "x": 16,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_grass_diag_nw_se": {
+   "x": 32,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_c": {
+   "x": 48,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_n": {
+   "x": 64,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_s": {
+   "x": 80,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_w": {
+   "x": 96,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_e": {
+   "x": 112,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_nw": {
+   "x": 128,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_ne": {
+   "x": 144,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_sw": {
+   "x": 160,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_se": {
+   "x": 176,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_inner_nw": {
+   "x": 192,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_inner_ne": {
+   "x": 208,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_inner_sw": {
+   "x": 224,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_inner_se": {
+   "x": 240,
+   "y": 48,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_diag_ne_sw": {
+   "x": 0,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "rocky_in_heath_diag_nw_se": {
+   "x": 16,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_nw": {
+   "x": 32,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_n": {
+   "x": 48,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_ne": {
+   "x": 64,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_w": {
+   "x": 80,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_c": {
+   "x": 96,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_e": {
+   "x": 112,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_sw": {
+   "x": 128,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_s": {
+   "x": 144,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_se": {
+   "x": 160,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "mound_entrance_3x2": {
+   "x": 176,
+   "y": 64,
+   "w": 48,
+   "h": 32
+  },
+  "cairn_small": {
+   "x": 224,
+   "y": 64,
+   "w": 16,
+   "h": 16
+  },
+  "cairn_medium_2x2": {
+   "x": 0,
+   "y": 96,
+   "w": 32,
+   "h": 32
+  },
+  "cairn_large_3x2": {
+   "x": 32,
+   "y": 96,
+   "w": 48,
+   "h": 32
+  },
+  "stone_tall_1x2": {
+   "x": 80,
+   "y": 96,
+   "w": 16,
+   "h": 32
+  },
+  "stone_medium_1x2": {
+   "x": 96,
+   "y": 96,
+   "w": 16,
+   "h": 32
+  },
+  "stone_short": {
+   "x": 112,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "stone_fallen_2x1": {
+   "x": 128,
+   "y": 96,
+   "w": 32,
+   "h": 16
+  },
+  "stone_ring": {
+   "x": 160,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "stone_ring_3x3": {
+   "x": 176,
+   "y": 96,
+   "w": 48,
+   "h": 48
+  },
+  "grave_slab": {
+   "x": 224,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "grave_stone": {
+   "x": 240,
+   "y": 96,
+   "w": 16,
+   "h": 16
+  },
+  "grave_wood": {
+   "x": 0,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_h": {
+   "x": 16,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_v": {
+   "x": 32,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_corner_nw": {
+   "x": 48,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_corner_ne": {
+   "x": 64,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_corner_sw": {
+   "x": 80,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_corner_se": {
+   "x": 96,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_t_s": {
+   "x": 112,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_t_n": {
+   "x": 128,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_end_w": {
+   "x": 144,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_end_e": {
+   "x": 160,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_end_n": {
+   "x": 176,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  },
+  "wall_post": {
+   "x": 192,
+   "y": 144,
+   "w": 16,
+   "h": 16
+  }
+ }
+}
