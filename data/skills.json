@@ -37,12 +37,13 @@
     {
       "id": "second_wind",
       "name": "Second Wind",
-      "description": "Catch your breath and knit a wound.",
+      "description": "Catch your breath and knit a wound; higher {mend.scaling} mends more. You are {open.status} while you recover.",
       "kind": "active",
       "target": "self",
-      "focusCost": 2,
+      "focusCost": 3,
       "effects": [
-        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8 }
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8, "scaling": "focus" },
+        { "id": "open", "trigger": "onUse", "op": "applyStatus", "status": "exposed" }
       ]
     },
     {
@@ -103,7 +104,7 @@
       "target": "self",
       "focusCost": 2,
       "effects": [
-        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 70 },
         {
           "id": "back",
           "trigger": "onUse",
@@ -332,14 +333,15 @@
     {
       "id": "rend",
       "name": "Rend",
-      "description": "Tear a wound open: {cut.status}. A foe that is already bleeding takes a deeper cut, and the bleeding stops.",
+      "description": "Tear a deep wound: {cut.status}, twice over. A foe that is already bleeding takes a deeper cut.",
       "kind": "active",
       "target": "enemy",
-      "focusCost": 3,
+      "focusCost": 2,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" },
-        { "id": "gash", "trigger": "onUse", "op": "damage", "power": 18, "ifTargetHas": "bleed", "consume": true },
-        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" },
+        { "id": "gash", "trigger": "onUse", "op": "damage", "power": 14, "ifTargetHas": "bleed" },
+        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" },
+        { "id": "cut2", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
       ]
     },
     {

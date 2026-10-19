@@ -369,9 +369,11 @@ void TestRiposteAndBulwark()
               battle.Player().Focus == 10,
           "riposte guards 50 percent and its flat reflect is power plus defense");
     const ActionResult bite = battle.EnemyAct();
-    Check(bite.Damage == 0 && battle.Enemy().Hp == 12 && battle.Player().Focus == 11 &&
+    // 28 back, less the wolf's defense (the fixture counts defense in full): 26, so 14 left.
+    Check(bite.Damage == 0 && battle.Enemy().Hp == 14 && battle.Player().Focus == 11 &&
               battle.Player().GuardPercent == 0,
-          "half of the blocked bite returns with the defense scaling, and bulwark pays focus");
+          "half of the blocked bite returns with the defense scaling, less the wolf's defense, "
+          "and bulwark pays focus");
 
     Battle plain(data, Sides({CombatantSide::Player, CombatantSide::Enemy, CombatantSide::Enemy}));
     Check(plain.Start("guardian", 5, "wolf", error), "the second guardian fight starts");
@@ -683,11 +685,11 @@ void TestWolfPack()
     Check(reflect.UseSkill("riposte").Accepted, "riposte is up");
     const ActionResult back = reflect.EnemyAct();
     Check(back.Damage == 0 && back.Text.find("returns") != std::string::npos &&
-              reflect.Enemies()[0].Hp == 12 && reflect.Enemies()[1].Hp == 40 &&
+              reflect.Enemies()[0].Hp == 14 && reflect.Enemies()[1].Hp == 40 &&
               reflect.Enemies()[2].Hp == 40,
           "the riposte lands on the wolf that bit, not the rest of the pack");
     Check(reflect.UseSkill("riposte").Accepted && reflect.EnemyAct().Accepted &&
-              reflect.Enemies()[1].Hp == 12 && reflect.Enemies()[0].Hp == 12,
+              reflect.Enemies()[1].Hp == 14 && reflect.Enemies()[0].Hp == 14,
           "a second riposte returns the next bite to wolf 2");
 
     Battle bleeding(
@@ -1495,6 +1497,106 @@ void TestFoeBuffAlert()
           "the defense alert uses the stat's name from stats.json");
 }
 
+// One riposte against the sample wolf. The flat return is 28; defense comes off that.
+struct CounterBlow {
+    bool Landed = false;
+    i32 WolfHp = 0;
+    std::string Text;
+};
+
+CounterBlow RiposteTheWolf(Database& data)
+{
+    CounterBlow blow;
+    Battle battle(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    std::string error;
+    if (!battle.Start("guardian", 5, "wolf", error) || !battle.UseSkill("riposte").Accepted)
+        return blow;
+    const ActionResult bite = battle.EnemyAct();
+    blow.Landed = bite.Accepted && bite.Damage == 0;
+    blow.WolfHp = battle.Enemy().Hp;
+    blow.Text = bite.Text;
+    return blow;
+}
+
+void TestCounterMeetsDefense()
+{
+    Database sample(kSample);
+    Check(sample.Load(), "sample data loads");
+    const CounterBlow ordinary = RiposteTheWolf(sample);
+    Check(ordinary.Landed && ordinary.WolfHp == 14 &&
+              ordinary.Text == "Wolf uses Bite for 0. 26 returns.",
+          "the wolf's defense of 2 comes off the 28 sent back");
+
+    TempCopy naked;
+    ReplaceInFile(naked.Path / "enemies.json", "\"strength\": 5,\n        \"defense\": 2,",
+                  "\"strength\": 5,\n        \"defense\": 0,");
+    Database undefended(naked.Path);
+    Check(undefended.Load(), "a wolf with no defense loads");
+    const CounterBlow open = RiposteTheWolf(undefended);
+    Check(open.Landed && open.WolfHp == 12 && open.Text == "Wolf uses Bite for 0. 28 returns.",
+          "with no defense the whole counter lands");
+
+    TempCopy plated;
+    ReplaceInFile(plated.Path / "enemies.json", "\"strength\": 5,\n        \"defense\": 2,",
+                  "\"strength\": 5,\n        \"defense\": 40,");
+    Database shelled(plated.Path);
+    Check(shelled.Load(), "a heavily armored wolf loads");
+    const CounterBlow stopped = RiposteTheWolf(shelled);
+    Check(stopped.Landed && stopped.WolfHp == 39 &&
+              stopped.Text == "Wolf uses Bite for 0. 1 returns.",
+          "defense can reduce a counter only as far as minimum damage");
+}
+
+void TestSecondWindExposed()
+{
+    // The frozen sample still has the flat heal. This copy is the shipped shape: 8 plus
+    // Focus, and Exposed on the user. The directory is still ASCENSION_DATA_DIR.
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "skills.json",
+                  "\"focusCost\": 2,\n"
+                  "      \"effects\": [\n"
+                  "        { \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", "
+                  "\"power\": 8 }\n"
+                  "      ]",
+                  "\"focusCost\": 3,\n"
+                  "      \"effects\": [\n"
+                  "        { \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", "
+                  "\"power\": 8, \"scaling\": \"focus\" },\n"
+                  "        { \"id\": \"open\", \"trigger\": \"onUse\", \"op\": \"applyStatus\", "
+                  "\"status\": \"exposed\" }\n"
+                  "      ]");
+    Database data(copy.Path);
+    Check(data.Load(), "a focus-scaled second wind loads from the frozen sample");
+    std::string error;
+
+    Battle low(data, Sides({CombatantSide::Player}));
+    Check(low.Start("fighter", 1, "wolf", error), "the focus-4 fight starts");
+    Check(low.Player().Stats.Focus == 4, "the fighter's Focus is 4");
+    low.SetPlayerHp(20);
+    const ActionResult mend = low.UseSkill("second_wind");
+    Check(mend.Accepted && mend.Healing == 12 && low.Player().Hp == 32 &&
+              Holds(low.Player(), "exposed") && low.Player().Statuses.size() == 1 &&
+              low.Player().Statuses[0].TurnsLeft == 2 && low.Enemy().Statuses.empty(),
+          "second wind heals 8 plus Focus and leaves its user Exposed");
+
+    Battle high(data, Sides({CombatantSide::Player}));
+    StatBlock focused;
+    focused.Vitality = 18;
+    focused.Strength = 8;
+    focused.Defense = 6;
+    focused.Agility = 5;
+    focused.Focus = 9;
+    high.SetBaseStats(focused);
+    Check(high.Start("fighter", 1, "wolf", error), "the focus-9 fight starts");
+    Check(high.Player().Stats.Focus == 9 && high.Player().MaxHp == 72,
+          "raising Focus leaves max health alone");
+    high.SetPlayerHp(20);
+    const ActionResult more = high.UseSkill("second_wind");
+    Check(more.Accepted && more.Healing == 17 && high.Player().Hp == 37 &&
+              Holds(high.Player(), "exposed"),
+          "a higher Focus mends more");
+}
+
 } // namespace
 
 int main()
@@ -1525,6 +1627,8 @@ int main()
     TestSteadfastBlocksStun();
     TestShellDefenseExpires();
     TestFoeBuffAlert();
+    TestCounterMeetsDefense();
+    TestSecondWindExposed();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

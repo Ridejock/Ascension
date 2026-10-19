@@ -856,6 +856,15 @@ Battle::HitLanded Battle::LandHit(CombatantState& attacker, CombatantState& defe
     const i32 blocked = raw > taken ? raw - taken : 0;
     if (&attacker != &defender && blocked > 0 && defender.ReflectPercent > 0) {
         landed.Reflected = ReflectedDamage(blocked, defender.ReflectPercent, defender.ReflectFlat);
+        // The blow sent back meets the attacker's defense the way any hit does: the defense
+        // term comes off, the result stays at least MinDamage, and a taken-percent status
+        // is applied after that.
+        const i32 armor =
+            Scaled(DefenseOf(attacker), m_Rules.DefenseNumerator, m_Rules.DefenseDenominator);
+        i32 returned = landed.Reflected - armor;
+        if (returned < m_Rules.MinDamage)
+            returned = m_Rules.MinDamage;
+        landed.Reflected = returned;
         const i32 back = StatusTakenPercent(attacker, catalog);
         if (back != 0)
             landed.Reflected = ScalePercent(landed.Reflected, 100 + back);
