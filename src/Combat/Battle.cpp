@@ -365,7 +365,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     }
 
     const CombatRules rules = m_Data->GetRules();
-    m_HeroGrants = m_Data->HeroGrants(*klass, m_WornItems);
+    m_HeroGrants = m_Data->HeroGrants(*klass, m_WornItems, m_PickedSkills);
     CombatantState player;
     player.Id = klass->Id;
     player.Name = klass->Name;
@@ -1007,6 +1007,11 @@ void Battle::SetGear(StatBlock gear)
 void Battle::SetWornItems(std::vector<std::string> itemIds)
 {
     m_WornItems = std::move(itemIds);
+}
+
+void Battle::SetPickedSkills(std::vector<std::string> skillIds)
+{
+    m_PickedSkills = std::move(skillIds);
 }
 
 void Battle::SetBaseStats(StatBlock stats)

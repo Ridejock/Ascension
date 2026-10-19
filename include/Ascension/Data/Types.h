@@ -123,10 +123,11 @@ struct SkillDef {
 
 // One class, enemy, or item grant, resolved to its own copy at load time. Id is the catalog
 // skill id, which is also the key skill ranks use. Resolved is the recipe, then the skill tune,
-// then this grant's tune. Battle reads the copy.
+// then this grant's tune. Battle reads the copy. Tuned is set when the grant listed a tune.
 struct SkillGrant {
     std::string Id;
     SkillDef Resolved;
+    bool Tuned = false;
 };
 
 // A named condition from statuses.json. Zero fields are unused. Stacks up to MaxStacks, and
@@ -242,6 +243,16 @@ struct ProgressRules {
 // Skills and Passives are what this class itself grants. Starter is set on a base class the
 // player may return to when a build is reset. The list is read from data, so another starter
 // is a JSON flag, not a code change.
+//
+// One skill choice a class offers once the hero reaches Level. The hero keeps one option for
+// the run. Each option is a grant like a class skill: a catalog id, or an id with a tune. An
+// option whose id the class already grants is an upgrade; its copy merges into that skill,
+// the best value wins per field, and the one rank is shared.
+struct SkillPick {
+    i32 Level = 0;
+    std::vector<SkillGrant> Options;
+};
+
 struct ClassDef {
     std::string Id;
     std::string Name;
@@ -251,6 +262,7 @@ struct ClassDef {
     StatBlock Growth;
     std::vector<SkillGrant> Skills;
     std::vector<SkillGrant> Passives;
+    std::vector<SkillPick> Picks; // in level order
     std::string EvolvesFrom;
     i32 EvolveLevel = 0;
     bool Starter = false;

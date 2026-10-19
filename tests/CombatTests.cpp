@@ -349,9 +349,17 @@ void TestFocusRegen()
 
 void TestRiposteAndBulwark()
 {
-    Database data(kSample);
+    // Riposte is a pick on the shipped guardian, not a class grant. This copy takes it off the
+    // class and puts it on the charm, so the fight does not depend on which option ships.
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "classes.json", "\"skills\": [\"shield_wall\", \"riposte\"]",
+                  "\"skills\": [\"shield_wall\"]");
+    ReplaceInFile(copy.Path / "items.json", "\"bonus\": { \"agility\": 2 },",
+                  "\"bonus\": { \"agility\": 2 }, \"grants\": [\"riposte\"],");
+    Database data(copy.Path);
     Check(data.Load(), "sample data loads");
     Battle battle(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
+    battle.SetWornItems({"wolfhide_charm"});
     std::string error;
     Check(battle.Start("guardian", 5, "wolf", error), "the guardian meets the wolf");
     Check(battle.Player().Stats.Defense == 18 && battle.Player().MaxFocus == 12,

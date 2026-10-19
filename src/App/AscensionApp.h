@@ -16,8 +16,11 @@ namespace Ascension {
 // One hero against an encounter. Wins grant the sum of each enemy's XP and gold. Between
 // fights, the shop from shop.json
 // buys and sells. At an evolution level the next fight waits until the player picks a path,
-// and that screen is the only place a build reset clears skill ranks. Consumables in the bag
-// are extra turn actions. C opens every stack; number keys still cover the ones that fit.
+// and that screen is the only place a build reset clears skill ranks. A class may also offer
+// a skill pick at a later level; that screen uses the same number keys and has no reset.
+// Consumables in the bag are extra turn actions. C opens every stack; number keys still
+// cover the ones that fit. Eight number keys is the cap, so a full skill bar leaves drinks
+// on C only.
 class AscensionApp : public Emerald::Application {
 public:
     AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options);
@@ -46,8 +49,8 @@ private:
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // The icon sheet and its accent layer. Nearest filtering, so a scaled pixel stays a square.
     void EnsureIcons();
-    // --choose, once the evolution choice is open and a fight is not underway.
-    // False when that pick failed and the run is stopping.
+    // --choose, once the evolution choice is open, then --pick for each open skill pick.
+    // Both wait until a fight is not underway. False when a pick failed and the run is stopping.
     bool TakeAutoPath();
     // One scripted key per frame. The press goes through OnEvent, so the window
     // does not need focus. The run ends after the last key unless --frames is longer.
@@ -57,6 +60,7 @@ private:
     PlaytestOptions m_Play;
     std::ofstream m_Transcript;
     usize m_KeyCursor = 0;
+    usize m_PickCursor = 0;
 
     Database m_Data;
     Hero m_Hero;

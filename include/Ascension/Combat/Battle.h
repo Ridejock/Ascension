@@ -196,6 +196,9 @@ public:
     // SetGear: the next Start, and ApplyData, read them. Ids are kept, so a reload resolves
     // them again; an id that is gone adds nothing.
     void SetWornItems(std::vector<std::string> itemIds);
+    // Skill ids the hero kept from the class's picks. Same timing as SetWornItems. An id the
+    // class does not offer adds nothing.
+    void SetPickedSkills(std::vector<std::string> skillIds);
 
     // Replaces the class stat line (level growth and class grants) before gear and passives.
     // The sandbox passes the hero's attributes. Leave it unset and Start keeps the class formula.
@@ -312,6 +315,7 @@ private:
     i32 m_PowerPerRank = 0;
     StatBlock m_Gear;
     std::vector<std::string> m_WornItems;
+    std::vector<std::string> m_PickedSkills;
     // Merged hero skills for this fight. Rebuilt in Build. Pointers into it last until the
     // next Build.
     std::vector<HeroGrant> m_HeroGrants;

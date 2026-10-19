@@ -506,6 +506,182 @@ void TestNextFoeStaysWhileChoosing()
     Check(hero.IndexAfterNextFoe(2, 0) == 2, "an empty roster does not move");
 }
 
+// The player acts, then the same seat is returned. Guard checks do not need the foe to move.
+class PlayerFirst final : public TurnModel {
+public:
+    void Reset() override {}
+
+    TurnSeat Next(std::span<const TurnSeat>) override { return {}; }
+
+    void Advance() override {}
+};
+
+i32 CountId(const std::vector<std::string>& ids, std::string_view id)
+{
+    i32 count = 0;
+    for (const std::string& row : ids) {
+        if (row == id)
+            ++count;
+    }
+    return count;
+}
+
+bool SpendPool(Hero& hero, std::string& error)
+{
+    while (hero.ClassPool() > 0) {
+        if (!hero.SpendClassPoint("vitality", error))
+            return false;
+    }
+    return true;
+}
+
+void AddRally(const fs::path& dir)
+{
+    ReplaceInFile(dir / "skills.json", "      \"id\": \"stone_skin\",",
+                  "      \"id\": \"rally\",\n"
+                  "      \"name\": \"Rally\",\n"
+                  "      \"description\": \"Raise a guard and close a small wound.\",\n"
+                  "      \"kind\": \"active\",\n"
+                  "      \"target\": \"self\",\n"
+                  "      \"focusCost\": 3,\n"
+                  "      \"effects\": [\n"
+                  "        { \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", "
+                  "\"amount\": 50 },\n"
+                  "        { \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", "
+                  "\"power\": 12 }\n"
+                  "      ]\n"
+                  "    },\n"
+                  "    {\n"
+                  "      \"id\": \"stone_skin\",");
+}
+
+void TestSkillPicks()
+{
+    {
+        TempCopy copy;
+        AddRally(copy.Path);
+        ReplaceInFile(copy.Path / "classes.json",
+                      "\"skills\": [\"shield_wall\", \"riposte\"],\n      \"passives\": "
+                      "[\"bulwark\"]",
+                      "\"skills\": [\"shield_wall\"],\n      \"passives\": [\"bulwark\"],\n"
+                      "      \"picks\": [\n"
+                      "        { \"level\": 6, \"options\": [\"riposte\", \"cleave\"] },\n"
+                      "        { \"level\": 8, \"options\": [\"rally\", { \"skill\": \"brace\", "
+                      "\"tune\": { \"ward\": { \"amount\": 75 } } }] }\n"
+                      "      ]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "guardian picks load");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        Hero hero = StartHero(data);
+        Check(!hero.PickPending() && hero.PickedIds().empty(), "level 1 has no pick");
+        hero.GrantXp(62);
+        Check(hero.Level() == 5 && hero.ChoicePending() && !hero.PickPending(),
+              "level 5 opens the path and no pick");
+        std::string why;
+        Check(hero.Choose("guardian", why), "guardian is chosen");
+        const XpGrant sixth = hero.GrantXp(126 - 62);
+        Check(hero.Level() == 6 && sixth.PickOpened && hero.PickPending(), "level 6 opens a pick");
+        const std::vector<std::string> first = hero.PickOptions();
+        Check(first.size() == 2 && first[0] == "riposte" && first[1] == "cleave",
+              "level 6 offers riposte then cleave");
+        const char* blocked = hero.NextFightBlock();
+        Check(blocked != nullptr && std::string(blocked) == "Pick a skill before the next fight.",
+              "the next fight waits on the pick");
+        Check(hero.IndexAfterNextFoe(0, 4) == 0, "N does not advance while a pick is open");
+        Check(!hero.Pick("rally", why), "a later pick's option is refused");
+        CheckHas(why, "rally", "the refusal names the skill");
+        Check(hero.Pick(first[0], why), "the first option is kept");
+        Check(!hero.PickPending() && hero.NextFightBlock() == nullptr &&
+                  Contains(hero.SkillIds(), "riposte") && hero.PickedIds().size() == 1,
+              "the kept skill is listed and the fight may start");
+        Check(!hero.ResetBuild(why), "a reset is refused once the path is chosen");
+        CheckHas(why, "only when a path is offered", "the refusal says when a reset is allowed");
+        Check(hero.NoteUse("brace") == 1 && hero.NoteUse("brace") == 1 &&
+                  hero.NoteUse("brace") == 2,
+              "three uses of brace reach rank 2");
+        const XpGrant eighth = hero.GrantXp(206 - 126);
+        Check(hero.Level() == 8 && eighth.PickOpened && hero.PickPending(),
+              "level 8 opens the second pick");
+        const std::vector<std::string> second = hero.PickOptions();
+        Check(second.size() == 2 && second[1] == "brace", "the second option upgrades brace");
+        Check(hero.Pick(second[1], why) && hero.PickedIds().size() == 2 &&
+                  hero.PickedIds()[0] == "riposte" && hero.PickedIds()[1] == "brace",
+              "both kept ids stay in pick order");
+        Check(hero.ApplyData(why) && hero.PickedIds().size() == 2, "ApplyData keeps the picks");
+        const std::vector<std::string> skills = hero.SkillIds();
+        Check(CountId(skills, "brace") == 1 && CountId(skills, "riposte") == 1 &&
+                  !Contains(skills, "rally") && hero.RankOf("brace") == 2 &&
+                  hero.UsesOf("brace") == 3,
+              "an upgrade shares the rank and is not listed twice");
+
+        Battle battle(data, std::make_unique<PlayerFirst>());
+        battle.SetPickedSkills(hero.PickedIds());
+        Check(battle.Start("guardian", 8, "wolf", why), "the upgraded brace fight starts");
+        Check(battle.UseSkill("brace").Accepted && battle.Player().GuardPercent == 75,
+              "the kept tune raises brace to 75 percent");
+
+        ReplaceInFile(copy.Path / "classes.json", "\"vitality\": 18", "\"vitality\": 19");
+        Reload(data);
+        Check(hero.ApplyData(why) && hero.PickedIds().size() == 2 &&
+                  Contains(hero.PickedIds(), "riposte"),
+              "a reload that still offers the options keeps the picks");
+        ReplaceInFile(copy.Path / "classes.json", "\"options\": [\"riposte\", \"cleave\"]",
+                      "\"options\": [\"bite\", \"cleave\"]");
+        Reload(data);
+        Check(hero.ApplyData(why) && hero.PickedIds().size() == 1 &&
+                  hero.PickedIds()[0] == "brace" && hero.PickPending(),
+              "dropping a kept option reopens that pick");
+        const std::vector<std::string> reopened = hero.PickOptions();
+        Check(reopened.size() == 2 && reopened[0] == "bite" && reopened[1] == "cleave",
+              "the reopened pick lists the options still in the file");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "classes.json",
+                      "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"],\n"
+                      "      \"passives\": []",
+                      "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"],\n"
+                      "      \"passives\": [],\n"
+                      "      \"picks\": [\n"
+                      "        { \"level\": 3, \"options\": [\"cleave\", \"riposte\"] }\n"
+                      "      ]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a fighter pick at level 3 loads");
+        Hero hero = StartHero(data);
+        const XpGrant third = hero.GrantXp(26);
+        Check(hero.Level() == 3 && third.PickOpened && hero.PickPending(),
+              "level 3 opens the fighter pick");
+        std::string why;
+        const std::string kept = hero.PickOptions().empty() ? std::string() : hero.PickOptions()[0];
+        Check(kept == "cleave" && hero.Pick(kept, why), "cleave is kept");
+        const XpGrant fifth = hero.GrantXp(62 - 26);
+        Check(hero.Level() == 5 && fifth.ChoiceOpened && !fifth.PickOpened &&
+                  hero.ChoicePending() && hero.PickedIds().size() == 1,
+              "level 5 opens the path with the pick still kept");
+        Check(hero.ResetBuild(why) && why.empty() && hero.PickedIds().empty() &&
+                  hero.ChoosingStarter(),
+              "a reset clears picks");
+        Check(!hero.PickPending(), "no pick is offered while the starter is still open");
+        Check(hero.ChooseStarter("fighter", why) && SpendPool(hero, why),
+              "the fighter is chosen and the class pool is spent");
+        Check(hero.ChoicePending() && hero.PickPending() &&
+                  std::string(hero.NextFightBlock()) == "Choose a path before the next fight.",
+              "the path is still the block, and the level-3 pick is open again");
+        Check(hero.Choose("guardian", why) && hero.PickPending() && hero.PickedIds().empty(),
+              "the parent pick reopens after the new path");
+        const std::vector<std::string> options = hero.PickOptions();
+        Check(options.size() == 2 && options[0] == "cleave" && options[1] == "riposte",
+              "the reopened pick is still cleave then riposte");
+        Check(hero.Pick("riposte", why) && CountId(hero.SkillIds(), "riposte") == 1,
+              "keeping the parent's riposte does not list the class skill twice");
+        Hero fresh = StartHero(data);
+        Check(fresh.PickedIds().empty() && !fresh.PickPending(), "Start clears picks");
+    }
+}
+
 void TestStartUsesFirstStarter()
 {
     TempCopy copy;
@@ -543,6 +719,7 @@ int main()
     TestResetKeepsPoints();
     TestResetClearsItemPractice();
     TestNextFoeStaysWhileChoosing();
+    TestSkillPicks();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

@@ -408,6 +408,10 @@ void MergeSkill(SkillDef& held, const SkillDef& incoming, const std::vector<std:
 
 void PushOrigin(HeroGrant& held, GrantSource source, const std::string& sourceId)
 {
+    for (const GrantOrigin& origin : held.Origins) {
+        if (origin.Source == source && origin.Id == sourceId)
+            return;
+    }
     GrantOrigin origin;
     origin.Source = source;
     origin.Id = sourceId;
@@ -1086,8 +1090,10 @@ bool ReadOneGrant(const Parsed& parsed, const Json& entry, SkillKind expected, b
             return false;
         }
         const auto found = entry.find("tune");
-        if (found != entry.end())
+        if (found != entry.end()) {
             tune = &(*found);
+            out.Tuned = true;
+        }
     } else {
         error = "a grant must be a skill id or an object";
         return false;
@@ -1326,6 +1332,99 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool GrantsId(const std::vector<SkillGrant>& grants, std::string_view id)
+{
+    for (const SkillGrant& grant : grants) {
+        if (grant.Id == id)
+            return true;
+    }
+    return false;
+}
+
+bool OfferedBy(const std::vector<SkillPick>& picks, std::string_view id)
+{
+    for (const SkillPick& pick : picks) {
+        if (GrantsId(pick.Options, id))
+            return true;
+    }
+    return false;
+}
+
+// An option the class or its parent already grants must carry a tune, or keeping it adds
+// nothing. The same skill id is not offered twice along the class chain.
+bool CheckPickOptions(const ClassDef& klass, const ClassDef* parent, const std::string& where,
+                      std::string& error)
+{
+    for (const SkillPick& pick : klass.Picks) {
+        for (const SkillGrant& option : pick.Options) {
+            const bool held = GrantsId(klass.Skills, option.Id) ||
+                              (parent != nullptr && GrantsId(parent->Skills, option.Id));
+            if (held && !option.Tuned) {
+                error = where + ": pick at level " + std::to_string(pick.Level) + ": " +
+                        Quote(option.Id) + " is already a class skill; give the option a tune";
+                return false;
+            }
+            if (parent != nullptr && OfferedBy(parent->Picks, option.Id)) {
+                error = where + ": pick at level " + std::to_string(pick.Level) + ": " +
+                        Quote(option.Id) + " is offered by an earlier pick";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// "picks": [{ "level": 6, "options": ["riposte", { "skill": "shield_wall", "tune": {...} }] }].
+// Levels rise, and an evolution's picks come after its evolve level. Each pick offers two or
+// three active grants. An id appears in one pick of this class only. The tune check against
+// the parent waits for the whole file (CheckPickOptions), since the parent may come later.
+bool ReadPicks(const Parsed& parsed, const Json& entry, ClassDef& klass, std::string& error)
+{
+    const auto list = entry.find("picks");
+    if (list == entry.end())
+        return true;
+    if (!list->is_array()) {
+        error = "'picks' must be a list";
+        return false;
+    }
+    i32 lastLevel = klass.IsEvolution() ? klass.EvolveLevel : 1;
+    for (const Json& pickEntry : *list) {
+        if (!pickEntry.is_object()) {
+            error = "a pick must be an object";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(pickEntry, {"level", "options"}, unknown)) {
+            error = "pick: unknown field " + Quote(unknown);
+            return false;
+        }
+        SkillPick pick;
+        if (!RequireInt(pickEntry, "level", lastLevel + 1, kMaxLevel, pick.Level, error)) {
+            error = "pick: " + error + " (picks rise in level, after the evolve level)";
+            return false;
+        }
+        const std::string where = "pick at level " + std::to_string(pick.Level) + ": ";
+        if (!ReadGrantList(parsed, pickEntry, "options", SkillKind::Active, true, true,
+                           pick.Options, error)) {
+            error = where + error;
+            return false;
+        }
+        if (pick.Options.size() < 2 || pick.Options.size() > 3) {
+            error = where + "'options' must list two or three skills";
+            return false;
+        }
+        for (const SkillGrant& option : pick.Options) {
+            if (OfferedBy(klass.Picks, option.Id)) {
+                error = where + Quote(option.Id) + " is offered by an earlier pick";
+                return false;
+            }
+        }
+        lastLevel = pick.Level;
+        klass.Picks.push_back(std::move(pick));
+    }
+    return true;
+}
+
 bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("classes");
@@ -1362,7 +1461,7 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
         if (evolution) {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "evolvesFrom", "evolveLevel", "bonus",
-                            "growth", "skills", "passives", "starter"},
+                            "growth", "skills", "passives", "picks", "starter"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             if (!RequireString(entry, "evolvesFrom", klass.EvolvesFrom, error))
@@ -1380,7 +1479,7 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
         } else {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "stats", "growth", "skills", "passives",
-                            "starter"},
+                            "picks", "starter"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string why;
@@ -1423,6 +1522,8 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
             return fail("an evolution must add at least one skill");
         if (evolution && klass.Passives.empty())
             return fail("an evolution must add at least one passive");
+        if (!ReadPicks(parsed, entry, klass, why))
+            return fail(why);
 
         if (!RequireString(entry, "name", klass.Name, error) ||
             !RequireString(entry, "description", klass.Description, error))
@@ -2419,6 +2520,10 @@ bool DescriptionsResolve(const Parsed& parsed, std::string& error)
             return false;
         if (!CheckGrants(base, klass.Skills, error) || !CheckGrants(base, klass.Passives, error))
             return false;
+        for (const SkillPick& pick : klass.Picks) {
+            if (!CheckGrants(base, pick.Options, error))
+                return false;
+        }
     }
     for (const EnemyDef& enemy : parsed.Enemies) {
         TextScope scope = base;
@@ -2465,8 +2570,15 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
         if (!GrantsKnown(parsed, klass.Skills, classWhere, error) ||
             !GrantsKnown(parsed, klass.Passives, classWhere, error))
             return false;
-        if (!klass.IsEvolution())
+        for (const SkillPick& pick : klass.Picks) {
+            if (!GrantsKnown(parsed, pick.Options, classWhere, error))
+                return false;
+        }
+        if (!klass.IsEvolution()) {
+            if (!CheckPickOptions(klass, nullptr, classWhere, error))
+                return false;
             continue;
+        }
         const ClassDef* parent = FindId(parsed.Classes, klass.EvolvesFrom);
         if (parent == nullptr) {
             error = classWhere + ": evolvesFrom " + Quote(klass.EvolvesFrom) + " does not exist";
@@ -2477,6 +2589,8 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
                     " is an evolution; evolve from the base class";
             return false;
         }
+        if (!CheckPickOptions(klass, parent, classWhere, error))
+            return false;
         for (const SkillGrant& grant : klass.Skills) {
             for (const SkillGrant& parentGrant : parent->Skills) {
                 if (grant.Id == parentGrant.Id) {
@@ -2846,8 +2960,21 @@ std::vector<const SkillDef*> Database::Passives(const ClassDef& klass) const
     return out;
 }
 
+std::vector<const SkillPick*> Database::PicksOf(const ClassDef& klass) const
+{
+    std::vector<const SkillPick*> out;
+    if (klass.IsEvolution()) {
+        if (const ClassDef* parent = FindClass(klass.EvolvesFrom))
+            out = PicksOf(*parent);
+    }
+    for (const SkillPick& pick : klass.Picks)
+        out.push_back(&pick);
+    return out;
+}
+
 std::vector<HeroGrant> Database::HeroGrants(const ClassDef& klass,
-                                            std::span<const std::string> wornItemIds) const
+                                            std::span<const std::string> wornItemIds,
+                                            std::span<const std::string> pickedIds) const
 {
     std::vector<HeroGrant> out;
     const auto add = [&](const SkillDef& skill, GrantSource source, const std::string& sourceId) {
@@ -2865,6 +2992,14 @@ std::vector<HeroGrant> Database::HeroGrants(const ClassDef& klass,
     };
     for (const SkillDef* active : ActiveSkills(klass))
         add(*active, GrantSource::Class, klass.Id);
+    for (const SkillPick* pick : PicksOf(klass)) {
+        for (const SkillGrant& option : pick->Options) {
+            for (const std::string& picked : pickedIds) {
+                if (picked == option.Id)
+                    add(option.Resolved, GrantSource::Class, klass.Id);
+            }
+        }
+    }
     for (const SkillDef* passive : Passives(klass))
         add(*passive, GrantSource::Class, klass.Id);
     for (const std::string& wornId : wornItemIds) {

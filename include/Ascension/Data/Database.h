@@ -26,10 +26,10 @@ struct GrantOrigin {
 };
 
 // One skill the hero has in a fight. One entry per skill id, in first-source order: class
-// actives, class passives, then each worn item. Skill is the merged copy. Each tunable
-// numeric field keeps the best value across every source; which way is better is the
-// "better" table in effects.json. A non-numeric tune (target, stat, scaling, status) keeps
-// the first source. Origins lists every source that granted the id, first source first.
+// actives, kept pick options, class passives, then each worn item. Skill is the merged copy.
+// Each tunable numeric field keeps the best value across every source; which way is better
+// is the "better" table in effects.json. A non-numeric tune (target, stat, scaling, status)
+// keeps the first source. Origins lists every source that granted the id, first source first.
 // This is a snapshot: ask again after a reload.
 struct HeroGrant {
     SkillDef Skill;
@@ -105,10 +105,17 @@ public:
     [[nodiscard]] std::vector<const SkillDef*> ActiveSkills(const ClassDef& klass) const;
     [[nodiscard]] std::vector<const SkillDef*> Passives(const ClassDef& klass) const;
 
-    // Class grants, then each worn item's grants. Unknown item ids add nothing. Ranks are
-    // keyed by skill id, so a merged copy keeps the one rank already earned.
-    [[nodiscard]] std::vector<HeroGrant> HeroGrants(const ClassDef& klass,
-                                                    std::span<const std::string> wornItemIds) const;
+    // Class actives, then the kept pick options, then class passives, then each worn item's
+    // grants. `pickedIds` are option skill ids from this class's picks (parent first); an id
+    // no pick offers adds nothing. Unknown item ids add nothing. Ranks are keyed by skill id,
+    // so a merged copy keeps the one rank already earned. An option the class already grants
+    // merges into that skill: the best value wins per field.
+    [[nodiscard]] std::vector<HeroGrant>
+    HeroGrants(const ClassDef& klass, std::span<const std::string> wornItemIds,
+               std::span<const std::string> pickedIds = {}) const;
+
+    // The picks this class offers, parent first. Pointers last until the next reload.
+    [[nodiscard]] std::vector<const SkillPick*> PicksOf(const ClassDef& klass) const;
 
     // Stats at `level` (clamped to 1..99). A base class is Stats + Growth * (level - 1). An
     // evolution below its EvolveLevel is still the parent. At the evolve level and after, it is

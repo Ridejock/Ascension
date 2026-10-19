@@ -39,7 +39,11 @@
         "focus": 1
       },
       "skills": ["rage", "cleave"],
-      "passives": ["bloodlust"]
+      "passives": ["bloodlust"],
+      "picks": [
+        { "level": 6, "options": ["rend", { "skill": "brace", "tune": { "ward": { "amount": 75 } } }] },
+        { "level": 8, "options": ["rally", { "skill": "heavy_blow", "tune": { "hit": { "power": 15 } } }] }
+      ]
     },
     {
       "id": "guardian",
@@ -58,8 +62,12 @@
         "agility": 1,
         "focus": 1
       },
-      "skills": ["shield_wall", "riposte", "shield_bash"],
-      "passives": ["bulwark"]
+      "skills": ["shield_bash"],
+      "passives": ["bulwark"],
+      "picks": [
+        { "level": 6, "options": ["riposte", { "skill": "shield_wall", "tune": { "ward": { "amount": 90 } } }] },
+        { "level": 8, "options": ["rally", { "skill": "rage", "tune": { "focusCost": 2 } }] }
+      ]
     }
   ]
 }

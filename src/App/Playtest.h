@@ -51,6 +51,8 @@ struct PlaytestOptions {
     std::vector<std::string> Equip;
     std::vector<SDL_Scancode> Keys;
     std::string ChooseId;
+    // --pick, in the order they were passed. Applied one open pick at a time.
+    std::vector<std::string> PickIds;
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
@@ -67,6 +69,9 @@ struct PlaytestSetup {
 
 // What PickEvolution did. Waiting means the choice is not open (or no id was set).
 enum class EvolutionPick { Waiting, Chosen, Failed };
+
+// What PickSkillOption did. Waiting means no skill pick is open (or no id was set).
+enum class SkillOptionPick { Waiting, Chosen, Failed };
 
 // `args[0]` is the program name and is skipped. Unknown flags fail and name the flag.
 // A bad key name fails here and names the key. Ids are checked later, against the data.
@@ -88,14 +93,19 @@ enum class EvolutionPick { Waiting, Chosen, Failed };
 [[nodiscard]] std::string MarkedTargetLine(std::string_view name);
 
 // Starts the hero and the bag, then applies level, class, gold, items, gear, and the foe.
-// Unknown ids fail and the message names the id. Does not pick --choose; call PickEvolution
-// when a choice is open, including once at startup before the first fight.
+// Unknown ids fail and the message names the id. Does not pick --choose or --pick; call
+// PickEvolution when a choice is open, and PickSkillOption when a skill pick is open,
+// including once at startup before the first fight.
 [[nodiscard]] bool ApplyPlaytest(Hero& hero, Inventory& inventory, const Database& data,
                                  const PlaytestOptions& options, PlaytestSetup& setup,
                                  std::string& error);
 
 // Picks `classId` when an evolution choice is open. A miss names the id.
 [[nodiscard]] EvolutionPick PickEvolution(Hero& hero, std::string_view classId, std::string& error);
+
+// Keeps `skillId` when a skill pick is open. A miss names the id.
+[[nodiscard]] SkillOptionPick PickSkillOption(Hero& hero, std::string_view skillId,
+                                              std::string& error);
 
 // Loads the data folder, checks every id, and checks that the transcript can be opened.
 // Failure is the process error for a bad playtest command, before the window is created.
