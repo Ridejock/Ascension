@@ -279,6 +279,10 @@ bool Inventory::Buy(std::string_view itemId, std::string& error)
         error = "that item is gone";
         return false;
     }
+    if (!ItemIsOffered(*item, m_Defeated)) {
+        error = shop->Keeper + " will not sell that yet";
+        return false;
+    }
     if (m_Gold < item->Value) {
         error = "not enough gold";
         return false;
@@ -442,6 +446,37 @@ bool Inventory::Take(i32 bagIndex, std::string& error)
     }
     error.clear();
     return true;
+}
+
+void Inventory::SetDefeated(std::vector<std::string> defeated)
+{
+    m_Defeated = std::move(defeated);
+}
+
+void Inventory::ExportBag(BagRecord& out) const
+{
+    out.Gold = m_Gold;
+    out.Bag = m_Bag;
+    out.Weapon = m_Weapon;
+    out.Offhand = m_Offhand;
+    out.Armor = m_Armor;
+    out.Accessory = m_Accessory;
+}
+
+bool Inventory::ImportBag(const BagRecord& in, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the bag is not ready";
+        return false;
+    }
+    if (!SetGold(in.Gold, error))
+        return false;
+    m_Weapon = in.Weapon;
+    m_Offhand = in.Offhand;
+    m_Armor = in.Armor;
+    m_Accessory = in.Accessory;
+    m_Bag = in.Bag;
+    return ApplyData(error);
 }
 
 } // namespace Ascension

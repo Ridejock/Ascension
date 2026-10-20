@@ -43,6 +43,8 @@ struct ResolvedFight {
 struct PlaytestOptions {
     std::filesystem::path DataDir;
     std::filesystem::path Transcript;
+    // Empty uses the per-user save folder. A set path is where this run reads and writes.
+    std::filesystem::path SaveDir;
     std::optional<i32> Level;
     std::string ClassId;
     FightRequest Fight;
@@ -58,6 +60,13 @@ struct PlaytestOptions {
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
+
+    // True when the command builds a hero of its own. That run does not load a save.
+    [[nodiscard]] bool DefinesRun() const
+    {
+        return Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || Gold.has_value() ||
+               !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty();
+    }
 };
 
 struct PlaytestSetup {

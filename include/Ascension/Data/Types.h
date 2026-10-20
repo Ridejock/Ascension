@@ -2,6 +2,7 @@
 
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -349,6 +350,9 @@ struct ItemDef {
     // piece's grants join the class skills. A consumable cannot grant, and an item grants
     // at most one active skill (passives are not capped).
     std::vector<SkillGrant> Grants;
+    // Foe ids from enemies.json. The shop withholds the item until every one of them has
+    // been defeated. Empty means the item is always offered. The ids live in the item file.
+    std::vector<std::string> RequiresDefeated;
 };
 
 // The shop, and the bag it sells into. BagSlots is how many stacks the hero can
@@ -364,6 +368,22 @@ struct ShopDef {
     i32 SellDenominator = 1;
     std::vector<std::string> Stock;
 };
+
+// True when every foe in RequiresDefeated is in `defeated`. An item with an empty list is
+// offered. The shop and the buy path both use this, so a locked row cannot be purchased.
+[[nodiscard]] inline bool ItemIsOffered(const ItemDef& item, std::span<const std::string> defeated)
+{
+    for (const std::string& foe : item.RequiresDefeated) {
+        bool down = false;
+        for (const std::string& id : defeated) {
+            if (id == foe)
+                down = true;
+        }
+        if (!down)
+            return false;
+    }
+    return true;
+}
 
 [[nodiscard]] inline i32 SellPrice(const ShopDef& shop, i32 value)
 {

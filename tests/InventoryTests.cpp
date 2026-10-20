@@ -130,9 +130,29 @@ void TestEquipAndHands()
     Check(bag.Start(data, why), "the bag starts");
     bag.GrantGold(200);
     Check(bag.Buy("rusty_sword", why) && bag.Buy("oak_shield", why) &&
-              bag.Buy("notched_greataxe", why) && bag.Buy("oathkeepers_plate", why) &&
               bag.Buy("wolfhide_charm", why),
-          "Pell sells the design gear");
+          "Pell sells the ungated gear");
+    Check(!bag.Buy("notched_greataxe", why), "a gated weapon is not sold yet");
+    CheckHas(why, "will not sell", "the keeper refuses the gated weapon");
+    std::vector<std::string> down;
+    const ItemDef* axe = data.FindItem("notched_greataxe");
+    const ItemDef* plate = data.FindItem("oathkeepers_plate");
+    if (axe != nullptr) {
+        for (const std::string& foe : axe->RequiresDefeated)
+            down.push_back(foe);
+    }
+    if (plate != nullptr) {
+        for (const std::string& foe : plate->RequiresDefeated) {
+            bool listed = false;
+            for (const std::string& held : down)
+                listed = listed || held == foe;
+            if (!listed)
+                down.push_back(foe);
+        }
+    }
+    bag.SetDefeated(down);
+    Check(bag.Buy("notched_greataxe", why) && bag.Buy("oathkeepers_plate", why),
+          "Pell sells the gated gear once its foes are defeated");
 
     Check(bag.Equip(FindStack(bag, "rusty_sword"), why), "the rusty sword equips");
     Check(bag.Equipped(GearSlot::Weapon) == "rusty_sword" && bag.GearBonus().Strength == 1,

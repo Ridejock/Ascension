@@ -514,6 +514,14 @@ public:
     TurnSeat Next(std::span<const TurnSeat>) override { return {}; }
 
     void Advance() override {}
+
+    void Capture(std::vector<TurnSeat>& order, i32& index) const override
+    {
+        order.clear();
+        index = 0;
+    }
+
+    void Place(std::span<const TurnSeat>, i32) override {}
 };
 
 i32 CountId(const std::vector<std::string>& ids, std::string_view id)

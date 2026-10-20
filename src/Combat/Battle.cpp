@@ -69,6 +69,63 @@ void CopyFightState(const CombatantState& from, CombatantState& to)
         to.Focus = to.MaxFocus;
 }
 
+CombatantSnapshot SnapOf(const CombatantState& who)
+{
+    CombatantSnapshot shot;
+    shot.Id = who.Id;
+    shot.Hp = who.Hp;
+    shot.Focus = who.Focus;
+    shot.GuardPercent = who.GuardPercent;
+    shot.EmpowerPercent = who.EmpowerPercent;
+    shot.ReflectPercent = who.ReflectPercent;
+    shot.ReflectFlat = who.ReflectFlat;
+    shot.BonusDefense = who.BonusDefense;
+    shot.BonusDefenseTurns = who.BonusDefenseTurns;
+    shot.Statuses = who.Statuses;
+    shot.WindupSkill = who.WindupSkill;
+    shot.WindupLeft = who.WindupLeft;
+    shot.WindupTotal = who.WindupTotal;
+    shot.PatternStep = who.PatternStep;
+    shot.Phase = who.Phase;
+    shot.PhaseTurns = who.PhaseTurns;
+    shot.ShardDue = who.ShardDue;
+    shot.SkillUseIds = who.SkillUseIds;
+    shot.SkillUseCounts = who.SkillUseCounts;
+    return shot;
+}
+
+i32 ClampPoolTo(i32 value, i32 least, i32 most)
+{
+    if (value < least)
+        return least;
+    if (most >= least && value > most)
+        return most;
+    return value;
+}
+
+void ApplySnap(CombatantState& who, const CombatantSnapshot& shot, bool hero)
+{
+    const i32 leastHp = hero ? 1 : 0;
+    who.Hp = ClampPoolTo(shot.Hp, leastHp, who.MaxHp);
+    who.Focus = ClampPoolTo(shot.Focus, 0, who.MaxFocus);
+    who.GuardPercent = shot.GuardPercent < 0 ? 0 : shot.GuardPercent;
+    who.EmpowerPercent = shot.EmpowerPercent;
+    who.ReflectPercent = shot.ReflectPercent < 0 ? 0 : shot.ReflectPercent;
+    who.ReflectFlat = shot.ReflectFlat < 0 ? 0 : shot.ReflectFlat;
+    who.BonusDefense = shot.BonusDefense < 0 ? 0 : shot.BonusDefense;
+    who.BonusDefenseTurns = shot.BonusDefenseTurns < 0 ? 0 : shot.BonusDefenseTurns;
+    who.Statuses = shot.Statuses;
+    who.WindupSkill = shot.WindupSkill;
+    who.WindupLeft = shot.WindupLeft < 0 ? 0 : shot.WindupLeft;
+    who.WindupTotal = shot.WindupTotal < 0 ? 0 : shot.WindupTotal;
+    who.PatternStep = shot.PatternStep < 0 ? 0 : shot.PatternStep;
+    who.Phase = shot.Phase < 1 ? 1 : shot.Phase;
+    who.PhaseTurns = shot.PhaseTurns < 0 ? 0 : shot.PhaseTurns;
+    who.ShardDue = shot.ShardDue;
+    who.SkillUseIds = shot.SkillUseIds;
+    who.SkillUseCounts = shot.SkillUseCounts;
+}
+
 // A fight draws at most this many enemies. A corpse does not hold one of these seats.
 constexpr i32 kMaxCombatants = 3;
 
@@ -308,6 +365,23 @@ void AgilityRoundModel::Advance()
         ++m_Index;
 }
 
+void AgilityRoundModel::Capture(std::vector<TurnSeat>& order, i32& index) const
+{
+    order = m_Round;
+    index = static_cast<i32>(m_Index);
+}
+
+void AgilityRoundModel::Place(std::span<const TurnSeat> order, i32 index)
+{
+    m_Round.assign(order.begin(), order.end());
+    if (index < 0)
+        index = 0;
+    if (static_cast<usize>(index) > m_Round.size())
+        index = static_cast<i32>(m_Round.size());
+    m_Index = static_cast<usize>(index);
+    m_Open = !m_Round.empty();
+}
+
 Battle::Battle(const Database& data, std::unique_ptr<TurnModel> turns)
     : m_Data(&data), m_Turns(std::move(turns))
 {
@@ -448,6 +522,7 @@ bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId
     m_Started = false;
     m_Result = BattleResult::Ongoing;
     m_UpkeepDone = false;
+    m_TurnCount = 0;
     m_Opening.clear();
     if (m_Data == nullptr) {
         error = "combat is missing its data or its turn model";
@@ -713,6 +788,8 @@ void Battle::AdvanceTurn()
 {
     m_UpkeepDone = false;
     m_Opening.clear();
+    if (m_TurnCount < 1000000)
+        ++m_TurnCount;
     if (m_Turns != nullptr)
         m_Turns->Advance();
 }
@@ -1142,6 +1219,17 @@ void Battle::SetPlayerHp(i32 hp)
     m_Player.Hp = hp;
 }
 
+void Battle::SetPlayerFocus(i32 focus)
+{
+    if (!m_Started)
+        return;
+    if (focus < 0)
+        focus = 0;
+    if (focus > m_Player.MaxFocus)
+        focus = m_Player.MaxFocus;
+    m_Player.Focus = focus;
+}
+
 void Battle::SetEnemyHp(i32 hp)
 {
     if (!m_Started || m_Target < 0 || m_Target >= static_cast<i32>(m_Enemies.size()))
@@ -1160,6 +1248,80 @@ void Battle::SetEnemyHp(i32 hp)
     }
     std::string note;
     EnterPhase(m_Target, note);
+}
+
+FightSnapshot Battle::ExportFight()
+{
+    FightSnapshot shot;
+    if (!m_Started || m_Result != BattleResult::Ongoing || m_Turns == nullptr)
+        return shot;
+    const TurnSeat seat = CurrentSeat();
+    shot.Known = true;
+    shot.TurnCount = m_TurnCount;
+    shot.Actor = seat.Side;
+    shot.ActorIndex = seat.Side == CombatantSide::Enemy ? seat.Index : -1;
+    shot.Target = m_Target;
+    shot.RandomCursor = m_RandomCursor;
+    shot.UpkeepDone = m_UpkeepDone;
+    m_Turns->Capture(shot.Order, shot.OrderIndex);
+    shot.Player = SnapOf(m_Player);
+    shot.Foes.reserve(m_Enemies.size());
+    for (const CombatantState& foe : m_Enemies)
+        shot.Foes.push_back(SnapOf(foe));
+    return shot;
+}
+
+bool Battle::ImportFight(const FightSnapshot& shot, std::string& error)
+{
+    if (!m_Started || m_Data == nullptr || m_Turns == nullptr || !shot.Known ||
+        shot.Order.empty()) {
+        error = "the fight cannot be restored";
+        return false;
+    }
+    if (shot.Foes.size() < m_Enemies.size()) {
+        error = "the save's foes do not match this fight";
+        return false;
+    }
+    const i32 built = static_cast<i32>(m_Enemies.size());
+    for (i32 index = 0; index < built; ++index) {
+        if (shot.Foes[static_cast<usize>(index)].Id != m_Enemies[static_cast<usize>(index)].Id) {
+            error = "the save's foes do not match this fight";
+            return false;
+        }
+    }
+    for (i32 index = built; index < static_cast<i32>(shot.Foes.size()); ++index) {
+        if (m_Enemies.size() >= static_cast<usize>(kMaxCombatants)) {
+            error = "the save has too many foes";
+            return false;
+        }
+        const EnemyDef* def = m_Data->FindEnemy(shot.Foes[static_cast<usize>(index)].Id);
+        if (def == nullptr) {
+            error = "the save's foe does not exist";
+            return false;
+        }
+        CombatantState foe;
+        MakeFoe(*def, foe);
+        m_Enemies.push_back(std::move(foe));
+    }
+    ApplySnap(m_Player, shot.Player, true);
+    for (i32 index = 0; index < static_cast<i32>(m_Enemies.size()); ++index)
+        ApplySnap(m_Enemies[static_cast<usize>(index)], shot.Foes[static_cast<usize>(index)],
+                  false);
+    NameCombatants(m_Data, m_Enemies);
+    m_Target = shot.Target;
+    Retarget();
+    m_RandomCursor = shot.RandomCursor < 0 ? 0 : shot.RandomCursor;
+    m_UpkeepDone = shot.UpkeepDone;
+    m_TurnCount = shot.TurnCount < 0 ? 0 : shot.TurnCount;
+    m_Opening.clear();
+    m_Turns->Place(shot.Order, shot.OrderIndex);
+    FinishIfDead();
+    if (m_Result != BattleResult::Ongoing) {
+        error = "the saved fight is already over";
+        return false;
+    }
+    error.clear();
+    return true;
 }
 
 bool Battle::Inflict(CombatantSide side, std::string_view statusId, std::string& error)

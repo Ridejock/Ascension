@@ -97,6 +97,8 @@ bool LookupKey(std::string_view name, SDL_Scancode& scancode, std::string& error
         scancode = SDL_SCANCODE_RIGHT;
     else if (key == "escape")
         scancode = SDL_SCANCODE_ESCAPE;
+    else if (key == "f5")
+        scancode = SDL_SCANCODE_F5;
     else {
         error = "unknown key '" + std::string(name) + "'";
         return false;
@@ -519,6 +521,15 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.PickIds.emplace_back(value);
+        } else if (flag == "--save-dir") {
+            if (AlreadySet(!options.SaveDir.empty(), flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            if (value.empty()) {
+                error = "--save-dir needs a directory";
+                return false;
+            }
+            options.SaveDir = std::string(value);
         } else if (flag == "--trace") {
             if (attached.has_value()) {
                 error = "--trace does not take a value";
