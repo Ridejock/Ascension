@@ -282,12 +282,15 @@ enum class AiAction : u8 { Pattern, Skill };
 
 // One condition. An empty string, or an optional that is not set, is not tested. Every
 // field that is set has to hold. A percent uses the phase comparison: hp * 100 against
-// maxHp * percent.
+// maxHp * percent. AllyHpAtMost uses that comparison on the other living foes together:
+// their current health over their combined maximum. Dead foes are left out of both
+// totals. The acting foe, with no other living ally, does not satisfy it.
 struct AiCondition {
     std::optional<i32> SelfHpAtMost;
     std::optional<i32> SelfHpAtLeast;
     std::optional<i32> TargetHpAtMost;
     std::optional<i32> TargetHpAtLeast;
+    std::optional<i32> AllyHpAtMost;
     std::string SelfStatus;
     std::string SelfStatusAbsent;
     std::string TargetStatus;
@@ -316,6 +319,11 @@ struct EnemyDef {
     i32 Experience = 0;
     i32 Gold = 0;
     bool Boss = false;                // the roster has one boss, last in the sample
+    bool Unique = false;              // at most one of this id in an encounter; other ids may set it too
+    bool HasColor = false;            // when set, the fight draws a square in Red/Green/Blue
+    u8 Red = 0;
+    u8 Green = 0;
+    u8 Blue = 0;
     std::vector<std::string> Pattern; // repeating skill ids; empty picks the strongest hit
     std::vector<AiRule> Ai;           // ordered interrupts; empty leaves the pattern in charge
     i32 PhaseAtPercent = 0;           // 0 means one phase. Otherwise phase 2 begins at this health
@@ -330,7 +338,9 @@ struct EnemyDef {
     BlockedSummon IfBlocked = BlockedSummon::Fizzle;
 };
 
-// A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack).
+// A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack),
+// except an enemy with Unique set, which can be listed once. Different unique enemies
+// may share a fight.
 // The sandbox walks this list. One id is still a normal single-enemy fight. Zone is the
 // campaign stretch drawn above the foe name. Empty means that line is absent. The log
 // never includes it.

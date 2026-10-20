@@ -14,7 +14,8 @@
       },
       "skills": ["bite"],
       "experience": 8,
-      "gold": 3
+      "gold": 3,
+      "color": "#C8C8C8"
     },
     {
       "id": "bandit",
@@ -77,9 +78,17 @@
         "agility": 8,
         "focus": 0
       },
-      "skills": ["bite"],
-      "experience": 8,
-      "gold": 3
+      "skills": ["howl", "stalk", "circle", "bite", "dire_bloodlust"],
+      "pattern": ["bite", "howl", "stalk", "circle", "stalk"],
+      "ai": [
+        { "if": { "selfStatus": "bloodlust" }, "do": "skill", "skill": "bite" },
+        { "if": { "targetHpAtMost": 45 }, "do": "skill", "skill": "dire_bloodlust" },
+        { "if": { "allyHpAtMost": 60 }, "do": "skill", "skill": "dire_bloodlust" }
+      ],
+      "experience": 20,
+      "gold": 3,
+      "unique": true,
+      "color": "#3A3A3A"
     },
     {
       "id": "barrow_sentry",

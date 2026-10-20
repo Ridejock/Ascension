@@ -1622,8 +1622,9 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
         }
         if (!AllowKeys(*condition,
                        {"selfHpAtMost", "selfHpAtLeast", "targetHpAtMost", "targetHpAtLeast",
-                        "selfStatus", "selfStatusAbsent", "targetStatus", "targetStatusAbsent",
-                        "targetGuardAtLeast", "selfHardenAtLeast", "phase", "next"},
+                        "allyHpAtMost", "selfStatus", "selfStatusAbsent", "targetStatus",
+                        "targetStatusAbsent", "targetGuardAtLeast", "selfHardenAtLeast", "phase",
+                        "next"},
                        unknown)) {
             error = where + ": unknown field " + Quote(unknown);
             return false;
@@ -1634,6 +1635,7 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
             !OptionalRange(*condition, "targetHpAtMost", 0, 100, rule.If.TargetHpAtMost, error) ||
             !OptionalRange(*condition, "targetHpAtLeast", 0, 100, rule.If.TargetHpAtLeast,
                            error) ||
+            !OptionalRange(*condition, "allyHpAtMost", 0, 100, rule.If.AllyHpAtMost, error) ||
             !OptionalRange(*condition, "targetGuardAtLeast", 0, 100, rule.If.TargetGuardAtLeast,
                            error) ||
             !OptionalRange(*condition, "selfHardenAtLeast", 0, 9999, rule.If.SelfHardenAtLeast,
@@ -1688,6 +1690,8 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
     return true;
 }
 
+bool ParseColor(std::string_view text, u8& red, u8& green, u8& blue, std::string& error);
+
 bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("enemies");
@@ -1715,8 +1719,8 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "level", "stats", "skills", "experience",
-                        "gold", "boss", "pattern", "phaseAtPercent", "phaseStatus", "summon",
-                        "ai"},
+                        "gold", "boss", "unique", "color", "pattern", "phaseAtPercent",
+                        "phaseStatus", "summon", "ai"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
@@ -1742,6 +1746,22 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
             if (!boss->is_boolean())
                 return fail("'boss' must be true or false");
             enemy.Boss = boss->get<bool>();
+        }
+        const auto unique = entry.find("unique");
+        if (unique != entry.end()) {
+            if (!unique->is_boolean())
+                return fail("'unique' must be true or false");
+            enemy.Unique = unique->get<bool>();
+        }
+        const auto color = entry.find("color");
+        if (color != entry.end()) {
+            if (!color->is_string())
+                return fail("'color' must be #RRGGBB");
+            std::string colorError;
+            if (!ParseColor(color->get<std::string>(), enemy.Red, enemy.Green, enemy.Blue,
+                            colorError))
+                return fail(colorError);
+            enemy.HasColor = true;
         }
         if (entry.contains("pattern")) {
             std::string patternError;
@@ -1844,9 +1864,17 @@ bool LoadEncounters(const Json& root, Parsed& parsed, std::string& error)
             return fail("'enemies' must list at least one enemy");
         if (encounter.Enemies.size() > 3)
             return fail("'enemies' cannot list more than 3");
-        for (const std::string& enemyId : encounter.Enemies) {
-            if (FindId(parsed.Enemies, enemyId) == nullptr)
+        for (usize index = 0; index < encounter.Enemies.size(); ++index) {
+            const std::string& enemyId = encounter.Enemies[index];
+            const EnemyDef* foe = FindId(parsed.Enemies, enemyId);
+            if (foe == nullptr)
                 return fail("enemy " + Quote(enemyId) + " does not exist");
+            if (!foe->Unique)
+                continue;
+            for (usize earlier = 0; earlier < index; ++earlier) {
+                if (encounter.Enemies[earlier] == enemyId)
+                    return fail("enemy " + Quote(enemyId) + " can appear at most once");
+            }
         }
         if (!RequireString(entry, "name", encounter.Name, error))
             return fail(error);

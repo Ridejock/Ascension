@@ -681,6 +681,49 @@ void TestValidation()
                       "\"enemies\": [\"wolf\", \"dragon\"]");
         TestRejected(copy.Path, "encounters.json", "dragon", "an encounter enemy must exist");
     }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"experience\": 8",
+                      "\"experience\": 8, \"unique\": true");
+        TestRejected(copy.Path, "encounters.json", "at most once",
+                     "a unique enemy cannot be listed twice");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"experience\": 18",
+                      "\"experience\": 18, \"unique\": true");
+        ReplaceInFile(copy.Path / "enemies.json", "\"experience\": 8",
+                      "\"experience\": 8, \"unique\": true");
+        ReplaceInFile(copy.Path / "encounters.json", "\"enemies\": [\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"enemies\": [\"bandit\", \"bandit\"]");
+        TestRejected(copy.Path, "encounters.json", "bandit",
+                     "the once-per-encounter flag names whichever enemy set it");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"experience\": 18",
+                      "\"experience\": 18, \"unique\": true");
+        ReplaceInFile(copy.Path / "enemies.json", "\"experience\": 8",
+                      "\"experience\": 8, \"unique\": true");
+        ReplaceInFile(copy.Path / "encounters.json", "\"enemies\": [\"wolf\", \"wolf\", \"wolf\"]",
+                      "\"enemies\": [\"wolf\", \"bandit\"]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "two different unique enemies can share a fight");
+        const EnemyDef* wolf = data.FindEnemy("wolf");
+        const EnemyDef* bandit = data.FindEnemy("bandit");
+        const EncounterDef* pack = data.FindEncounter("wolf_pack");
+        Check(wolf != nullptr && wolf->Unique && bandit != nullptr && bandit->Unique &&
+                  pack != nullptr && pack->Enemies.size() == 2 && pack->Enemies[0] == "wolf" &&
+                  pack->Enemies[1] == "bandit",
+              "unique is per enemy id, so two different flagged foes can share a fight");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json", "\"experience\": 8",
+                      "\"experience\": 8, \"color\": \"grey\"");
+        TestRejected(copy.Path, "enemies.json", "#RRGGBB", "an enemy color is #RRGGBB");
+    }
 }
 
 const EffectDef* EffectOf(const SkillDef* skill, const char* effectId)
@@ -1590,12 +1633,43 @@ void TestShippedDescriptions()
               guardian->Picks[1].Options[1].Resolved.FocusCost == 2,
           "guardian picks stay Riposte or Shield Wall, then Rally or Rage");
 
-    bool shippedRules = false;
+    const EnemyDef* wolf = data.FindEnemy("wolf");
+    const EnemyDef* dire = data.FindEnemy("dire_wolf");
+    bool onlyDire = dire != nullptr && !dire->Ai.empty();
     for (const EnemyDef& enemy : data.GetEnemies()) {
-        if (!enemy.Ai.empty())
-            shippedRules = true;
+        if (enemy.Id != "dire_wolf" && !enemy.Ai.empty())
+            onlyDire = false;
     }
-    Check(!shippedRules && !data.GetEnemies().empty(), "no shipped foe has an ai list");
+    Check(onlyDire && !data.GetEnemies().empty(),
+          "the dire wolf is the only shipped foe with ai rules");
+    const bool direPattern = dire != nullptr && dire->Pattern.size() == 5 &&
+                             dire->Pattern[0] == "bite" && dire->Pattern[1] == "howl" &&
+                             dire->Pattern[2] == "stalk" && dire->Pattern[3] == "circle" &&
+                             dire->Pattern[4] == "stalk";
+    const bool direRules =
+        dire != nullptr && dire->Ai.size() == 3 && dire->Ai[0].Action == AiAction::Skill &&
+        dire->Ai[0].Skill == "bite" && dire->Ai[0].If.SelfStatus == "bloodlust" &&
+        dire->Ai[1].Skill == "dire_bloodlust" && dire->Ai[1].If.TargetHpAtMost == 45 &&
+        dire->Ai[2].Skill == "dire_bloodlust" && dire->Ai[2].If.AllyHpAtMost == 60;
+    Check(direPattern && direRules,
+          "bloodlust makes the dire wolf bite, and the hero or the pack can open it");
+    const StatusDef* lust = data.FindStatus("bloodlust");
+    const SkillDef* cast = data.FindSkill("dire_bloodlust");
+    const SkillDef* passive = data.FindSkill("bloodlust");
+    Check(lust != nullptr && lust->DamageDealtPercent == 25 && lust->Turns == 99 &&
+              cast != nullptr && cast->Name == "Bloodlust" && cast->Kind == SkillKind::Active &&
+              passive != nullptr && passive->Kind == SkillKind::Passive,
+          "Bloodlust the status is separate from the berserker passive");
+    const EncounterDef* pack = data.FindEncounter("wolf_pack");
+    Check(wolf != nullptr && !wolf->Unique && wolf->HasColor && wolf->Red == 0xC8 &&
+              wolf->Green == 0xC8 && wolf->Blue == 0xC8,
+          "the wolf is a light grey square");
+    Check(dire != nullptr && dire->Unique && dire->HasColor && dire->Red == 0x3A &&
+              dire->Green == 0x3A && dire->Blue == 0x3A,
+          "the dire wolf is a dark grey square and can appear once");
+    Check(pack != nullptr && pack->Enemies.size() == 3 && pack->Enemies[0] == "dire_wolf" &&
+              pack->Enemies[1] == "wolf" && pack->Enemies[2] == "wolf",
+          "the wolf pack is one dire wolf leading two wolves");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
@@ -1881,6 +1955,34 @@ void TestAiValidation()
                       "\"do\": \"pattern\" } ],");
         TestRejected(copy.Path, "enemies.json", "targetGuardAtLeast",
                      "a guard percent above 100 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyHpAtMost\": 150 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "allyHpAtMost",
+                     "an ally percent above 100 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyHpAtMost\": 40 }, "
+                      "\"do\": \"skill\", \"skill\": \"harden\" } ],");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "an ally health rule loads");
+        const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
+        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
+                            sentry->Ai[0].Action == AiAction::Skill &&
+                            sentry->Ai[0].Skill == "harden" &&
+                            sentry->Ai[0].If.AllyHpAtMost == 40 &&
+                            !sentry->Ai[0].If.TargetHpAtMost.has_value();
+        Check(loaded, "allyHpAtMost is stored as the combined-ally percent");
     }
     {
         TempCopy copy;

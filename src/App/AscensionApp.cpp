@@ -75,6 +75,23 @@ void DrawFigure(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, f32 
     renderer.FillRect(origin + Emerald::Vec2{s * 2.3f, s * 4.4f}, {s * 0.8f, s * 2.1f}, color);
 }
 
+// A foe with a data color is a square of that color. Anyone else keeps the figure.
+// The id is never consulted; the color field is the only switch.
+void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const CombatantState& foe,
+                 const Emerald::Vec2& origin, f32 size, bool alive, const Emerald::Vec4& fallback)
+{
+    const EnemyDef* def = data.FindEnemy(foe.Id);
+    if (def != nullptr && def->HasColor) {
+        const Emerald::Vec4 tint = alive ? Emerald::Vec4{def->Red / 255.0f, def->Green / 255.0f,
+                                                         def->Blue / 255.0f, 1.0f}
+                                         : kDim;
+        const f32 side = size * 4.0f;
+        renderer.FillRect(origin + Emerald::Vec2{0.0f, size * 1.25f}, {side, side}, tint);
+        return;
+    }
+    DrawFigure(renderer, origin, size, alive ? fallback : kDim);
+}
+
 void DrawPanel(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin,
                const Emerald::Vec2& size)
 {
@@ -1465,7 +1482,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     }
 
     if (packCount <= 1) {
-        DrawFigure(renderer, {right.x + 28.0f, right.y + 28.0f}, 16.0f, kFoe);
+        DrawFoeBody(renderer, m_Data, enemy, {right.x + 28.0f, right.y + 28.0f}, 16.0f,
+                    enemy.Alive(), kFoe);
         y = right.y + 24.0f;
         y = DrawZone(renderer, zone, {right.x + 140.0f, y}, 1);
         const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
@@ -1523,11 +1541,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             const CombatantState& member = pack[static_cast<usize>(column)];
             const bool selected = column == m_Battle->TargetIndex();
             const bool acting = column == actorSlot;
-            const Emerald::Vec4 body = member.Alive() ? kFoe : kDim;
             const Emerald::Vec4 ink = member.Alive() ? kInk : kDim;
             if (selected)
                 renderer.DrawRect({columnX, cardTop}, {columnWidth, cardHeight}, kFrame);
-            DrawFigure(renderer, {columnX + 8.0f, cardTop + 8.0f}, figureSize, body);
+            DrawFoeBody(renderer, m_Data, member, {columnX + 8.0f, cardTop + 8.0f}, figureSize,
+                        member.Alive(), kFoe);
             f32 textY = cardTop + 12.0f + figureSize * 6.6f;
             const f32 textX = columnX + 8.0f;
             const f32 textWrap = columnWidth - 16.0f;

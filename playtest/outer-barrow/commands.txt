@@ -1,6 +1,6 @@
 # Outer Barrow MSVC playtest. The Playtest suite checks these files.
-# Word counts: riposte+rally 61, riposte+rage 61, wall+rally 72, wall+rage 73,
-# rend+rally 56, rend+second-wind 56, brace+rally 68, brace+second-wind 109.
+# Word counts: riposte+rally 64, riposte+rage 65, wall+rally 71, wall+rage 72,
+# rend+rally 53, rend+second-wind 53, brace+rally 65, brace+second-wind 107.
 # Run from the repo root. Paste into PowerShell, not cmd.exe.
 
 .\build\debug\bin\Ascension.exe --data data --choose guardian --pick riposte --pick rally --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/guardian-riposte-rally.keys --transcript guardian-riposte-rally.txt

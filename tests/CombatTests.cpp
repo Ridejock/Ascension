@@ -1817,6 +1817,102 @@ void TestFoeRules()
                     sentry.Enemy().PatternStep);
 }
 
+void TestAllyHp()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "enemies.json",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    }",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    },\n    {\n      \"id\": \"caller\",\n      \"name\": "
+                  "\"Caller\",\n      \"description\": \"A made-up foe that watches its allies.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 3,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"bite\"],\n"
+                  "      \"pattern\": [\"harden\"],\n      \"ai\": [\n"
+                  "        { \"if\": { \"allyHpAtMost\": 50 }, \"do\": \"skill\", "
+                  "\"skill\": \"bite\" }\n"
+                  "      ],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n"
+                  "      \"id\": \"mate\",\n      \"name\": \"Mate\",\n"
+                  "      \"description\": \"A made-up ally with a known health pool.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 10,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
+                  "    }");
+    ReplaceInFile(copy.Path / "encounters.json",
+                  "      \"enemies\": [\"oathkeeper_varn\"]\n    }",
+                  "      \"enemies\": [\"oathkeeper_varn\"]\n    },\n    {\n"
+                  "      \"id\": \"ally_pack\",\n      \"name\": \"Ally Pack\",\n"
+                  "      \"enemies\": [\"caller\", \"mate\", \"mate\"]\n    },\n    {\n"
+                  "      \"id\": \"caller_alone\",\n      \"name\": \"Caller Alone\",\n"
+                  "      \"enemies\": [\"caller\"]\n    }");
+    Database data(copy.Path);
+    DataError loadError;
+    Check(data.Load(&loadError), "the caller and its mates load");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    auto ready = [&](Battle& battle, const char* encounter) {
+        Check(battle.Start("fighter", 1, encounter, error), "the made-up fight starts");
+        Check(battle.TargetIndex() == 0 && battle.UseSkill("strike").Accepted,
+              "the fighter strikes the caller, not a mate");
+    };
+
+    Battle mixed(data, std::make_unique<AgilityRoundModel>());
+    ready(mixed, "ally_pack");
+    mixed.SetTarget(1);
+    mixed.SetEnemyHp(8);
+    mixed.SetTarget(2);
+    Check(mixed.Enemies()[1].Hp == 8 && mixed.Enemies()[2].Hp == 40,
+          "one mate is at 8 of 40 and the other is full");
+    const ActionResult mixedAct = mixed.EnemyAct();
+    Check(mixedAct.SkillId == "harden" && mixedAct.Text.find("Caller uses Harden") != std::string::npos,
+          "8 plus 40 of 80 is above 50, so one wounded ally does not trip the combined pool");
+    if (mixedAct.SkillId != "harden")
+        std::printf("    mixed: %s\n", mixedAct.Text.c_str());
+
+    Battle boundary(data, std::make_unique<AgilityRoundModel>());
+    ready(boundary, "ally_pack");
+    boundary.SetTarget(1);
+    boundary.SetEnemyHp(20);
+    boundary.SetTarget(2);
+    boundary.SetEnemyHp(20);
+    Check(boundary.Enemies()[1].Hp == 20 && boundary.Enemies()[2].Hp == 20,
+          "each mate is at half");
+    const ActionResult half = boundary.EnemyAct();
+    Check(half.SkillId == "bite" && half.Text.find("Caller uses Bite") != std::string::npos,
+          "20 plus 20 of 80 is 50, and allyHpAtMost includes that combined percent");
+    if (half.SkillId != "bite")
+        std::printf("    half: %s\n", half.Text.c_str());
+
+    Battle gone(data, std::make_unique<AgilityRoundModel>());
+    ready(gone, "ally_pack");
+    gone.SetTarget(1);
+    gone.SetEnemyHp(0);
+    gone.SetTarget(2);
+    gone.SetEnemyHp(0);
+    Check(gone.Result() == BattleResult::Ongoing && !gone.Enemies()[1].Alive() &&
+              !gone.Enemies()[2].Alive() && gone.Enemies()[0].Alive(),
+          "both mates can fall while the caller still stands");
+    const ActionResult alone = gone.EnemyAct();
+    Check(alone.SkillId == "harden" && alone.Text.find("Caller uses Harden") != std::string::npos,
+          "no living ally does not satisfy allyHpAtMost");
+    if (alone.SkillId != "harden")
+        std::printf("    gone: %s\n", alone.Text.c_str());
+
+    Battle solo(data, std::make_unique<AgilityRoundModel>());
+    ready(solo, "caller_alone");
+    const ActionResult soloAct = solo.EnemyAct();
+    Check(soloAct.SkillId == "harden" && solo.Enemies().size() == 1,
+          "a lone caller does not treat itself as an ally");
+    if (soloAct.SkillId != "harden")
+        std::printf("    solo: %s\n", soloAct.Text.c_str());
+}
+
 } // namespace
 
 int main()
@@ -1852,6 +1948,7 @@ int main()
     TestSecondWindExposed();
     TestLoggedHeal();
     TestFoeRules();
+    TestAllyHp();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

@@ -64,7 +64,7 @@ bool HpAtLeast(i32 hp, i32 maxHp, i32 percent)
 }
 
 bool AiHolds(const CombatantState& self, const CombatantState& target, const SkillDef* next,
-             const AiCondition& condition)
+             const AiCondition& condition, i32 allyHp, i32 allyMaxHp)
 {
     if (condition.SelfHpAtMost.has_value() &&
         !HpAtMost(self.Hp, self.MaxHp, *condition.SelfHpAtMost))
@@ -78,6 +78,12 @@ bool AiHolds(const CombatantState& self, const CombatantState& target, const Ski
     if (condition.TargetHpAtLeast.has_value() &&
         !HpAtLeast(target.Hp, target.MaxHp, *condition.TargetHpAtLeast))
         return false;
+    // No other living foe leaves the pool empty. Do not clamp that maximum to 1:
+    // an empty pack is not "at most" any percent.
+    if (condition.AllyHpAtMost.has_value()) {
+        if (allyMaxHp < 1 || !HpAtMost(allyHp, allyMaxHp, *condition.AllyHpAtMost))
+            return false;
+    }
     if (!condition.SelfStatus.empty() && !HoldsStatus(self, condition.SelfStatus))
         return false;
     if (!condition.SelfStatusAbsent.empty() && HoldsStatus(self, condition.SelfStatusAbsent))
@@ -1967,8 +1973,16 @@ const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
         return nullptr;
 
     const PatternHead head = PeekPattern(who, *enemy);
+    i32 allyHp = 0;
+    i32 allyMaxHp = 0;
+    for (const CombatantState& foe : m_Enemies) {
+        if (&foe == &who || !foe.Alive())
+            continue;
+        allyHp += foe.Hp;
+        allyMaxHp += foe.MaxHp;
+    }
     for (const AiRule& rule : enemy->Ai) {
-        if (!AiHolds(who, m_Player, head.Skill, rule.If))
+        if (!AiHolds(who, m_Player, head.Skill, rule.If, allyHp, allyMaxHp))
             continue;
         if (rule.Action == AiAction::Pattern)
             break;
