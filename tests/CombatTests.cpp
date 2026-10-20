@@ -1650,6 +1650,86 @@ void TestSecondWindExposed()
           "a higher Focus mends more");
 }
 
+// Rally sets a guard and knits a wound. The log names the health that fit under max HP.
+// Second Wind is only a heal and uses the same sentence.
+void TestLoggedHeal()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "skills.json",
+                  "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }\n"
+                  "      ]\n"
+                  "    },",
+                  "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }\n"
+                  "      ]\n"
+                  "    },\n"
+                  "    {\n"
+                  "      \"id\": \"rally\",\n"
+                  "      \"name\": \"Rally\",\n"
+                  "      \"description\": \"Set your guard and catch your breath in one motion.\",\n"
+                  "      \"kind\": \"active\",\n"
+                  "      \"target\": \"self\",\n"
+                  "      \"focusCost\": 3,\n"
+                  "      \"effects\": [\n"
+                  "        { \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", "
+                  "\"amount\": 50 },\n"
+                  "        { \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", "
+                  "\"power\": 12 }\n"
+                  "      ]\n"
+                  "    },");
+    ReplaceInFile(copy.Path / "classes.json",
+                  "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"]",
+                  "\"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\", \"rally\"]");
+    Database data(copy.Path);
+    Check(data.Load(), "a fighter who knows Rally loads");
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    Battle open(data, Sides({CombatantSide::Player}));
+    Check(open.Start("fighter", 1, "wolf", error), "the rally fight starts");
+    open.SetPlayerHp(40);
+    const ActionResult rally = open.UseSkill("rally");
+    Check(rally.Accepted && rally.Healing == 12 && open.Player().Hp == 52 &&
+              open.Player().GuardPercent == 50 &&
+              rally.Text == "Fighter uses Rally. The next hit is reduced by 50 percent. Heals 12.",
+          "rally logs the 12 health it restored");
+    if (rally.Text != "Fighter uses Rally. The next hit is reduced by 50 percent. Heals 12.")
+        std::printf("    text: %s\n", rally.Text.c_str());
+
+    Battle capped(data, Sides({CombatantSide::Player}));
+    Check(capped.Start("fighter", 1, "wolf", error), "the capped rally fight starts");
+    Check(capped.Player().MaxHp == 72, "the fighter's max health is 72");
+    capped.SetPlayerHp(68);
+    const ActionResult fitted = capped.UseSkill("rally");
+    Check(fitted.Accepted && fitted.Healing == 4 && capped.Player().Hp == 72 &&
+              capped.Player().GuardPercent == 50 &&
+              fitted.Text == "Fighter uses Rally. The next hit is reduced by 50 percent. Heals 4.",
+          "rally logs the 4 health that fit under the cap");
+    if (fitted.Text != "Fighter uses Rally. The next hit is reduced by 50 percent. Heals 4.")
+        std::printf("    text: %s\n", fitted.Text.c_str());
+
+    Battle full(data, Sides({CombatantSide::Player}));
+    Check(full.Start("fighter", 1, "wolf", error), "the full-health rally fight starts");
+    const ActionResult none = full.UseSkill("rally");
+    Check(none.Accepted && none.Healing == 0 && full.Player().Hp == 72 &&
+              full.Player().GuardPercent == 50 &&
+              none.Text == "Fighter uses Rally. The next hit is reduced by 50 percent.",
+          "rally at full health names the guard and does not claim a heal");
+
+    Battle wind(data, Sides({CombatantSide::Player}));
+    Check(wind.Start("fighter", 1, "wolf", error), "the second wind fight starts");
+    wind.SetPlayerHp(50);
+    const ActionResult mend = wind.UseSkill("second_wind");
+    Check(mend.Accepted && mend.Healing == 8 && wind.Player().Hp == 58 &&
+              mend.Text == "Fighter uses Second Wind. Heals 8.",
+          "a heal on its own uses the same words");
+    wind.SetPlayerHp(70);
+    const ActionResult shortWind = wind.UseSkill("second_wind");
+    Check(shortWind.Accepted && shortWind.Healing == 2 && wind.Player().Hp == 72 &&
+              shortWind.Text == "Fighter uses Second Wind. Heals 2.",
+          "second wind logs the health that fit, not its power");
+}
+
 } // namespace
 
 int main()
@@ -1683,6 +1763,7 @@ int main()
     TestFoeBuffAlert();
     TestCounterMeetsDefense();
     TestSecondWindExposed();
+    TestLoggedHeal();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
