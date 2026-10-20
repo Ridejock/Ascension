@@ -183,6 +183,9 @@ public:
     // Sum of every enemy in the fight, including a shard that has already joined.
     [[nodiscard]] i32 Experience() const;
     [[nodiscard]] i32 Gold() const;
+    // One line of the live fight: player health, focus, bloodlust, statuses, and each foe's
+    // health and harden. Empty before the fight starts. --trace prints it beside each action.
+    [[nodiscard]] std::string TraceState() const;
     [[nodiscard]] std::span<const std::string> PlayerSkillIds() const { return m_PlayerSkills; }
 
     // Empty ranks and a zero bonus leave every skill at the power in skills.json, which is

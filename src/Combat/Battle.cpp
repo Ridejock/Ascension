@@ -586,6 +586,61 @@ i32 Battle::Gold() const
     return sum;
 }
 
+std::string Battle::TraceState() const
+{
+    if (!m_Started)
+        return {};
+    std::string line = "trace P ";
+    line += std::to_string(m_Player.Hp);
+    line += "/";
+    line += std::to_string(m_Player.MaxHp);
+    line += " F ";
+    line += std::to_string(m_Player.Focus);
+    line += "/";
+    line += std::to_string(m_Player.MaxFocus);
+    line += " BL ";
+    line += std::to_string(MissingFor(m_Player, "strength"));
+    line += " guard ";
+    line += std::to_string(m_Player.GuardPercent);
+    line += " def+";
+    line += std::to_string(m_Player.BonusDefense);
+    line += " t";
+    line += std::to_string(m_Player.BonusDefenseTurns);
+    for (const StatusInstance& status : m_Player.Statuses) {
+        line += " ";
+        line += status.Id;
+        line += " ";
+        line += std::to_string(status.Stacks);
+        line += "x";
+        line += std::to_string(status.TurnsLeft);
+    }
+    const i32 count = static_cast<i32>(m_Enemies.size());
+    for (i32 index = 0; index < count; ++index) {
+        const CombatantState& foe = m_Enemies[static_cast<usize>(index)];
+        line += " | ";
+        line += foe.Name.empty() ? foe.Id : foe.Name;
+        line += " ";
+        line += std::to_string(foe.Hp);
+        line += "/";
+        line += std::to_string(foe.MaxHp);
+        line += " def+";
+        line += std::to_string(foe.BonusDefense);
+        line += " t";
+        line += std::to_string(foe.BonusDefenseTurns);
+        line += " step ";
+        line += std::to_string(foe.PatternStep);
+        for (const StatusInstance& status : foe.Statuses) {
+            line += " ";
+            line += status.Id;
+            line += " ";
+            line += std::to_string(status.Stacks);
+            line += "x";
+            line += std::to_string(status.TurnsLeft);
+        }
+    }
+    return line;
+}
+
 std::vector<TurnSeat> Battle::Living() const
 {
     std::vector<TurnSeat> seats;

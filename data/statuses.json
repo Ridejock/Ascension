@@ -45,8 +45,8 @@
     {
       "id": "steadfast",
       "name": "Steadfast",
-      "description": "Cannot be stunned for a short while.",
-      "resists": ["stunned"],
+      "description": "Cannot be stunned or Exposed for a short while.",
+      "resists": ["stunned", "exposed"],
       "turns": 3,
       "maxStacks": 1
     }

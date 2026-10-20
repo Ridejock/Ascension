@@ -23,6 +23,25 @@ constexpr usize kLogLines = 6;
 constexpr int kMaxHotkeys = 8;
 // Keys are fixed in this file. There is no binding table in the data.
 constexpr SDL_Scancode kItemKey = SDL_SCANCODE_C;
+// Enemy actions finished inside one scripted key before the press is applied. A round is
+// at most a handful of foes; the cap is several rounds so a leftover foe turn cannot eat
+// the next key, and it still happens on that key's frame.
+constexpr i32 kScriptPumpPasses = 4;
+
+FightStanding FightStandingOf(const Battle* battle)
+{
+    if (battle == nullptr)
+        return FightStanding::None;
+    switch (battle->Result()) {
+    case BattleResult::Victory:
+        return FightStanding::Victory;
+    case BattleResult::Defeat:
+        return FightStanding::Defeat;
+    case BattleResult::Ongoing:
+        return FightStanding::Ongoing;
+    }
+    return FightStanding::Ongoing;
+}
 
 constexpr Emerald::Vec4 kInk{0.93f, 0.91f, 0.84f, 1.0f};
 constexpr Emerald::Vec4 kDim{0.62f, 0.66f, 0.60f, 1.0f};
@@ -373,6 +392,14 @@ void AscensionApp::Note(const ActionResult& result)
     // Battle text is the multi-enemy log: Cleave names each hit, and a summon says
     // "Rubble Shard 2 joins the fight." The transcript is this same line.
     Note(result.Text);
+    // --trace stays on stderr so a transcript diff still compares the combat log alone.
+    if (!m_Play.Trace || m_Battle == nullptr)
+        return;
+    const std::string state = m_Battle->TraceState();
+    if (state.empty())
+        return;
+    std::fprintf(stderr, "%s | %s\n", state.c_str(), result.Text.c_str());
+    std::fflush(stderr);
 }
 
 void AscensionApp::NoteMarked(i32 previous)
@@ -582,11 +609,20 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
     if (!m_Data.IsLoaded())
         return;
+    ScriptedPressQuery window;
+    window.ScriptRunning = m_KeyCursor < m_Play.Keys.size();
+    window.FromScript = m_ApplyingScript;
+    if (DecideScriptedPress(window) == ScriptedPress::IgnoreWindow)
+        return;
     if (event.key.scancode == SDL_SCANCODE_R) {
         BeginFight();
         return;
     }
     if (event.key.scancode == SDL_SCANCODE_N) {
+        if (!NextFightAllowed(FightStandingOf(m_Battle.get()))) {
+            Note("Finish the fight.");
+            return;
+        }
         m_DirectEnemy.clear();
         const i32 count = static_cast<i32>(m_Data.GetEncounters().size());
         m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
@@ -804,13 +840,40 @@ void AscensionApp::PlayScriptedKey()
 {
     if (m_KeyCursor >= m_Play.Keys.size() || !m_StartError.empty() || !m_Data.IsLoaded())
         return;
+    // Finish a foe turn left over from the previous frame before this press is spent.
+    if (m_Battle != nullptr) {
+        for (i32 pass = 0; pass < kScriptPumpPasses && m_Battle->Result() == BattleResult::Ongoing &&
+                           m_Battle->Actor() == CombatantSide::Enemy;
+             ++pass)
+            ResolveFoe();
+    }
     const SDL_Scancode scancode = m_Play.Keys[m_KeyCursor];
+    const bool ongoing = m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing;
+    ScriptedPressQuery script;
+    script.ScriptRunning = true;
+    script.FromScript = true;
+    script.FightOngoing = ongoing;
+    script.PlayerTurn = !ongoing || m_Battle->Actor() == CombatantSide::Player;
+    script.NeedsPlayerTurn = KeyNeedsPlayerTurn(scancode);
+    if (DecideScriptedPress(script) == ScriptedPress::WaitForTurn) {
+        if (m_Play.Trace)
+            std::fprintf(stderr, "trace wait foe-turn\n");
+        return;
+    }
     ++m_KeyCursor;
-    SDL_Event event{};
+    // SDL_Event is a union. Value-initialization only has to clear the first member, so
+    // key.repeat can be leftover stack data. OnEvent drops a press when repeat is set,
+    // and the cursor has already moved, so the script would skip that key. Zero the
+    // whole event. libstdc++ happens to zero it; MSVC does not have to.
+    SDL_Event event;
+    SDL_zero(event);
     event.type = SDL_EVENT_KEY_DOWN;
     event.key.scancode = scancode;
     event.key.down = true;
+    event.key.repeat = false;
+    m_ApplyingScript = true;
     OnEvent(event);
+    m_ApplyingScript = false;
     if (m_KeyCursor < m_Play.Keys.size())
         return;
     const u64 frameLimit = GetDevOptions().Frames;
@@ -823,6 +886,11 @@ void AscensionApp::OnUpdate(f32 dt)
     if (!TakeAutoPath())
         return;
     PlayScriptedKey();
+    // Frame time is a float, and Windows file stamps are not stable the way this poll
+    // expects. A reload between scripted keys rebuilds the fight on a different frame
+    // than a Linux replay. The script is the input; data is whatever it started with.
+    if (m_KeyCursor < m_Play.Keys.size())
+        return;
     m_ReloadWait += dt;
     if (m_ReloadWait < kPollSeconds)
         return;

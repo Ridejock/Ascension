@@ -193,6 +193,12 @@ void TestParseExampleAndEngineFlags()
     Check(!Parse({"--give", "minor_potion:0"}, items, why), "a zero count fails");
     Check(!Parse({"--level"}, items, why), "a missing level fails");
     Check(!Parse({"--level", "6", "--level", "7"}, items, why), "a repeated level fails");
+    PlaytestOptions traced;
+    Check(Parse({"--trace", "--keys", "1"}, traced, why), "--trace parses");
+    Check(traced.Trace && traced.Keys.size() == 1, "--trace is a switch and keeps the keys");
+    Check(!Parse({"--trace", "1"}, traced, why), "--trace does not take a value");
+    CheckHas(why, "unexpected argument", "a value after --trace is a leftover argument");
+
     Check(!Parse({"--bogus"}, items, why), "an unknown flag fails");
     CheckHas(why, "--bogus", "the unknown flag is named");
     Check(!Parse({"leftover"}, items, why), "a positional argument fails");
@@ -572,6 +578,125 @@ void TestStartupFailureText()
     Check(StartupFailureText(why, "", block) == why, "the window would keep the folder sentence");
 }
 
+void TestNextFightAndScriptedKeys()
+{
+    Check(NextFightAllowed(FightStanding::None), "N advances before the first fight");
+    Check(NextFightAllowed(FightStanding::Victory), "N advances after a victory");
+    Check(NextFightAllowed(FightStanding::Defeat), "N advances after a defeat");
+    Check(!NextFightAllowed(FightStanding::Ongoing), "N does not advance while a foe is alive");
+
+    ScriptedPressQuery window;
+    window.ScriptRunning = true;
+    Check(DecideScriptedPress(window) == ScriptedPress::IgnoreWindow,
+          "a focused window cannot insert a key into a script");
+    window.FromScript = true;
+    Check(DecideScriptedPress(window) == ScriptedPress::Play, "the script's own press is played");
+
+    ScriptedPressQuery combat;
+    combat.ScriptRunning = true;
+    combat.FromScript = true;
+    combat.FightOngoing = true;
+    combat.PlayerTurn = false;
+    combat.NeedsPlayerTurn = true;
+    Check(DecideScriptedPress(combat) == ScriptedPress::WaitForTurn,
+          "a combat key waits while it is still the foe's turn");
+    combat.PlayerTurn = true;
+    Check(DecideScriptedPress(combat) == ScriptedPress::Play,
+          "a combat key plays on the player's turn");
+
+    ScriptedPressQuery nextFight = combat;
+    nextFight.PlayerTurn = false;
+    nextFight.NeedsPlayerTurn = false;
+    Check(DecideScriptedPress(nextFight) == ScriptedPress::Play,
+          "N is delivered even when it is the foe's turn");
+    nextFight.FightOngoing = false;
+    Check(DecideScriptedPress(nextFight) == ScriptedPress::Play, "N plays once the fight is over");
+
+    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_2), "a skill key needs the player's turn");
+    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_RIGHT), "aiming needs the player's turn");
+    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_SPACE), "waiting needs the player's turn");
+    Check(!KeyNeedsPlayerTurn(SDL_SCANCODE_N), "N is not a combat key");
+    Check(!KeyNeedsPlayerTurn(SDL_SCANCODE_R), "restart is not a combat key");
+
+    ScriptedPressQuery idle;
+    Check(DecideScriptedPress(idle) == ScriptedPress::Play, "with no script, a window key plays");
+}
+
+// The eight Outer Barrow replays. commands.txt is what the PR body pastes. Each
+// --keys-file is the list Linux ran. Brace + Second Wind is 109 words; a 113-word
+// paste is a different list.
+void TestOuterBarrowReplayKeys()
+{
+    struct ReplayKeys {
+        const char* File;
+        const char* Transcript;
+        i32 Words;
+    };
+    const ReplayKeys rows[] = {
+        {"guardian-riposte-rally.keys", "guardian-riposte-rally.txt", 61},
+        {"guardian-riposte-rage.keys", "guardian-riposte-rage.txt", 61},
+        {"guardian-shield-wall-rally.keys", "guardian-shield-wall-rally.txt", 72},
+        {"guardian-shield-wall-rage.keys", "guardian-shield-wall-rage.txt", 73},
+        {"berserker-rend-rally.keys", "berserker-rend-rally.txt", 56},
+        {"berserker-rend-second-wind.keys", "berserker-rend-second-wind.txt", 56},
+        {"berserker-brace-rally.keys", "berserker-brace-rally.txt", 68},
+        {"berserker-brace-second-wind.keys", "berserker-brace-second-wind.txt", 109},
+    };
+
+    const fs::path root = ASCENSION_SOURCE_DIR;
+    const fs::path commandsPath = root / "playtest/outer-barrow/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && !commands.empty(), "the Outer Barrow command list is present");
+    Check(commands.find("--keys ") == std::string::npos,
+          "the commands read key files and do not inline a list");
+
+    for (const ReplayKeys& row : rows) {
+        const fs::path keysPath = root / "playtest/outer-barrow" / row.File;
+        const std::string flag = std::string("--keys-file playtest/outer-barrow/") + row.File;
+        Check(commands.find(flag) != std::string::npos, "the command names this key file");
+        Check(commands.find(row.Transcript) != std::string::npos,
+              "the command names this transcript");
+
+        std::string why;
+        PlaytestOptions options;
+        const bool parsed = Parse({"--keys-file", keysPath.string()}, options, why);
+        Check(parsed, "the replay key file parses");
+        if (!parsed)
+            std::printf("    %s\n", why.c_str());
+        if (static_cast<i32>(options.Keys.size()) != row.Words)
+            std::printf("    %s has %zu keys, expected %d\n", row.File, options.Keys.size(),
+                        row.Words);
+        Check(static_cast<i32>(options.Keys.size()) == row.Words,
+              "the replay key count is the Linux replay");
+    }
+
+    std::ifstream braceIn(root / "playtest/outer-barrow/berserker-brace-second-wind.keys");
+    const std::string brace((std::istreambuf_iterator<char>(braceIn)),
+                            std::istreambuf_iterator<char>());
+    Check(brace.find("5 space 3 3 3 4 5 4") != std::string::npos,
+          "Brace + Second Wind opens the Warden with Second Wind, then Rage");
+    Check(brace.find("5 space 3 3 3 5 4 4") == std::string::npos,
+          "Brace + Second Wind does not swap that Second Wind and Rage");
+    i32 braceWords = 0;
+    for (usize index = 0; index < brace.size();) {
+        while (index < brace.size() &&
+               (brace[index] == ' ' || brace[index] == '\t' || brace[index] == '\n' ||
+                brace[index] == '\r'))
+            ++index;
+        if (index >= brace.size())
+            break;
+        ++braceWords;
+        while (index < brace.size() && brace[index] != ' ' && brace[index] != '\t' &&
+               brace[index] != '\n' && brace[index] != '\r')
+            ++index;
+    }
+    if (braceWords != 109)
+        std::printf("    Brace + Second Wind has %d words\n", braceWords);
+    Check(braceWords == 109, "Brace + Second Wind is 109 words");
+}
+
 } // namespace
 
 int main()
@@ -583,6 +708,8 @@ int main()
     TestDataFolderHotReload();
     TestPickFlag();
     TestStartupFailureText();
+    TestNextFightAndScriptedKeys();
+    TestOuterBarrowReplayKeys();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

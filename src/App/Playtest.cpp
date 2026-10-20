@@ -519,6 +519,12 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.PickIds.emplace_back(value);
+        } else if (flag == "--trace") {
+            if (attached.has_value()) {
+                error = "--trace does not take a value";
+                return false;
+            }
+            options.Trace = true;
         } else {
             error = "unknown flag '" + std::string(flag) + "'";
             return false;

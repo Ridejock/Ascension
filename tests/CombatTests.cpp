@@ -787,6 +787,41 @@ void TestSummonSeats()
     Check(boss.ActorIndex() == 0, "Varn's seat in the turn order is unchanged");
 }
 
+void TestJoinedShardMark()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+    std::vector<CombatantSide> turns(20, CombatantSide::Enemy);
+    Battle boss(data, Sides(std::move(turns)));
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can call a shard under the marker");
+    boss.SetEnemyHp(120);
+    Check(boss.TargetIndex() == 0 && boss.Enemy().Id == "oathkeeper_varn", "Varn starts marked");
+
+    ActionResult joined;
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
+        joined = DriveVarn(boss);
+    Check(joined.Text.find("Rubble Shard joins") != std::string::npos && boss.Enemies().size() == 2 &&
+              boss.TargetIndex() == 0 && boss.Enemy().Id == "oathkeeper_varn",
+          "a shard joining does not move a living mark");
+
+    const i32 firstShard = ShardSlot(boss, true);
+    Check(firstShard == 1 && boss.SetTarget(firstShard), "the first shard is the second seat");
+    boss.SetEnemyHp(0);
+    Check(!boss.Enemies()[1].Alive() && boss.TargetIndex() == 0 && boss.Result() == BattleResult::Ongoing,
+          "the dead shard leaves the mark on Varn");
+
+    for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
+        joined = DriveVarn(boss);
+    Check(joined.Text.find("Rubble Shard 2 joins") != std::string::npos && boss.Enemies().size() == 3 &&
+              !boss.Enemies()[1].Alive() && boss.Enemies()[2].Alive() &&
+              boss.Enemies()[2].Id == "rubble_shard" && boss.TargetIndex() == 0,
+          "the second shard takes a new seat and the mark stays on Varn");
+    boss.CycleTarget(1);
+    Check(boss.TargetIndex() == 2 && boss.Enemy().Name == "Rubble Shard 2" && boss.Enemy().Alive(),
+          "one step right skips the corpse and lands on Rubble Shard 2");
+}
+
 void TestPackAim()
 {
     TempCopy copy;
@@ -1616,6 +1651,7 @@ int main()
     TestPhaseShard();
     TestWolfPack();
     TestSummonSeats();
+    TestJoinedShardMark();
     TestPackAim();
     TestGearAndConsumables();
     TestBossPlans();
