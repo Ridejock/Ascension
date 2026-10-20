@@ -519,11 +519,11 @@ bool HoldsStatus(const CombatantState& who, std::string_view id)
     return false;
 }
 
-// Strikes until the brute has landed the scripted Overhead. The step still names the
-// following maul, Steadfast is down, and it is the player's turn.
-bool AfterScriptedOverhead(Battle& battle)
+// Strikes until the warden has landed the second Cairn Slam. The step still names Settle,
+// and it is the player's turn.
+bool AfterSecondSlam(Battle& battle)
 {
-    for (i32 turn = 0; turn < 12; ++turn) {
+    for (i32 turn = 0; turn < 16; ++turn) {
         if (battle.Result() != BattleResult::Ongoing)
             return false;
         if (battle.Actor() == CombatantSide::Player) {
@@ -534,8 +534,7 @@ bool AfterScriptedOverhead(Battle& battle)
         const ActionResult act = battle.EnemyAct();
         if (!act.Accepted)
             return false;
-        if (act.SkillId == "overhead" && battle.Enemy().WindupSkill.empty() &&
-            battle.Enemy().PatternStep == 3 && !HoldsStatus(battle.Enemy(), "steadfast") &&
+        if (act.SkillId == "cairn_slam" && battle.Enemy().PatternStep == 3 &&
             battle.Actor() == CombatantSide::Player)
             return true;
     }
@@ -550,45 +549,43 @@ void TestAiSnapshot()
     if (!data.IsLoaded())
         return;
     std::string why;
-    Battle brute(data, std::make_unique<AgilityRoundModel>());
-    Check(brute.Start("fighter", 8, "barrow_brute", why) && AfterScriptedOverhead(brute),
-          "the scripted overhead has landed");
-    Check(brute.UseSkill("strike").Accepted && brute.Actor() == CombatantSide::Enemy,
-          "the save is taken on the brute's turn");
-    Check(brute.Inflict(CombatantSide::Player, "exposed", why), "the fighter is Exposed");
-    const i32 step = brute.Enemy().PatternStep;
-    Check(step == 3 && HoldsStatus(brute.Player(), "exposed") &&
-              !HoldsStatus(brute.Enemy(), "steadfast"),
-          "the maul is queued and Steadfast is down");
+    Battle warden(data, std::make_unique<AgilityRoundModel>());
+    Check(warden.Start("fighter", 8, "cairn_warden", why) && AfterSecondSlam(warden),
+          "the second slam has landed");
+    Check(warden.UseSkill("strike").Accepted && warden.Actor() == CombatantSide::Enemy,
+          "the save is taken on the warden's turn");
+    Check(warden.Inflict(CombatantSide::Player, "exposed", why), "the fighter is Exposed");
+    const i32 step = warden.Enemy().PatternStep;
+    Check(step == 3 && HoldsStatus(warden.Player(), "exposed"),
+          "Settle is queued and the fighter is Exposed");
 
     Hero hero = StartHero(data);
     Inventory bag = StartBag(data);
     RunState run = Capture(hero, bag);
     run.Standing = RunStanding::Ongoing;
-    run.Fight = brute.ExportFight();
+    run.Fight = warden.ExportFight();
     Check(run.Fight.Known && run.Fight.Actor == CombatantSide::Enemy &&
               run.Fight.Foes.size() == 1 && run.Fight.Foes[0].PatternStep == step,
-          "the snapshot is the brute's turn at the queued maul");
+          "the snapshot is the warden's turn at the queued Settle");
 
     TempDir dir("ascension-save-ai");
     RunSave saves(dir.Path);
-    Check(saves.Write(run, why), "the exposed brute fight is written");
+    Check(saves.Write(run, why), "the exposed warden fight is written");
     const RunLoad loaded = saves.Read();
     Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.Fight.Known,
           "the snapshot loads at version 3");
 
     Battle again(data, std::make_unique<AgilityRoundModel>());
-    Check(again.Start("fighter", 8, "barrow_brute", why) &&
+    Check(again.Start("fighter", 8, "cairn_warden", why) &&
               again.ImportFight(loaded.Run.Fight, why),
-          "the exposed brute snapshot is restored");
+          "the exposed warden snapshot is restored");
     Check(again.Actor() == CombatantSide::Enemy && again.Enemy().PatternStep == step &&
               HoldsStatus(again.Player(), "exposed"),
           "step and Exposed survive the round trip");
     const ActionResult next = again.EnemyAct();
-    Check(next.Accepted && next.SkillId == "bellow" && again.Enemy().PatternStep == step &&
-              next.Text.find("Steadfast.") != std::string::npos,
-          "the restored brute still inserts Bellow and leaves the step");
-    if (next.SkillId != "bellow" || again.Enemy().PatternStep != step)
+    Check(next.Accepted && next.SkillId == "cairn_slam" && again.Enemy().PatternStep == step,
+          "the restored warden still inserts Cairn Slam and leaves the step");
+    if (next.SkillId != "cairn_slam" || again.Enemy().PatternStep != step)
         std::printf("    restored: %s step %d\n", next.SkillId.c_str(), again.Enemy().PatternStep);
 }
 

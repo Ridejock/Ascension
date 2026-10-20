@@ -1592,24 +1592,13 @@ void TestShippedDescriptions()
 
     const EnemyDef* brute = data.FindEnemy("barrow_brute");
     const EnemyDef* warden = data.FindEnemy("cairn_warden");
-    const bool bruteRules = brute != nullptr && brute->Ai.size() == 2 &&
-                            brute->Ai[0].Action == AiAction::Skill &&
-                            brute->Ai[0].Skill == "bellow" &&
-                            brute->Ai[0].If.TargetStatus == "exposed" &&
-                            brute->Ai[0].If.SelfStatusAbsent == "steadfast" &&
-                            brute->Ai[1].Action == AiAction::Skill &&
-                            brute->Ai[1].Skill == "overhead" &&
-                            brute->Ai[1].If.TargetStatus == "exposed" &&
-                            brute->Ai[1].If.SelfStatus == "steadfast";
-    Check(bruteRules, "the brute answers Exposed with Bellow, then Overhead");
-    const bool wardenRules = warden != nullptr && warden->Ai.size() == 2 &&
+    Check(brute != nullptr && brute->Ai.empty(), "the brute keeps the plain pattern");
+    const bool wardenRules = warden != nullptr && warden->Ai.size() == 1 &&
                              warden->Ai[0].Action == AiAction::Skill &&
                              warden->Ai[0].Skill == "cairn_slam" &&
                              warden->Ai[0].If.TargetStatus == "exposed" &&
-                             warden->Ai[0].If.Next == "cairn_shell" &&
-                             warden->Ai[1].Skill == "cairn_slam" &&
-                             warden->Ai[1].If.Next == "cairn_settle";
-    Check(wardenRules, "the warden spends one Cairn Slam for Exposed on a shell or settle");
+                             warden->Ai[0].If.Next == "cairn_settle";
+    Check(wardenRules, "the warden spends one Cairn Slam for Exposed on Settle");
     const EnemyDef* wolf = data.FindEnemy("wolf");
     const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
     const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");

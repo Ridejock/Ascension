@@ -1753,6 +1753,28 @@ bool AfterScriptedOverhead(Battle& battle)
     return false;
 }
 
+// Strikes until the warden has landed the second Cairn Slam. The step still names Settle,
+// and it is the player's turn.
+bool AfterSecondSlam(Battle& battle)
+{
+    for (i32 turn = 0; turn < 16; ++turn) {
+        if (battle.Result() != BattleResult::Ongoing)
+            return false;
+        if (battle.Actor() == CombatantSide::Player) {
+            if (!battle.UseSkill("strike").Accepted)
+                return false;
+            continue;
+        }
+        const ActionResult act = battle.EnemyAct();
+        if (!act.Accepted)
+            return false;
+        if (act.SkillId == "cairn_slam" && battle.Enemy().PatternStep == 3 &&
+            battle.Actor() == CombatantSide::Player)
+            return true;
+    }
+    return false;
+}
+
 void TestFoeRules()
 {
     Database data(ASCENSION_SHIPPED_DATA_DIR);
@@ -1783,29 +1805,11 @@ void TestFoeRules()
     const i32 queued = brute.Enemy().PatternStep;
     Check(queued == 3 && brute.Inflict(CombatantSide::Player, "exposed", error),
           "the fighter is Exposed while the maul is still queued");
-    const ActionResult inserted = brute.EnemyAct();
-    Check(inserted.Accepted && inserted.SkillId == "bellow" && brute.Enemy().PatternStep == queued &&
-              inserted.Text.find("Steadfast.") != std::string::npos,
-          "Exposed inserts Bellow and leaves the pattern step");
-    if (inserted.SkillId != "bellow" || brute.Enemy().PatternStep != queued)
-        std::printf("    insert: %s step %d text %s\n", inserted.SkillId.c_str(),
-                    brute.Enemy().PatternStep, inserted.Text.c_str());
-
-    Check(brute.UseSkill("strike").Accepted && Holds(brute.Player(), "exposed"),
-          "Exposed is still up on the turn after the insert");
-    const ActionResult telegraph = brute.EnemyAct();
-    Check(telegraph.Accepted && telegraph.SkillId == "overhead" && telegraph.Damage == 0 &&
-              brute.Enemy().WindupSkill == "overhead" && brute.Enemy().PatternStep == queued,
-          "the next act is Overhead and the maul stays queued");
-    if (telegraph.SkillId != "overhead" || brute.Enemy().PatternStep != queued)
-        std::printf("    overhead: %s step %d wind %s\n", telegraph.SkillId.c_str(),
-                    brute.Enemy().PatternStep, brute.Enemy().WindupSkill.c_str());
-    const ActionResult heavy = brute.UseSkill("heavy_blow");
-    Check(heavy.Accepted && heavy.Text.find("shrugs off the stun") != std::string::npos &&
-              brute.Enemy().WindupSkill == "overhead",
-          "Heavy Blow on that telegraph is shrugged off and the wind-up remains");
-    if (heavy.Text.find("shrugs off the stun") == std::string::npos)
-        std::printf("    heavy: %s\n", heavy.Text.c_str());
+    const ActionResult maul = brute.EnemyAct();
+    Check(maul.Accepted && maul.SkillId == "brute_maul" && brute.Enemy().PatternStep == queued + 1,
+          "Exposed does not pull the brute off the queued maul");
+    if (maul.SkillId != "brute_maul" || brute.Enemy().PatternStep != queued + 1)
+        std::printf("    maul: %s step %d\n", maul.SkillId.c_str(), brute.Enemy().PatternStep);
 
     Battle shell(data, std::make_unique<AgilityRoundModel>());
     Check(shell.Start("fighter", 8, "cairn_warden", error), "the warden fight starts");
@@ -1824,12 +1828,27 @@ void TestFoeRules()
           "the fighter starts the warden fight Exposed");
     Check(open.UseSkill("strike").Accepted && Holds(open.Player(), "exposed"),
           "the opening strike leaves Exposed up");
-    const ActionResult slam = open.EnemyAct();
-    Check(slam.Accepted && slam.SkillId == "cairn_slam" && open.Enemy().PatternStep == 0 &&
-              open.Enemy().BonusDefense == 0,
-          "Exposed inserts one Cairn Slam and leaves the shell queued");
-    if (slam.SkillId != "cairn_slam" || open.Enemy().PatternStep != 0)
-        std::printf("    slam: %s step %d\n", slam.SkillId.c_str(), open.Enemy().PatternStep);
+    const ActionResult shelled = open.EnemyAct();
+    Check(shelled.Accepted && shelled.SkillId == "cairn_shell" && open.Enemy().PatternStep == 1 &&
+              open.Enemy().BonusDefense == 150 && open.Enemy().BonusDefenseTurns == 1,
+          "Exposed still plays Cairn Shell and advances the step");
+    if (shelled.SkillId != "cairn_shell" || open.Enemy().PatternStep != 1)
+        std::printf("    exposed shell: %s step %d\n", shelled.SkillId.c_str(),
+                    open.Enemy().PatternStep);
+
+    Battle settle(data, std::make_unique<AgilityRoundModel>());
+    Check(settle.Start("fighter", 8, "cairn_warden", error) && AfterSecondSlam(settle),
+          "the second slam has landed and Settle is next");
+    Check(settle.UseSkill("strike").Accepted && settle.Actor() == CombatantSide::Enemy,
+          "the warden's turn is next");
+    const i32 settleStep = settle.Enemy().PatternStep;
+    Check(settleStep == 3 && settle.Inflict(CombatantSide::Player, "exposed", error),
+          "the fighter is Exposed while Settle is still queued");
+    const ActionResult slam = settle.EnemyAct();
+    Check(slam.Accepted && slam.SkillId == "cairn_slam" && settle.Enemy().PatternStep == settleStep,
+          "Exposed inserts one Cairn Slam and leaves Settle queued");
+    if (slam.SkillId != "cairn_slam" || settle.Enemy().PatternStep != settleStep)
+        std::printf("    slam: %s step %d\n", slam.SkillId.c_str(), settle.Enemy().PatternStep);
 
     TempCopy copy;
     ReplaceInFile(copy.Path / "enemies.json", "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
