@@ -510,6 +510,76 @@ void TestCorruptFallsBack()
     Check(fresh.Level() == 1 && fresh.Xp() == 0, "a failed load leaves a new run to start");
 }
 
+bool HoldsStatus(const CombatantState& who, std::string_view id)
+{
+    for (const StatusInstance& status : who.Statuses) {
+        if (status.Id == id)
+            return true;
+    }
+    return false;
+}
+
+void TestAiSnapshot()
+{
+    DataCopy copy;
+    ReplaceInFile(copy.Path / "enemies.json",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    }",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    },\n    {\n      \"id\": \"rule_post\",\n      \"name\": "
+                  "\"Rule Post\",\n      \"description\": \"A post with a short pattern and two "
+                  "rules.\",\n      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"thrust\"],\n"
+                  "      \"pattern\": [\"harden\", \"thrust\"],\n      \"ai\": [\n        "
+                  "{ \"if\": { \"targetStatus\": \"exposed\", \"next\": \"harden\" }, "
+                  "\"do\": \"skill\", \"skill\": \"thrust\" }\n      ],\n      \"experience\": 0,\n"
+                  "      \"gold\": 0\n    }");
+    Database data(copy.Path);
+    DataError loadError;
+    Check(data.Load(&loadError), "the rule post loads");
+    if (!data.IsLoaded())
+        return;
+    std::string why;
+    Battle post(data, std::make_unique<AgilityRoundModel>());
+    Check(post.Start("fighter", 1, "rule_post", why) &&
+              post.Inflict(CombatantSide::Player, "exposed", why),
+          "the fighter starts Exposed");
+    Check(post.UseSkill("strike").Accepted && post.Actor() == CombatantSide::Enemy,
+          "the save is taken on the post's turn");
+    const i32 step = post.Enemy().PatternStep;
+    Check(step == 0 && HoldsStatus(post.Player(), "exposed"),
+          "Harden is queued and the fighter is Exposed");
+
+    Hero hero = StartHero(data);
+    Inventory bag = StartBag(data);
+    RunState run = Capture(hero, bag);
+    run.Standing = RunStanding::Ongoing;
+    run.Fight = post.ExportFight();
+    Check(run.Fight.Known && run.Fight.Actor == CombatantSide::Enemy &&
+              run.Fight.Foes.size() == 1 && run.Fight.Foes[0].PatternStep == step,
+          "the snapshot is the post's turn at the queued Harden");
+
+    TempDir dir("ascension-save-ai");
+    RunSave saves(dir.Path);
+    Check(saves.Write(run, why), "the exposed post fight is written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.Fight.Known,
+          "the snapshot loads at version 3");
+
+    Battle again(data, std::make_unique<AgilityRoundModel>());
+    Check(again.Start("fighter", 1, "rule_post", why) && again.ImportFight(loaded.Run.Fight, why),
+          "the exposed post snapshot is restored");
+    Check(again.Actor() == CombatantSide::Enemy && again.Enemy().PatternStep == step &&
+              HoldsStatus(again.Player(), "exposed"),
+          "step and Exposed survive the round trip");
+    const ActionResult next = again.EnemyAct();
+    Check(next.Accepted && next.SkillId == "thrust" && again.Enemy().PatternStep == step,
+          "the restored post still inserts Thrust and leaves the step");
+    if (next.SkillId != "thrust" || again.Enemy().PatternStep != step)
+        std::printf("    restored: %s step %d\n", next.SkillId.c_str(), again.Enemy().PatternStep);
+}
+
 } // namespace
 
 int main()
@@ -523,6 +593,7 @@ int main()
     TestMidFight();
     TestVersion2Restarts();
     TestCorruptFallsBack();
+    TestAiSnapshot();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();
     return g_Failures == 0 ? 0 : 1;

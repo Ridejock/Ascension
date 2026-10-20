@@ -1589,6 +1589,13 @@ void TestShippedDescriptions()
               guardian->Picks[1].Options[1].Id == "rage" &&
               guardian->Picks[1].Options[1].Resolved.FocusCost == 2,
           "guardian picks stay Riposte or Shield Wall, then Rally or Rage");
+
+    bool shippedRules = false;
+    for (const EnemyDef& enemy : data.GetEnemies()) {
+        if (!enemy.Ai.empty())
+            shippedRules = true;
+    }
+    Check(!shippedRules && !data.GetEnemies().empty(), "no shipped foe has an ai list");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
@@ -1828,12 +1835,81 @@ void TestEveryRequiredFoe()
     Check(ItemIsOffered(*axe, axe->RequiresDefeated), "every required foe offers the item");
 }
 
+void TestAiValidation()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"mood\": \"angry\" }, \"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "mood", "an ai condition rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetStatus\": \"exposed\" }, "
+                      "\"do\": \"skill\", \"skill\": \"bite\" } ],");
+        TestRejected(copy.Path, "enemies.json", "bite", "an ai skill must be one of the foe's");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetStatus\": \"doomed\" }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "doomed", "an ai status must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"next\": \"bite\" }, \"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "pattern",
+                     "an ai next skill must be in the pattern");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetGuardAtLeast\": 150 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "targetGuardAtLeast",
+                     "a guard percent above 100 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetStatus\": \"exposed\", "
+                      "\"next\": \"thrust\" }, \"do\": \"skill\", \"skill\": \"harden\" } ],");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a test foe rule loads");
+        const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
+        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
+                            sentry->Ai[0].Action == AiAction::Skill &&
+                            sentry->Ai[0].Skill == "harden" &&
+                            sentry->Ai[0].If.TargetStatus == "exposed" &&
+                            sentry->Ai[0].If.Next == "thrust" &&
+                            !sentry->Ai[0].If.TargetGuardAtLeast.has_value();
+        Check(loaded, "the loaded rule keeps the skill, Exposed, and the pattern head");
+    }
+}
+
 int main()
 {
     TestSample();
     TestEveryRequiredFoe();
     TestHotReload();
     TestValidation();
+    TestAiValidation();
     TestLayers();
     TestUnusedFields();
     TestConditionalFields();

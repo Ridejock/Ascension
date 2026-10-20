@@ -1533,6 +1533,161 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool OptionalRange(const Json& object, const char* key, i32 min, i32 max, std::optional<i32>& out,
+                   std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    i32 value = 0;
+    if (!ReadInt(*it, min, max, value, error)) {
+        error = std::string("'") + key + "' " + error;
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+bool OptionalPhase(const Json& object, std::optional<i32>& out, std::string& error)
+{
+    const auto it = object.find("phase");
+    if (it == object.end())
+        return true;
+    i32 value = 0;
+    if (!ReadInt(*it, 1, 2, value, error)) {
+        error = "'phase' " + error;
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+bool OptionalStatusId(const Parsed& parsed, const Json& object, const char* key, std::string& out,
+                      std::string& error)
+{
+    if (!OptionalId(object, key, out, error))
+        return false;
+    if (out.empty() || FindId(parsed.Statuses, out) != nullptr)
+        return true;
+    error = std::string("'") + key + "' status " + Quote(out) + " does not exist";
+    return false;
+}
+
+bool GrantHas(const std::vector<SkillGrant>& skills, std::string_view id)
+{
+    for (const SkillGrant& grant : skills) {
+        if (grant.Id == id)
+            return true;
+    }
+    return false;
+}
+
+bool PatternHas(const std::vector<std::string>& pattern, std::string_view id)
+{
+    for (const std::string& step : pattern) {
+        if (step == id)
+            return true;
+    }
+    return false;
+}
+
+// `ai` is optional. Each rule is an ordered interrupt. The loader checks the skill and
+// status ids here; the fight only reads the list.
+bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::string& error)
+{
+    const auto ai = entry.find("ai");
+    if (ai == entry.end())
+        return true;
+    if (!ai->is_array()) {
+        error = "'ai' must be a list";
+        return false;
+    }
+    i32 index = 0;
+    for (const Json& ruleJson : *ai) {
+        ++index;
+        const std::string where = "'ai' rule " + std::to_string(index);
+        if (!ruleJson.is_object()) {
+            error = where + " must be an object";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(ruleJson, {"if", "do", "skill"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        const auto condition = ruleJson.find("if");
+        if (condition == ruleJson.end() || !condition->is_object()) {
+            error = where + ": 'if' must be an object";
+            return false;
+        }
+        if (!AllowKeys(*condition,
+                       {"selfHpAtMost", "selfHpAtLeast", "targetHpAtMost", "targetHpAtLeast",
+                        "selfStatus", "selfStatusAbsent", "targetStatus", "targetStatusAbsent",
+                        "targetGuardAtLeast", "selfHardenAtLeast", "phase", "next"},
+                       unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        AiRule rule;
+        if (!OptionalRange(*condition, "selfHpAtMost", 0, 100, rule.If.SelfHpAtMost, error) ||
+            !OptionalRange(*condition, "selfHpAtLeast", 0, 100, rule.If.SelfHpAtLeast, error) ||
+            !OptionalRange(*condition, "targetHpAtMost", 0, 100, rule.If.TargetHpAtMost, error) ||
+            !OptionalRange(*condition, "targetHpAtLeast", 0, 100, rule.If.TargetHpAtLeast,
+                           error) ||
+            !OptionalRange(*condition, "targetGuardAtLeast", 0, 100, rule.If.TargetGuardAtLeast,
+                           error) ||
+            !OptionalRange(*condition, "selfHardenAtLeast", 0, 9999, rule.If.SelfHardenAtLeast,
+                           error) ||
+            !OptionalPhase(*condition, rule.If.Phase, error) ||
+            !OptionalStatusId(parsed, *condition, "selfStatus", rule.If.SelfStatus, error) ||
+            !OptionalStatusId(parsed, *condition, "selfStatusAbsent", rule.If.SelfStatusAbsent,
+                              error) ||
+            !OptionalStatusId(parsed, *condition, "targetStatus", rule.If.TargetStatus, error) ||
+            !OptionalStatusId(parsed, *condition, "targetStatusAbsent",
+                              rule.If.TargetStatusAbsent, error) ||
+            !OptionalId(*condition, "next", rule.If.Next, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        if (!rule.If.Next.empty() && !PatternHas(enemy.Pattern, rule.If.Next)) {
+            error = where + ": 'next' skill " + Quote(rule.If.Next) + " is not in the pattern";
+            return false;
+        }
+        std::string action;
+        if (!RequireString(ruleJson, "do", action, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        if (action == "pattern")
+            rule.Action = AiAction::Pattern;
+        else if (action == "skill")
+            rule.Action = AiAction::Skill;
+        else {
+            error = where + ": 'do' must be \"skill\" or \"pattern\"";
+            return false;
+        }
+        if (rule.Action == AiAction::Skill) {
+            if (!RequireString(ruleJson, "skill", rule.Skill, error)) {
+                error = where + ": " + error;
+                return false;
+            }
+            if (!IsId(rule.Skill)) {
+                error = where + ": 'skill' must be an id";
+                return false;
+            }
+            if (!GrantHas(enemy.Skills, rule.Skill)) {
+                error = where + ": skill " + Quote(rule.Skill) + " is not in skills";
+                return false;
+            }
+        } else if (ruleJson.contains("skill")) {
+            error = where + ": 'skill' is only used when 'do' is \"skill\"";
+            return false;
+        }
+        enemy.Ai.push_back(std::move(rule));
+    }
+    return true;
+}
+
 bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("enemies");
@@ -1560,7 +1715,8 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "level", "stats", "skills", "experience",
-                        "gold", "boss", "pattern", "phaseAtPercent", "phaseStatus", "summon"},
+                        "gold", "boss", "pattern", "phaseAtPercent", "phaseStatus", "summon",
+                        "ai"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
@@ -1592,6 +1748,8 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
             if (!ReadIdList(entry, "pattern", enemy.Pattern, patternError, true))
                 return fail(patternError);
         }
+        if (!ReadAi(parsed, entry, enemy, error))
+            return fail(error);
         if (!OptionalInt(entry, "phaseAtPercent", 1, 99, enemy.PhaseAtPercent, error) ||
             !OptionalId(entry, "phaseStatus", enemy.PhaseStatus, error))
             return fail(error);

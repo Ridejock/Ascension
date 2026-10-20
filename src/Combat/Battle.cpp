@@ -33,6 +33,71 @@ const StatusDef* FindStatusDef(std::span<const StatusDef> catalog, std::string_v
     return nullptr;
 }
 
+bool HoldsStatus(const CombatantState& who, std::string_view id)
+{
+    if (id.empty())
+        return false;
+    for (const StatusInstance& status : who.Statuses) {
+        if (status.Id == id)
+            return true;
+    }
+    return false;
+}
+
+// The same test phase uses: hp * 100 against maxHp * percent.
+bool HpAtMost(i32 hp, i32 maxHp, i32 percent)
+{
+    if (hp < 0)
+        hp = 0;
+    if (maxHp < 1)
+        maxHp = 1;
+    return static_cast<i64>(hp) * 100 <= static_cast<i64>(maxHp) * percent;
+}
+
+bool HpAtLeast(i32 hp, i32 maxHp, i32 percent)
+{
+    if (hp < 0)
+        hp = 0;
+    if (maxHp < 1)
+        maxHp = 1;
+    return static_cast<i64>(hp) * 100 >= static_cast<i64>(maxHp) * percent;
+}
+
+bool AiHolds(const CombatantState& self, const CombatantState& target, const SkillDef* next,
+             const AiCondition& condition)
+{
+    if (condition.SelfHpAtMost.has_value() &&
+        !HpAtMost(self.Hp, self.MaxHp, *condition.SelfHpAtMost))
+        return false;
+    if (condition.SelfHpAtLeast.has_value() &&
+        !HpAtLeast(self.Hp, self.MaxHp, *condition.SelfHpAtLeast))
+        return false;
+    if (condition.TargetHpAtMost.has_value() &&
+        !HpAtMost(target.Hp, target.MaxHp, *condition.TargetHpAtMost))
+        return false;
+    if (condition.TargetHpAtLeast.has_value() &&
+        !HpAtLeast(target.Hp, target.MaxHp, *condition.TargetHpAtLeast))
+        return false;
+    if (!condition.SelfStatus.empty() && !HoldsStatus(self, condition.SelfStatus))
+        return false;
+    if (!condition.SelfStatusAbsent.empty() && HoldsStatus(self, condition.SelfStatusAbsent))
+        return false;
+    if (!condition.TargetStatus.empty() && !HoldsStatus(target, condition.TargetStatus))
+        return false;
+    if (!condition.TargetStatusAbsent.empty() && HoldsStatus(target, condition.TargetStatusAbsent))
+        return false;
+    if (condition.TargetGuardAtLeast.has_value() &&
+        target.GuardPercent < *condition.TargetGuardAtLeast)
+        return false;
+    if (condition.SelfHardenAtLeast.has_value() && self.BonusDefense < *condition.SelfHardenAtLeast)
+        return false;
+    if (condition.Phase.has_value() && self.Phase != *condition.Phase)
+        return false;
+    if (!condition.Next.empty() && (next == nullptr || next->Id != condition.Next))
+        return false;
+    return true;
+}
+
 void CopyFightState(const CombatantState& from, CombatantState& to)
 {
     to.GuardPercent = from.GuardPercent;
@@ -1873,30 +1938,59 @@ ActionResult Battle::ResolveSummon(i32 index)
     return result;
 }
 
+Battle::PatternHead Battle::PeekPattern(const CombatantState& who, const EnemyDef& enemy) const
+{
+    PatternHead head;
+    if (enemy.Pattern.empty())
+        return head;
+    const i32 count = static_cast<i32>(enemy.Pattern.size());
+    for (i32 step = 0; step < count; ++step) {
+        const i32 patternIndex = (who.PatternStep + step) % count;
+        const SkillDef* skill = EnemySkill(who, enemy.Pattern[static_cast<usize>(patternIndex)]);
+        if (skill == nullptr || skill->Kind != SkillKind::Active)
+            continue;
+        if (skill->FocusCost > who.Focus)
+            continue;
+        head.Skill = skill;
+        head.Index = patternIndex;
+        return head;
+    }
+    return head;
+}
+
 const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
 {
     if (m_Data == nullptr)
         return nullptr;
     const EnemyDef* enemy = m_Data->FindEnemy(who.Id);
-    if (enemy != nullptr && !enemy->Pattern.empty()) {
-        const i32 count = static_cast<i32>(enemy->Pattern.size());
-        for (i32 step = 0; step < count; ++step) {
-            const i32 patternIndex = (who.PatternStep + step) % count;
-            const SkillDef* skill =
-                EnemySkill(who, enemy->Pattern[static_cast<usize>(patternIndex)]);
-            if (skill == nullptr || skill->Kind != SkillKind::Active)
-                continue;
-            if (skill->FocusCost > who.Focus)
-                continue;
-            who.PatternStep = patternIndex + 1;
-            return skill;
-        }
-        return nullptr;
-    }
-
-    const SkillDef* best = nullptr;
     if (enemy == nullptr)
         return nullptr;
+
+    const PatternHead head = PeekPattern(who, *enemy);
+    for (const AiRule& rule : enemy->Ai) {
+        if (!AiHolds(who, m_Player, head.Skill, rule.If))
+            continue;
+        if (rule.Action == AiAction::Pattern)
+            break;
+        const SkillDef* skill = EnemySkill(who, rule.Skill);
+        if (skill == nullptr || skill->Kind != SkillKind::Active)
+            continue;
+        if (skill->FocusCost > who.Focus)
+            continue;
+        // The pattern head is consumed. An insert leaves the step for the next choice.
+        if (head.Skill != nullptr && skill->Id == head.Skill->Id)
+            who.PatternStep = head.Index + 1;
+        return skill;
+    }
+    if (head.Skill != nullptr) {
+        who.PatternStep = head.Index + 1;
+        return head.Skill;
+    }
+    // A pattern that cannot be paid does not fall through to a skill outside it.
+    if (!enemy->Pattern.empty())
+        return nullptr;
+
+    const SkillDef* best = nullptr;
     for (const SkillGrant& grant : enemy->Skills) {
         const SkillDef* skill = &grant.Resolved;
         if (skill->Kind != SkillKind::Active)
