@@ -1,0 +1,20 @@
+# Outer Barrow MSVC playtest. The Playtest suite checks these files.
+# Word counts: riposte+rally 61, riposte+rage 61, wall+rally 72, wall+rage 73,
+# rend+rally 56, rend+second-wind 56, brace+rally 68, brace+second-wind 109.
+# Run from the repo root. Paste into PowerShell, not cmd.exe.
+
+.\build\debug\bin\Ascension.exe --data data --choose guardian --pick riposte --pick rally --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/guardian-riposte-rally.keys --transcript guardian-riposte-rally.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose guardian --pick riposte --pick rage --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/guardian-riposte-rage.keys --transcript guardian-riposte-rage.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose guardian --pick shield_wall --pick rally --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/guardian-shield-wall-rally.keys --transcript guardian-shield-wall-rally.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose guardian --pick shield_wall --pick rage --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/guardian-shield-wall-rage.keys --transcript guardian-shield-wall-rage.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose berserker --pick rend --pick rally --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/berserker-rend-rally.keys --transcript berserker-rend-rally.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose berserker --pick rend --pick second_wind --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/berserker-rend-second-wind.keys --transcript berserker-rend-second-wind.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose berserker --pick brace --pick rally --equip rusty_sword,oak_shield,wolfhide_charm --keys-file playtest/outer-barrow/berserker-brace-rally.keys --transcript berserker-brace-rally.txt
+
+.\build\debug\bin\Ascension.exe --data data --choose berserker --pick brace --pick second_wind --equip rusty_sword,oak_shield,wolfhide_charm --trace --keys-file playtest/outer-barrow/berserker-brace-second-wind.keys --transcript berserker-brace-second-wind.txt

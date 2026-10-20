@@ -179,7 +179,8 @@ if(ASCENSION_BUILD_TESTS)
     target_include_directories(AscensionPlaytestTests PRIVATE src/App)
     target_link_libraries(AscensionPlaytestTests PRIVATE AscensionProgress)
     target_compile_definitions(AscensionPlaytestTests PRIVATE
-        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     emerald_set_warnings(AscensionPlaytestTests)
     add_test(NAME Playtest COMMAND AscensionPlaytestTests)
 endif()

@@ -622,6 +622,81 @@ void TestNextFightAndScriptedKeys()
     Check(DecideScriptedPress(idle) == ScriptedPress::Play, "with no script, a window key plays");
 }
 
+// The eight Outer Barrow replays. commands.txt is what the PR body pastes. Each
+// --keys-file is the list Linux ran. Brace + Second Wind is 109 words; a 113-word
+// paste is a different list.
+void TestOuterBarrowReplayKeys()
+{
+    struct ReplayKeys {
+        const char* File;
+        const char* Transcript;
+        i32 Words;
+    };
+    const ReplayKeys rows[] = {
+        {"guardian-riposte-rally.keys", "guardian-riposte-rally.txt", 61},
+        {"guardian-riposte-rage.keys", "guardian-riposte-rage.txt", 61},
+        {"guardian-shield-wall-rally.keys", "guardian-shield-wall-rally.txt", 72},
+        {"guardian-shield-wall-rage.keys", "guardian-shield-wall-rage.txt", 73},
+        {"berserker-rend-rally.keys", "berserker-rend-rally.txt", 56},
+        {"berserker-rend-second-wind.keys", "berserker-rend-second-wind.txt", 56},
+        {"berserker-brace-rally.keys", "berserker-brace-rally.txt", 68},
+        {"berserker-brace-second-wind.keys", "berserker-brace-second-wind.txt", 109},
+    };
+
+    const fs::path root = ASCENSION_SOURCE_DIR;
+    const fs::path commandsPath = root / "playtest/outer-barrow/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && !commands.empty(), "the Outer Barrow command list is present");
+    Check(commands.find("--keys ") == std::string::npos,
+          "the commands read key files and do not inline a list");
+
+    for (const ReplayKeys& row : rows) {
+        const fs::path keysPath = root / "playtest/outer-barrow" / row.File;
+        const std::string flag = std::string("--keys-file playtest/outer-barrow/") + row.File;
+        Check(commands.find(flag) != std::string::npos, "the command names this key file");
+        Check(commands.find(row.Transcript) != std::string::npos,
+              "the command names this transcript");
+
+        std::string why;
+        PlaytestOptions options;
+        const bool parsed = Parse({"--keys-file", keysPath.string()}, options, why);
+        Check(parsed, "the replay key file parses");
+        if (!parsed)
+            std::printf("    %s\n", why.c_str());
+        if (static_cast<i32>(options.Keys.size()) != row.Words)
+            std::printf("    %s has %zu keys, expected %d\n", row.File, options.Keys.size(),
+                        row.Words);
+        Check(static_cast<i32>(options.Keys.size()) == row.Words,
+              "the replay key count is the Linux replay");
+    }
+
+    std::ifstream braceIn(root / "playtest/outer-barrow/berserker-brace-second-wind.keys");
+    const std::string brace((std::istreambuf_iterator<char>(braceIn)),
+                            std::istreambuf_iterator<char>());
+    Check(brace.find("5 space 3 3 3 4 5 4") != std::string::npos,
+          "Brace + Second Wind opens the Warden with Second Wind, then Rage");
+    Check(brace.find("5 space 3 3 3 5 4 4") == std::string::npos,
+          "Brace + Second Wind does not swap that Second Wind and Rage");
+    i32 braceWords = 0;
+    for (usize index = 0; index < brace.size();) {
+        while (index < brace.size() &&
+               (brace[index] == ' ' || brace[index] == '\t' || brace[index] == '\n' ||
+                brace[index] == '\r'))
+            ++index;
+        if (index >= brace.size())
+            break;
+        ++braceWords;
+        while (index < brace.size() && brace[index] != ' ' && brace[index] != '\t' &&
+               brace[index] != '\n' && brace[index] != '\r')
+            ++index;
+    }
+    if (braceWords != 109)
+        std::printf("    Brace + Second Wind has %d words\n", braceWords);
+    Check(braceWords == 109, "Brace + Second Wind is 109 words");
+}
+
 } // namespace
 
 int main()
@@ -634,6 +709,7 @@ int main()
     TestPickFlag();
     TestStartupFailureText();
     TestNextFightAndScriptedKeys();
+    TestOuterBarrowReplayKeys();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
