@@ -276,6 +276,36 @@ struct ClassDef {
 // the refusal.
 enum class BlockedSummon : u8 { Act, Fizzle };
 
+// What a matching ai rule does. Pattern is the repeating list. Skill is one of this
+// enemy's own grants.
+enum class AiAction : u8 { Pattern, Skill };
+
+// One condition. An empty string, or an optional that is not set, is not tested. Every
+// field that is set has to hold. A percent uses the phase comparison: hp * 100 against
+// maxHp * percent.
+struct AiCondition {
+    std::optional<i32> SelfHpAtMost;
+    std::optional<i32> SelfHpAtLeast;
+    std::optional<i32> TargetHpAtMost;
+    std::optional<i32> TargetHpAtLeast;
+    std::string SelfStatus;
+    std::string SelfStatusAbsent;
+    std::string TargetStatus;
+    std::string TargetStatusAbsent;
+    std::optional<i32> TargetGuardAtLeast;
+    std::optional<i32> SelfHardenAtLeast;
+    std::optional<i32> Phase;
+    std::string Next;
+};
+
+// The first matching rule wins. A skill that is the pattern head consumes the step.
+// Any other skill is an insert and leaves the step where it is.
+struct AiRule {
+    AiCondition If;
+    AiAction Action = AiAction::Pattern;
+    std::string Skill;
+};
+
 struct EnemyDef {
     std::string Id;
     std::string Name;
@@ -287,6 +317,7 @@ struct EnemyDef {
     i32 Gold = 0;
     bool Boss = false;                // the roster has one boss, last in the sample
     std::vector<std::string> Pattern; // repeating skill ids; empty picks the strongest hit
+    std::vector<AiRule> Ai;           // ordered interrupts; empty leaves the pattern in charge
     i32 PhaseAtPercent = 0;           // 0 means one phase. Otherwise phase 2 begins at this health
     std::string PhaseStatus;          // applied once when phase 2 begins
     // In phase 2, every SummonEvery actions, this enemy calls SummonId into the fight.

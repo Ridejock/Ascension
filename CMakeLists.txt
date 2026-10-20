@@ -154,7 +154,8 @@ if(ASCENSION_BUILD_TESTS)
     target_include_directories(AscensionCombatTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/App")
     target_compile_definitions(AscensionCombatTests PRIVATE
-        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionCombatTests)
     add_test(NAME Combat COMMAND AscensionCombatTests)
 
@@ -175,7 +176,8 @@ if(ASCENSION_BUILD_TESTS)
     add_executable(AscensionSaveTests tests/SaveTests.cpp tests/Check.h)
     target_link_libraries(AscensionSaveTests PRIVATE AscensionProgress AscensionCombat)
     target_compile_definitions(AscensionSaveTests PRIVATE
-        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionSaveTests)
     add_test(NAME Save COMMAND AscensionSaveTests)
 

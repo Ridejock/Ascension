@@ -149,6 +149,18 @@
       },
       "skills": ["cairn_shell", "cairn_slam", "cairn_settle"],
       "pattern": ["cairn_shell", "cairn_slam", "cairn_slam", "cairn_settle"],
+      "ai": [
+        {
+          "if": { "targetStatus": "exposed", "next": "cairn_shell" },
+          "do": "skill",
+          "skill": "cairn_slam"
+        },
+        {
+          "if": { "targetStatus": "exposed", "next": "cairn_settle" },
+          "do": "skill",
+          "skill": "cairn_slam"
+        }
+      ],
       "experience": 30,
       "gold": 14
     },
@@ -166,6 +178,18 @@
       },
       "skills": ["bellow", "overhead", "brute_maul"],
       "pattern": ["bellow", "brute_maul", "overhead", "brute_maul"],
+      "ai": [
+        {
+          "if": { "targetStatus": "exposed", "selfStatusAbsent": "steadfast" },
+          "do": "skill",
+          "skill": "bellow"
+        },
+        {
+          "if": { "targetStatus": "exposed", "selfStatus": "steadfast" },
+          "do": "skill",
+          "skill": "overhead"
+        }
+      ],
       "experience": 40,
       "gold": 20
     }

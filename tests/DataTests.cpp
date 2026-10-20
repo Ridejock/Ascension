@@ -1589,6 +1589,33 @@ void TestShippedDescriptions()
               guardian->Picks[1].Options[1].Id == "rage" &&
               guardian->Picks[1].Options[1].Resolved.FocusCost == 2,
           "guardian picks stay Riposte or Shield Wall, then Rally or Rage");
+
+    const EnemyDef* brute = data.FindEnemy("barrow_brute");
+    const EnemyDef* warden = data.FindEnemy("cairn_warden");
+    const bool bruteRules = brute != nullptr && brute->Ai.size() == 2 &&
+                            brute->Ai[0].Action == AiAction::Skill &&
+                            brute->Ai[0].Skill == "bellow" &&
+                            brute->Ai[0].If.TargetStatus == "exposed" &&
+                            brute->Ai[0].If.SelfStatusAbsent == "steadfast" &&
+                            brute->Ai[1].Action == AiAction::Skill &&
+                            brute->Ai[1].Skill == "overhead" &&
+                            brute->Ai[1].If.TargetStatus == "exposed" &&
+                            brute->Ai[1].If.SelfStatus == "steadfast";
+    Check(bruteRules, "the brute answers Exposed with Bellow, then Overhead");
+    const bool wardenRules = warden != nullptr && warden->Ai.size() == 2 &&
+                             warden->Ai[0].Action == AiAction::Skill &&
+                             warden->Ai[0].Skill == "cairn_slam" &&
+                             warden->Ai[0].If.TargetStatus == "exposed" &&
+                             warden->Ai[0].If.Next == "cairn_shell" &&
+                             warden->Ai[1].Skill == "cairn_slam" &&
+                             warden->Ai[1].If.Next == "cairn_settle";
+    Check(wardenRules, "the warden spends one Cairn Slam for Exposed on a shell or settle");
+    const EnemyDef* wolf = data.FindEnemy("wolf");
+    const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
+    const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");
+    Check(wolf != nullptr && wolf->Ai.empty() && sentry != nullptr && sentry->Ai.empty() &&
+              varn != nullptr && varn->Ai.empty(),
+          "wolf, the sentry, and Varn keep the pattern");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
@@ -1828,12 +1855,62 @@ void TestEveryRequiredFoe()
     Check(ItemIsOffered(*axe, axe->RequiresDefeated), "every required foe offers the item");
 }
 
+void TestAiValidation()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"mood\": \"angry\" }, \"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "mood", "an ai condition rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetStatus\": \"exposed\" }, "
+                      "\"do\": \"skill\", \"skill\": \"bite\" } ],");
+        TestRejected(copy.Path, "enemies.json", "bite", "an ai skill must be one of the foe's");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetStatus\": \"doomed\" }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "doomed", "an ai status must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"next\": \"bite\" }, \"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "pattern",
+                     "an ai next skill must be in the pattern");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetGuardAtLeast\": 150 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "targetGuardAtLeast",
+                     "a guard percent above 100 is rejected");
+    }
+}
+
 int main()
 {
     TestSample();
     TestEveryRequiredFoe();
     TestHotReload();
     TestValidation();
+    TestAiValidation();
     TestLayers();
     TestUnusedFields();
     TestConditionalFields();

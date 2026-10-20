@@ -337,6 +337,13 @@ private:
     [[nodiscard]] TurnSeat CurrentSeat();
     void Retarget();
 
+    // The pattern skill the foe would take next, without moving the step. Index is that
+    // skill's place in the pattern. Skill is null when the pattern has nothing to spend.
+    struct PatternHead {
+        const SkillDef* Skill = nullptr;
+        i32 Index = -1;
+    };
+    [[nodiscard]] PatternHead PeekPattern(const CombatantState& who, const EnemyDef& enemy) const;
     const SkillDef* TakeEnemySkill(CombatantState& who);
     const SkillDef* PlayerSkill(std::string_view skillId) const;
     const SkillDef* EnemySkill(const CombatantState& who, std::string_view skillId) const;

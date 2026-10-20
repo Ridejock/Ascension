@@ -510,6 +510,88 @@ void TestCorruptFallsBack()
     Check(fresh.Level() == 1 && fresh.Xp() == 0, "a failed load leaves a new run to start");
 }
 
+bool HoldsStatus(const CombatantState& who, std::string_view id)
+{
+    for (const StatusInstance& status : who.Statuses) {
+        if (status.Id == id)
+            return true;
+    }
+    return false;
+}
+
+// Strikes until the brute has landed the scripted Overhead. The step still names the
+// following maul, Steadfast is down, and it is the player's turn.
+bool AfterScriptedOverhead(Battle& battle)
+{
+    for (i32 turn = 0; turn < 12; ++turn) {
+        if (battle.Result() != BattleResult::Ongoing)
+            return false;
+        if (battle.Actor() == CombatantSide::Player) {
+            if (!battle.UseSkill("strike").Accepted)
+                return false;
+            continue;
+        }
+        const ActionResult act = battle.EnemyAct();
+        if (!act.Accepted)
+            return false;
+        if (act.SkillId == "overhead" && battle.Enemy().WindupSkill.empty() &&
+            battle.Enemy().PatternStep == 3 && !HoldsStatus(battle.Enemy(), "steadfast") &&
+            battle.Actor() == CombatantSide::Player)
+            return true;
+    }
+    return false;
+}
+
+void TestAiSnapshot()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads");
+    if (!data.IsLoaded())
+        return;
+    std::string why;
+    Battle brute(data, std::make_unique<AgilityRoundModel>());
+    Check(brute.Start("fighter", 8, "barrow_brute", why) && AfterScriptedOverhead(brute),
+          "the scripted overhead has landed");
+    Check(brute.UseSkill("strike").Accepted && brute.Actor() == CombatantSide::Enemy,
+          "the save is taken on the brute's turn");
+    Check(brute.Inflict(CombatantSide::Player, "exposed", why), "the fighter is Exposed");
+    const i32 step = brute.Enemy().PatternStep;
+    Check(step == 3 && HoldsStatus(brute.Player(), "exposed") &&
+              !HoldsStatus(brute.Enemy(), "steadfast"),
+          "the maul is queued and Steadfast is down");
+
+    Hero hero = StartHero(data);
+    Inventory bag = StartBag(data);
+    RunState run = Capture(hero, bag);
+    run.Standing = RunStanding::Ongoing;
+    run.Fight = brute.ExportFight();
+    Check(run.Fight.Known && run.Fight.Actor == CombatantSide::Enemy &&
+              run.Fight.Foes.size() == 1 && run.Fight.Foes[0].PatternStep == step,
+          "the snapshot is the brute's turn at the queued maul");
+
+    TempDir dir("ascension-save-ai");
+    RunSave saves(dir.Path);
+    Check(saves.Write(run, why), "the exposed brute fight is written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.Fight.Known,
+          "the snapshot loads at version 3");
+
+    Battle again(data, std::make_unique<AgilityRoundModel>());
+    Check(again.Start("fighter", 8, "barrow_brute", why) &&
+              again.ImportFight(loaded.Run.Fight, why),
+          "the exposed brute snapshot is restored");
+    Check(again.Actor() == CombatantSide::Enemy && again.Enemy().PatternStep == step &&
+              HoldsStatus(again.Player(), "exposed"),
+          "step and Exposed survive the round trip");
+    const ActionResult next = again.EnemyAct();
+    Check(next.Accepted && next.SkillId == "bellow" && again.Enemy().PatternStep == step &&
+              next.Text.find("Steadfast.") != std::string::npos,
+          "the restored brute still inserts Bellow and leaves the step");
+    if (next.SkillId != "bellow" || again.Enemy().PatternStep != step)
+        std::printf("    restored: %s step %d\n", next.SkillId.c_str(), again.Enemy().PatternStep);
+}
+
 } // namespace
 
 int main()
@@ -523,6 +605,7 @@ int main()
     TestMidFight();
     TestVersion2Restarts();
     TestCorruptFallsBack();
+    TestAiSnapshot();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();
     return g_Failures == 0 ? 0 : 1;

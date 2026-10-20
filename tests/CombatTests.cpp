@@ -1730,6 +1730,131 @@ void TestLoggedHeal()
           "second wind logs the health that fit, not its power");
 }
 
+// Strikes until the brute has landed the scripted Overhead. Steadfast has ticked off and
+// the step still names the maul that follows. It is the player's turn.
+bool AfterScriptedOverhead(Battle& battle)
+{
+    for (i32 turn = 0; turn < 12; ++turn) {
+        if (battle.Result() != BattleResult::Ongoing)
+            return false;
+        if (battle.Actor() == CombatantSide::Player) {
+            if (!battle.UseSkill("strike").Accepted)
+                return false;
+            continue;
+        }
+        const ActionResult act = battle.EnemyAct();
+        if (!act.Accepted)
+            return false;
+        if (act.SkillId == "overhead" && battle.Enemy().WindupSkill.empty() &&
+            battle.Enemy().PatternStep == 3 && !Holds(battle.Enemy(), "steadfast") &&
+            battle.Actor() == CombatantSide::Player)
+            return true;
+    }
+    return false;
+}
+
+void TestFoeRules()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    Battle opening(data, std::make_unique<AgilityRoundModel>());
+    Check(opening.Start("fighter", 8, "barrow_brute", error), "the brute fight starts");
+    Check(opening.UseSkill("strike").Accepted, "the fighter strikes first");
+    const ActionResult bellow = opening.EnemyAct();
+    Check(bellow.Accepted && bellow.SkillId == "bellow" && opening.Enemy().PatternStep == 1 &&
+              bellow.Text.find("Steadfast.") != std::string::npos,
+          "with no Exposed the brute bellows and advances the step");
+    if (bellow.SkillId != "bellow" || opening.Enemy().PatternStep != 1)
+        std::printf("    opening: %s step %d\n", bellow.SkillId.c_str(),
+                    opening.Enemy().PatternStep);
+
+    Battle brute(data, std::make_unique<AgilityRoundModel>());
+    Check(brute.Start("fighter", 8, "barrow_brute", error) && AfterScriptedOverhead(brute),
+          "the scripted overhead has landed and the maul is next");
+    Check(brute.UseSkill("strike").Accepted && brute.Actor() == CombatantSide::Enemy,
+          "the brute's turn is next");
+    const i32 queued = brute.Enemy().PatternStep;
+    Check(queued == 3 && brute.Inflict(CombatantSide::Player, "exposed", error),
+          "the fighter is Exposed while the maul is still queued");
+    const ActionResult inserted = brute.EnemyAct();
+    Check(inserted.Accepted && inserted.SkillId == "bellow" && brute.Enemy().PatternStep == queued &&
+              inserted.Text.find("Steadfast.") != std::string::npos,
+          "Exposed inserts Bellow and leaves the pattern step");
+    if (inserted.SkillId != "bellow" || brute.Enemy().PatternStep != queued)
+        std::printf("    insert: %s step %d text %s\n", inserted.SkillId.c_str(),
+                    brute.Enemy().PatternStep, inserted.Text.c_str());
+
+    Check(brute.UseSkill("strike").Accepted && Holds(brute.Player(), "exposed"),
+          "Exposed is still up on the turn after the insert");
+    const ActionResult telegraph = brute.EnemyAct();
+    Check(telegraph.Accepted && telegraph.SkillId == "overhead" && telegraph.Damage == 0 &&
+              brute.Enemy().WindupSkill == "overhead" && brute.Enemy().PatternStep == queued,
+          "the next act is Overhead and the maul stays queued");
+    if (telegraph.SkillId != "overhead" || brute.Enemy().PatternStep != queued)
+        std::printf("    overhead: %s step %d wind %s\n", telegraph.SkillId.c_str(),
+                    brute.Enemy().PatternStep, brute.Enemy().WindupSkill.c_str());
+    const ActionResult heavy = brute.UseSkill("heavy_blow");
+    Check(heavy.Accepted && heavy.Text.find("shrugs off the stun") != std::string::npos &&
+              brute.Enemy().WindupSkill == "overhead",
+          "Heavy Blow on that telegraph is shrugged off and the wind-up remains");
+    if (heavy.Text.find("shrugs off the stun") == std::string::npos)
+        std::printf("    heavy: %s\n", heavy.Text.c_str());
+
+    Battle shell(data, std::make_unique<AgilityRoundModel>());
+    Check(shell.Start("fighter", 8, "cairn_warden", error), "the warden fight starts");
+    Check(shell.UseSkill("strike").Accepted, "the fighter strikes the closed cairn");
+    const ActionResult closed = shell.EnemyAct();
+    Check(closed.Accepted && closed.SkillId == "cairn_shell" && shell.Enemy().PatternStep == 1 &&
+              shell.Enemy().BonusDefense == 150 && shell.Enemy().BonusDefenseTurns == 1,
+          "Cairn Shell still raises defense by 150 for 1 turn");
+    if (closed.SkillId != "cairn_shell")
+        std::printf("    shell: %s def %d turns %d\n", closed.SkillId.c_str(),
+                    shell.Enemy().BonusDefense, shell.Enemy().BonusDefenseTurns);
+
+    Battle open(data, std::make_unique<AgilityRoundModel>());
+    Check(open.Start("fighter", 8, "cairn_warden", error) &&
+              open.Inflict(CombatantSide::Player, "exposed", error),
+          "the fighter starts the warden fight Exposed");
+    Check(open.UseSkill("strike").Accepted && Holds(open.Player(), "exposed"),
+          "the opening strike leaves Exposed up");
+    const ActionResult slam = open.EnemyAct();
+    Check(slam.Accepted && slam.SkillId == "cairn_slam" && open.Enemy().PatternStep == 0 &&
+              open.Enemy().BonusDefense == 0,
+          "Exposed inserts one Cairn Slam and leaves the shell queued");
+    if (slam.SkillId != "cairn_slam" || open.Enemy().PatternStep != 0)
+        std::printf("    slam: %s step %d\n", slam.SkillId.c_str(), open.Enemy().PatternStep);
+
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "enemies.json", "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                  "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                  "      \"ai\": [\n"
+                  "        { \"if\": { \"targetGuardAtLeast\": 1 }, \"do\": \"skill\", "
+                  "\"skill\": \"harden\" }\n"
+                  "      ],");
+    Database guarded(copy.Path);
+    Check(guarded.Load(), "a sentry that answers a guard loads");
+    Battle sentry(guarded, std::make_unique<AgilityRoundModel>());
+    Check(sentry.Start("fighter", 1, "barrow_sentry", error), "the guarded sentry fight starts");
+    Check(sentry.UseSkill("strike").Accepted && sentry.EnemyAct().SkillId == "harden" &&
+              sentry.Enemy().PatternStep == 1,
+          "with no guard the sentry hardens and advances");
+    Check(sentry.UseSkill("brace").Accepted && sentry.Player().GuardPercent == 50,
+          "the fighter braces before the thrust");
+    const ActionResult answered = sentry.EnemyAct();
+    Check(answered.Accepted && answered.SkillId == "harden" && sentry.Enemy().PatternStep == 1,
+          "a guard of at least 1 inserts Harden and leaves the thrust queued");
+    if (answered.SkillId != "harden" || sentry.Enemy().PatternStep != 1)
+        std::printf("    guard rule: %s step %d\n", answered.SkillId.c_str(),
+                    sentry.Enemy().PatternStep);
+}
+
 } // namespace
 
 int main()
@@ -1764,6 +1889,7 @@ int main()
     TestCounterMeetsDefense();
     TestSecondWindExposed();
     TestLoggedHeal();
+    TestFoeRules();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
