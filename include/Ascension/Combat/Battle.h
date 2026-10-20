@@ -134,6 +134,10 @@ public:
     // A seat that is no longer in `living` is skipped.
     virtual TurnSeat Next(std::span<const TurnSeat> living) = 0;
     virtual void Advance() = 0;
+    // The seats of this round and the index of the seat that acts next. Place puts a saved
+    // round back, so the next Next() is that seat and nobody has acted.
+    virtual void Capture(std::vector<TurnSeat>& order, i32& index) const = 0;
+    virtual void Place(std::span<const TurnSeat> order, i32 index) = 0;
 };
 
 // One action each per round. Higher agility goes first. An equal agility gives the player
@@ -143,6 +147,8 @@ public:
     void Reset() override;
     TurnSeat Next(std::span<const TurnSeat> living) override;
     void Advance() override;
+    void Capture(std::vector<TurnSeat>& order, i32& index) const override;
+    void Place(std::span<const TurnSeat> order, i32 index) override;
 
 private:
     void Open(std::span<const TurnSeat> living);
@@ -150,6 +156,47 @@ private:
     std::vector<TurnSeat> m_Round;
     usize m_Index = 0;
     bool m_Open = false;
+};
+
+// The part of one combatant that a save has to put back. Stats and max pools are rebuilt
+// from data. Statuses keep the stacks and the turns still left.
+struct CombatantSnapshot {
+    std::string Id;
+    i32 Hp = 0;
+    i32 Focus = 0;
+    i32 GuardPercent = 0;
+    i32 EmpowerPercent = 0;
+    i32 ReflectPercent = 0;
+    i32 ReflectFlat = 0;
+    i32 BonusDefense = 0;
+    i32 BonusDefenseTurns = 0;
+    std::vector<StatusInstance> Statuses;
+    std::string WindupSkill;
+    i32 WindupLeft = 0;
+    i32 WindupTotal = 0;
+    i32 PatternStep = 0;
+    i32 Phase = 1;
+    i32 PhaseTurns = 0;
+    bool ShardDue = false;
+    std::vector<std::string> SkillUseIds;
+    std::vector<i32> SkillUseCounts;
+};
+
+// One ongoing fight. Known is false when the save only knows that a fight was in progress,
+// and that fight starts again from the encounter. Order is whose turn it is: index OrderIndex
+// acts next, and TurnCount is how many actions have already been taken.
+struct FightSnapshot {
+    bool Known = false;
+    i32 TurnCount = 0;
+    CombatantSide Actor = CombatantSide::Player;
+    i32 ActorIndex = -1;
+    i32 Target = 0;
+    i32 RandomCursor = 0;
+    bool UpkeepDone = false;
+    std::vector<TurnSeat> Order;
+    i32 OrderIndex = 0;
+    CombatantSnapshot Player;
+    std::vector<CombatantSnapshot> Foes;
 };
 
 // One player class against an encounter (one enemy, or a pack). Skill ids are kept, not
@@ -222,6 +269,13 @@ public:
     // Clamps the selected enemy to 0..MaxHp. 0 may end the fight. Crossing that enemy's phase
     // threshold starts phase 2.
     void SetEnemyHp(i32 hp);
+
+    // The live fight, including each foe's wound, statuses, pattern step, and whose action
+    // it is. Empty (Known false) before the fight starts or after it ends.
+    FightSnapshot ExportFight();
+    // After Start. Puts the snapshot back and does not take an action. False leaves the
+    // fight as Start built it.
+    bool ImportFight(const FightSnapshot& shot, std::string& error);
 
     // Applies a status from statuses.json. Tests place one before a blow.
     bool Inflict(CombatantSide side, std::string_view statusId, std::string& error);
@@ -330,6 +384,7 @@ private:
     BattleResult m_Result = BattleResult::Ongoing;
     bool m_Started = false;
     bool m_UpkeepDone = false;
+    i32 m_TurnCount = 0;
     std::string m_Opening;
 };
 

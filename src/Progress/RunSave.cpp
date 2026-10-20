@@ -116,11 +116,212 @@ void MigrateRunV1(Emerald::SaveData& data)
     SplitFoes(data);
 }
 
+// Version 2 remembered the hero's wound, not the foe or whose turn it was. Leave the fight
+// unknown so that ongoing file starts the encounter over.
+void MigrateRunV2(Emerald::SaveData& data)
+{
+    if (!data.Has("fight.known"))
+        data.SetBool("fight.known", false);
+}
+
 Emerald::SaveSystem Open(const std::filesystem::path& folder)
 {
     Emerald::SaveSystem system(folder, RunSave::kVersion);
     system.AddMigration(1, MigrateRunV1);
+    system.AddMigration(2, MigrateRunV2);
     return system;
+}
+
+bool CountOk(i32 count, std::string& error);
+
+const char* SideName(CombatantSide side)
+{
+    if (side == CombatantSide::Enemy)
+        return "enemy";
+    return "player";
+}
+
+bool SideFrom(std::string_view text, CombatantSide& side)
+{
+    if (text == "enemy") {
+        side = CombatantSide::Enemy;
+        return true;
+    }
+    if (text == "player") {
+        side = CombatantSide::Player;
+        return true;
+    }
+    return false;
+}
+
+void WriteUnit(Emerald::SaveData& data, const std::string& prefix, const CombatantSnapshot& unit)
+{
+    data.SetString(prefix + ".id", unit.Id);
+    data.SetInt(prefix + ".hp", unit.Hp);
+    data.SetInt(prefix + ".focus", unit.Focus);
+    data.SetInt(prefix + ".guard", unit.GuardPercent);
+    data.SetInt(prefix + ".empower", unit.EmpowerPercent);
+    data.SetInt(prefix + ".reflect", unit.ReflectPercent);
+    data.SetInt(prefix + ".reflectFlat", unit.ReflectFlat);
+    data.SetInt(prefix + ".defense", unit.BonusDefense);
+    data.SetInt(prefix + ".defenseTurns", unit.BonusDefenseTurns);
+    data.SetString(prefix + ".windup", unit.WindupSkill);
+    data.SetInt(prefix + ".windupLeft", unit.WindupLeft);
+    data.SetInt(prefix + ".windupTotal", unit.WindupTotal);
+    data.SetInt(prefix + ".step", unit.PatternStep);
+    data.SetInt(prefix + ".phase", unit.Phase);
+    data.SetInt(prefix + ".phaseTurns", unit.PhaseTurns);
+    data.SetBool(prefix + ".shard", unit.ShardDue);
+
+    data.SetInt(prefix + ".status.count", static_cast<i32>(unit.Statuses.size()));
+    for (i32 index = 0; index < static_cast<i32>(unit.Statuses.size()); ++index) {
+        const StatusInstance& status = unit.Statuses[static_cast<usize>(index)];
+        const std::string key = Key(prefix + ".status", index, {});
+        data.SetString(key + ".id", status.Id);
+        data.SetInt(key + ".stacks", status.Stacks);
+        data.SetInt(key + ".turns", status.TurnsLeft);
+    }
+
+    data.SetInt(prefix + ".use.count", static_cast<i32>(unit.SkillUseIds.size()));
+    for (i32 index = 0; index < static_cast<i32>(unit.SkillUseIds.size()); ++index) {
+        const std::string key = Key(prefix + ".use", index, {});
+        data.SetString(key + ".id", unit.SkillUseIds[static_cast<usize>(index)]);
+        const i32 uses = index < static_cast<i32>(unit.SkillUseCounts.size())
+                             ? unit.SkillUseCounts[static_cast<usize>(index)]
+                             : 0;
+        data.SetInt(key + ".count", uses);
+    }
+}
+
+bool ReadUnit(const Emerald::SaveData& data, const std::string& prefix, CombatantSnapshot& unit,
+              std::string& error)
+{
+    unit = {};
+    unit.Id = data.GetString(prefix + ".id");
+    unit.Hp = data.GetInt(prefix + ".hp", 0);
+    unit.Focus = data.GetInt(prefix + ".focus", 0);
+    unit.GuardPercent = data.GetInt(prefix + ".guard", 0);
+    unit.EmpowerPercent = data.GetInt(prefix + ".empower", 0);
+    unit.ReflectPercent = data.GetInt(prefix + ".reflect", 0);
+    unit.ReflectFlat = data.GetInt(prefix + ".reflectFlat", 0);
+    unit.BonusDefense = data.GetInt(prefix + ".defense", 0);
+    unit.BonusDefenseTurns = data.GetInt(prefix + ".defenseTurns", 0);
+    unit.WindupSkill = data.GetString(prefix + ".windup");
+    unit.WindupLeft = data.GetInt(prefix + ".windupLeft", 0);
+    unit.WindupTotal = data.GetInt(prefix + ".windupTotal", 0);
+    unit.PatternStep = data.GetInt(prefix + ".step", 0);
+    unit.Phase = data.GetInt(prefix + ".phase", 1);
+    unit.PhaseTurns = data.GetInt(prefix + ".phaseTurns", 0);
+    unit.ShardDue = data.GetBool(prefix + ".shard", false);
+
+    const i32 statuses = data.GetInt(prefix + ".status.count", 0);
+    const i32 uses = data.GetInt(prefix + ".use.count", 0);
+    if (!CountOk(statuses, error) || !CountOk(uses, error))
+        return false;
+    unit.Statuses.resize(static_cast<usize>(statuses));
+    for (i32 index = 0; index < statuses; ++index) {
+        const std::string key = Key(prefix + ".status", index, {});
+        StatusInstance& status = unit.Statuses[static_cast<usize>(index)];
+        status.Id = data.GetString(key + ".id");
+        status.Stacks = data.GetInt(key + ".stacks", 1);
+        status.TurnsLeft = data.GetInt(key + ".turns", 0);
+        if (status.Id.empty() || status.Stacks < 1) {
+            error = "the save's statuses are damaged";
+            return false;
+        }
+    }
+    unit.SkillUseIds.resize(static_cast<usize>(uses));
+    unit.SkillUseCounts.resize(static_cast<usize>(uses));
+    for (i32 index = 0; index < uses; ++index) {
+        const std::string key = Key(prefix + ".use", index, {});
+        const std::string id = data.GetString(key + ".id");
+        if (id.empty()) {
+            error = "the save's skill counts are damaged";
+            return false;
+        }
+        unit.SkillUseIds[static_cast<usize>(index)] = id;
+        const i32 count = data.GetInt(key + ".count", 0);
+        unit.SkillUseCounts[static_cast<usize>(index)] = count < 0 ? 0 : count;
+    }
+    error.clear();
+    return true;
+}
+
+void WriteFight(const FightSnapshot& fight, Emerald::SaveData& data)
+{
+    data.SetBool("fight.known", fight.Known);
+    if (!fight.Known)
+        return;
+    data.SetInt("fight.turn", fight.TurnCount);
+    data.SetString("fight.actor", SideName(fight.Actor));
+    data.SetInt("fight.actorIndex", fight.ActorIndex);
+    data.SetInt("fight.target", fight.Target);
+    data.SetInt("fight.random", fight.RandomCursor);
+    data.SetBool("fight.upkeep", fight.UpkeepDone);
+    data.SetInt("fight.order.count", static_cast<i32>(fight.Order.size()));
+    data.SetInt("fight.orderAt", fight.OrderIndex);
+    for (i32 index = 0; index < static_cast<i32>(fight.Order.size()); ++index) {
+        const TurnSeat& seat = fight.Order[static_cast<usize>(index)];
+        data.SetString(Key("fight.order", index, "side"), SideName(seat.Side));
+        data.SetInt(Key("fight.order", index, "index"), seat.Index);
+        data.SetInt(Key("fight.order", index, "agility"), seat.Agility);
+    }
+    WriteUnit(data, "fight.player", fight.Player);
+    data.SetInt("fight.foe.count", static_cast<i32>(fight.Foes.size()));
+    for (i32 index = 0; index < static_cast<i32>(fight.Foes.size()); ++index)
+        WriteUnit(data, Key("fight.foe", index, {}), fight.Foes[static_cast<usize>(index)]);
+}
+
+bool ReadFight(const Emerald::SaveData& data, FightSnapshot& fight, std::string& error)
+{
+    fight = {};
+    if (!data.GetBool("fight.known", false)) {
+        error.clear();
+        return true;
+    }
+    fight.Known = true;
+    fight.TurnCount = data.GetInt("fight.turn", 0);
+    if (!SideFrom(data.GetString("fight.actor"), fight.Actor)) {
+        error = "the save does not say whose turn it is";
+        return false;
+    }
+    fight.ActorIndex = data.GetInt("fight.actorIndex", -1);
+    fight.Target = data.GetInt("fight.target", 0);
+    fight.RandomCursor = data.GetInt("fight.random", 0);
+    fight.UpkeepDone = data.GetBool("fight.upkeep", false);
+    const i32 seats = data.GetInt("fight.order.count", 0);
+    const i32 foes = data.GetInt("fight.foe.count", 0);
+    if (!CountOk(seats, error) || !CountOk(foes, error))
+        return false;
+    if (seats < 1 || foes < 1) {
+        error = "the save's fight is damaged";
+        return false;
+    }
+    fight.OrderIndex = data.GetInt("fight.orderAt", 0);
+    fight.Order.resize(static_cast<usize>(seats));
+    for (i32 index = 0; index < seats; ++index) {
+        TurnSeat& seat = fight.Order[static_cast<usize>(index)];
+        if (!SideFrom(data.GetString(Key("fight.order", index, "side")), seat.Side)) {
+            error = "the save's turn order is damaged";
+            return false;
+        }
+        seat.Index = data.GetInt(Key("fight.order", index, "index"), 0);
+        seat.Agility = data.GetInt(Key("fight.order", index, "agility"), 0);
+    }
+    if (!ReadUnit(data, "fight.player", fight.Player, error))
+        return false;
+    fight.Foes.resize(static_cast<usize>(foes));
+    for (i32 index = 0; index < foes; ++index) {
+        if (!ReadUnit(data, Key("fight.foe", index, {}), fight.Foes[static_cast<usize>(index)],
+                      error))
+            return false;
+        if (fight.Foes[static_cast<usize>(index)].Id.empty()) {
+            error = "the save's foes are damaged";
+            return false;
+        }
+    }
+    error.clear();
+    return true;
 }
 
 void Store(const RunState& run, Emerald::SaveData& data)
@@ -178,6 +379,7 @@ void Store(const RunState& run, Emerald::SaveData& data)
     data.SetBool("resources", run.ResourcesKnown);
     data.SetInt("hp", run.Hp);
     data.SetInt("focus", run.Focus);
+    WriteFight(run.Fight, data);
 }
 
 bool CountOk(i32 count, std::string& error)
@@ -284,6 +486,9 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     run.ResourcesKnown = data.GetBool("resources", false);
     run.Hp = data.GetInt("hp", 0);
     run.Focus = data.GetInt("focus", 0);
+    std::string fightError;
+    if (!ReadFight(data, run.Fight, fightError))
+        run.Fight = {};
     error.clear();
     return true;
 }

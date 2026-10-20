@@ -100,6 +100,20 @@ public:
             ++m_Index;
     }
 
+    void Capture(std::vector<TurnSeat>& order, i32& index) const override
+    {
+        order = m_Order;
+        index = static_cast<i32>(m_Index);
+    }
+
+    void Place(std::span<const TurnSeat> order, i32 index) override
+    {
+        m_Order.assign(order.begin(), order.end());
+        if (index < 0)
+            index = 0;
+        m_Index = static_cast<usize>(index);
+    }
+
 private:
     std::vector<TurnSeat> m_Order;
     usize m_Index = 0;
@@ -794,28 +808,32 @@ void TestJoinedShardMark()
     std::string error;
     std::vector<CombatantSide> turns(20, CombatantSide::Enemy);
     Battle boss(data, Sides(std::move(turns)));
-    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can call a shard under the marker");
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error),
+          "Varn can call a shard under the marker");
     boss.SetEnemyHp(120);
     Check(boss.TargetIndex() == 0 && boss.Enemy().Id == "oathkeeper_varn", "Varn starts marked");
 
     ActionResult joined;
     for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
         joined = DriveVarn(boss);
-    Check(joined.Text.find("Rubble Shard joins") != std::string::npos && boss.Enemies().size() == 2 &&
-              boss.TargetIndex() == 0 && boss.Enemy().Id == "oathkeeper_varn",
+    Check(joined.Text.find("Rubble Shard joins") != std::string::npos &&
+              boss.Enemies().size() == 2 && boss.TargetIndex() == 0 &&
+              boss.Enemy().Id == "oathkeeper_varn",
           "a shard joining does not move a living mark");
 
     const i32 firstShard = ShardSlot(boss, true);
     Check(firstShard == 1 && boss.SetTarget(firstShard), "the first shard is the second seat");
     boss.SetEnemyHp(0);
-    Check(!boss.Enemies()[1].Alive() && boss.TargetIndex() == 0 && boss.Result() == BattleResult::Ongoing,
+    Check(!boss.Enemies()[1].Alive() && boss.TargetIndex() == 0 &&
+              boss.Result() == BattleResult::Ongoing,
           "the dead shard leaves the mark on Varn");
 
     for (i32 step = 0; step < 8 && ShardSlot(boss, true) < 0; ++step)
         joined = DriveVarn(boss);
-    Check(joined.Text.find("Rubble Shard 2 joins") != std::string::npos && boss.Enemies().size() == 3 &&
-              !boss.Enemies()[1].Alive() && boss.Enemies()[2].Alive() &&
-              boss.Enemies()[2].Id == "rubble_shard" && boss.TargetIndex() == 0,
+    Check(joined.Text.find("Rubble Shard 2 joins") != std::string::npos &&
+              boss.Enemies().size() == 3 && !boss.Enemies()[1].Alive() &&
+              boss.Enemies()[2].Alive() && boss.Enemies()[2].Id == "rubble_shard" &&
+              boss.TargetIndex() == 0,
           "the second shard takes a new seat and the mark stays on Varn");
     boss.CycleTarget(1);
     Check(boss.TargetIndex() == 2 && boss.Enemy().Name == "Rubble Shard 2" && boss.Enemy().Alive(),

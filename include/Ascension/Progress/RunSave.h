@@ -4,14 +4,16 @@
 #include <string>
 #include <vector>
 
+#include "Ascension/Combat/Battle.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 
 namespace Ascension {
 
-// Where a saved run was. None is a run that had not started a fight. Ongoing is mid-fight,
-// and the saved HP and focus are applied when that fight starts again. Victory and defeat
-// stay between fights so the same win is not awarded twice.
+// Where a saved run was. None is a run that had not started a fight. Ongoing is mid-fight.
+// A snapshot in Fight restores that blow, including the foe and whose turn it is. An ongoing
+// file with no snapshot starts the encounter over. Victory and defeat stay between fights
+// so the same win is not awarded twice.
 enum class RunStanding : u8 { None, Ongoing, Victory, Defeat };
 
 // One run: the career, the bag, the foes already defeated, and the place in the encounter
@@ -26,6 +28,7 @@ struct RunState {
     bool ResourcesKnown = false;
     i32 Hp = 0;
     i32 Focus = 0;
+    FightSnapshot Fight;
 };
 
 enum class RunSaveError : u8 {
@@ -54,7 +57,7 @@ struct RunLoad {
 // the previous good copy. The folder is the per-user path unless a test passes its own.
 class RunSave {
 public:
-    static constexpr u32 kVersion = 2;
+    static constexpr u32 kVersion = 3;
 
     explicit RunSave(std::filesystem::path folder);
 

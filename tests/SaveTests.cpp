@@ -221,7 +221,7 @@ void TestRoundTrip()
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     Check(text.find("EMERALD-SAVE 1") == 0, "the file is an Emerald save, not JSON");
-    Check(text.find("version = 2") != std::string::npos, "the header carries the data version");
+    Check(text.find("version = 3") != std::string::npos, "the header carries the data version");
     Check(text.find('{') == std::string::npos, "the save text has no JSON object");
 
     const RunLoad loaded = saves.Read();
@@ -337,6 +337,132 @@ void TestMigration()
               loaded.Run.Defeated.size() == 2 && loaded.Run.Defeated[0] == "wolf" &&
               loaded.Run.Defeated[1] == "bandit",
           "health, place, and the foe list are migrated");
+    Check(!loaded.Run.Fight.Known, "a version 1 file has no mid-fight snapshot");
+}
+
+const StatusInstance* FindStatus(const CombatantState& who, std::string_view id)
+{
+    for (const StatusInstance& status : who.Statuses) {
+        if (status.Id == id)
+            return &status;
+    }
+    return nullptr;
+}
+
+bool SameStatus(const CombatantState& who, std::string_view id, i32 stacks, i32 turns)
+{
+    const StatusInstance* status = FindStatus(who, id);
+    return status != nullptr && status->Stacks == stacks && status->TurnsLeft == turns;
+}
+
+void TestMidFight()
+{
+    Database data = Sample();
+    std::string why;
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    Check(battle.Start("fighter", 1, "wolf", why), "the wolf fight starts");
+    const ActionResult bite = battle.EnemyAct();
+    Check(bite.Accepted && battle.Actor() == CombatantSide::Player, "the wolf has already bitten");
+    const i32 heroHp = battle.Player().Hp;
+    battle.SetEnemyHp(22);
+    Check(heroHp < battle.Player().MaxHp && battle.Enemy().Hp == 22, "the wolf is wounded to 22");
+    Check(battle.Inflict(CombatantSide::Enemy, "bleed", why) &&
+              battle.Inflict(CombatantSide::Enemy, "bleed", why) &&
+              battle.Inflict(CombatantSide::Enemy, "fury", why),
+          "the wolf is bleeding and furious");
+    const i32 step = battle.Enemy().PatternStep;
+    const i32 turns = battle.ExportFight().TurnCount;
+    Check(turns >= 1 && battle.Enemy().PatternStep == step, "the pattern step is still the wolf's");
+
+    Hero hero = StartHero(data);
+    Inventory bag = StartBag(data);
+    RunState run = Capture(hero, bag);
+    run.Standing = RunStanding::Ongoing;
+    run.ResourcesKnown = true;
+    run.Hp = heroHp;
+    run.Focus = battle.Player().Focus;
+    run.Position = 0;
+    run.Fight = battle.ExportFight();
+    Check(run.Fight.Known && run.Fight.Actor == CombatantSide::Player && run.Fight.Foes.size() == 1,
+          "the snapshot is the player's turn against one wolf");
+
+    TempDir dir("ascension-save-fight");
+    RunSave saves(dir.Path);
+    Check(saves.Write(run, why), "the mid-fight run is written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == RunSave::kVersion &&
+              loaded.Run.Fight.Known,
+          "the mid-fight snapshot loads at the current version");
+
+    Battle again(data, std::make_unique<AgilityRoundModel>());
+    Check(again.Start("fighter", 1, "wolf", why), "a fresh wolf fight starts");
+    Check(again.Actor() == CombatantSide::Enemy && again.Enemy().Hp == again.Enemy().MaxHp,
+          "a fresh wolf would bite first at full health");
+    const i32 before = again.Enemy().Hp;
+    Check(again.ImportFight(loaded.Run.Fight, why), "the snapshot is restored");
+    Check(again.Actor() == CombatantSide::Player, "resume stays on the player's turn");
+    Check(again.Player().Hp == heroHp && again.Enemy().Hp == 22, "hero and wolf HP match");
+    Check(again.Enemy().Hp != before, "the wolf was not left at full health");
+    Check(SameStatus(again.Enemy(), "bleed", 2, 3) && SameStatus(again.Enemy(), "fury", 1, 4),
+          "bleed stacks and fury turns match");
+    Check(again.Enemy().PatternStep == step && again.ExportFight().TurnCount == turns,
+          "pattern step and turn count match");
+    const ActionResult extra = again.EnemyAct();
+    Check(!extra.Accepted && again.Enemy().Hp == 22 && again.Player().Hp == heroHp,
+          "restoring does not give the foe an action");
+
+    Battle sentry(data, std::make_unique<AgilityRoundModel>());
+    Check(sentry.Start("fighter", 1, "barrow_sentry", why) && sentry.Wait().Accepted &&
+              sentry.EnemyAct().Accepted,
+          "the sentry hardens on its turn");
+    Check(sentry.Enemy().PatternStep == 1 && sentry.Enemy().BonusDefense == 4 &&
+              sentry.Enemy().BonusDefenseTurns == 3 && sentry.Actor() == CombatantSide::Player,
+          "the sentry's pattern and harden are live");
+    sentry.SetEnemyHp(40);
+    Check(sentry.Enemy().Hp == 40 && sentry.Inflict(CombatantSide::Enemy, "exposed", why),
+          "the sentry is wounded and exposed");
+    RunState sentryRun = Capture(hero, bag);
+    sentryRun.Standing = RunStanding::Ongoing;
+    sentryRun.Fight = sentry.ExportFight();
+    TempDir sentryDir("ascension-save-sentry");
+    RunSave sentrySave(sentryDir.Path);
+    Check(sentrySave.Write(sentryRun, why), "the sentry fight is written");
+    const RunLoad sentryLoaded = sentrySave.Read();
+    Battle sentryAgain(data, std::make_unique<AgilityRoundModel>());
+    Check(static_cast<bool>(sentryLoaded) &&
+              sentryAgain.Start("fighter", 1, "barrow_sentry", why) &&
+              sentryAgain.ImportFight(sentryLoaded.Run.Fight, why),
+          "the sentry snapshot is restored");
+    Check(sentryAgain.Enemy().Hp == 40 && sentryAgain.Enemy().PatternStep == 1 &&
+              sentryAgain.Enemy().BonusDefense == 4 && sentryAgain.Enemy().BonusDefenseTurns == 3 &&
+              SameStatus(sentryAgain.Enemy(), "exposed", 1, 2) &&
+              sentryAgain.Actor() == CombatantSide::Player,
+          "sentry HP, pattern, harden, and exposed match");
+    const ActionResult sentryExtra = sentryAgain.EnemyAct();
+    Check(!sentryExtra.Accepted && sentryAgain.Enemy().Hp == 40 &&
+              sentryAgain.Enemy().PatternStep == 1,
+          "restoring the sentry does not advance it");
+}
+
+void TestVersion2Restarts()
+{
+    TempDir dir("ascension-save-v2");
+    Emerald::SaveData older;
+    older.SetString("class", "fighter");
+    older.SetInt("xp", 0);
+    older.SetInt("hp", 45);
+    older.SetInt("focus", 4);
+    older.SetBool("resources", true);
+    older.SetString("standing", "ongoing");
+    older.SetInt("position", 0);
+    Emerald::SaveSystem version2(dir.Path, 2);
+    Check(version2.Save("run", older, "ongoing"), "a version 2 ongoing file is written");
+
+    RunSave saves(dir.Path);
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 2 && !loaded.Run.Fight.Known &&
+              loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.Hp == 45,
+          "version 2 migrates and keeps no foe snapshot");
 }
 
 void TestCorruptFallsBack()
@@ -394,6 +520,8 @@ int main()
     TestRoundTrip();
     TestCustomStats();
     TestMigration();
+    TestMidFight();
+    TestVersion2Restarts();
     TestCorruptFallsBack();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();

@@ -545,15 +545,33 @@ void AscensionApp::BeginFight()
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
         m_StartError = error;
         m_ResumeResources = false;
+        m_ResumeFight = {};
         return;
+    }
+    m_Standing = RunStanding::Ongoing;
+    PushRanks();
+    if (m_ResumeFight.Known) {
+        const FightSnapshot shot = std::move(m_ResumeFight);
+        m_ResumeFight = {};
+        std::string restoreError;
+        if (m_Battle->ImportFight(shot, restoreError)) {
+            m_ResumeResources = false;
+            m_AnnounceResume = false;
+            Note("Resumed.");
+            return;
+        }
+        if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, restoreError)) {
+            m_StartError = restoreError;
+            m_ResumeResources = false;
+            return;
+        }
+        PushRanks();
     }
     if (m_ResumeResources) {
         m_Battle->SetPlayerHp(m_ResumeHp);
         m_Battle->SetPlayerFocus(m_ResumeFocus);
         m_ResumeResources = false;
     }
-    m_Standing = RunStanding::Ongoing;
-    PushRanks();
     if (m_Battle->Result() != BattleResult::Ongoing) {
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
         return;
@@ -1021,6 +1039,7 @@ bool AscensionApp::WriteSave()
             run.ResourcesKnown = true;
             run.Hp = m_Battle->Player().Hp;
             run.Focus = m_Battle->Player().Focus;
+            run.Fight = m_Battle->ExportFight();
         }
     }
     RunSave saves(SaveFolder());
@@ -1052,11 +1071,14 @@ bool AscensionApp::TryResume(std::string& error)
     m_DirectEnemy = loaded.Run.DirectEnemy;
     m_Standing = loaded.Run.Standing;
     m_ResumeResources = false;
+    m_ResumeFight = {};
     if (loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.ResourcesKnown) {
         m_ResumeResources = true;
         m_ResumeHp = loaded.Run.Hp;
         m_ResumeFocus = loaded.Run.Focus;
     }
+    if (loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.Fight.Known)
+        m_ResumeFight = loaded.Run.Fight;
     if (loaded.FromBackup)
         Note("The save was damaged. The previous one was loaded.");
     error.clear();
