@@ -1590,21 +1590,12 @@ void TestShippedDescriptions()
               guardian->Picks[1].Options[1].Resolved.FocusCost == 2,
           "guardian picks stay Riposte or Shield Wall, then Rally or Rage");
 
-    const EnemyDef* brute = data.FindEnemy("barrow_brute");
-    const EnemyDef* warden = data.FindEnemy("cairn_warden");
-    Check(brute != nullptr && brute->Ai.empty(), "the brute keeps the plain pattern");
-    const bool wardenRules = warden != nullptr && warden->Ai.size() == 1 &&
-                             warden->Ai[0].Action == AiAction::Skill &&
-                             warden->Ai[0].Skill == "cairn_slam" &&
-                             warden->Ai[0].If.TargetStatus == "exposed" &&
-                             warden->Ai[0].If.Next == "cairn_settle";
-    Check(wardenRules, "the warden spends one Cairn Slam for Exposed on Settle");
-    const EnemyDef* wolf = data.FindEnemy("wolf");
-    const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
-    const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");
-    Check(wolf != nullptr && wolf->Ai.empty() && sentry != nullptr && sentry->Ai.empty() &&
-              varn != nullptr && varn->Ai.empty(),
-          "wolf, the sentry, and Varn keep the pattern");
+    bool shippedRules = false;
+    for (const EnemyDef& enemy : data.GetEnemies()) {
+        if (!enemy.Ai.empty())
+            shippedRules = true;
+    }
+    Check(!shippedRules && !data.GetEnemies().empty(), "no shipped foe has an ai list");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
@@ -1890,6 +1881,25 @@ void TestAiValidation()
                       "\"do\": \"pattern\" } ],");
         TestRejected(copy.Path, "enemies.json", "targetGuardAtLeast",
                      "a guard percent above 100 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"targetStatus\": \"exposed\", "
+                      "\"next\": \"thrust\" }, \"do\": \"skill\", \"skill\": \"harden\" } ],");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a test foe rule loads");
+        const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
+        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
+                            sentry->Ai[0].Action == AiAction::Skill &&
+                            sentry->Ai[0].Skill == "harden" &&
+                            sentry->Ai[0].If.TargetStatus == "exposed" &&
+                            sentry->Ai[0].If.Next == "thrust" &&
+                            !sentry->Ai[0].If.TargetGuardAtLeast.has_value();
+        Check(loaded, "the loaded rule keeps the skill, Exposed, and the pattern head");
     }
 }
 

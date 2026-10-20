@@ -149,13 +149,6 @@
       },
       "skills": ["cairn_shell", "cairn_slam", "cairn_settle"],
       "pattern": ["cairn_shell", "cairn_slam", "cairn_slam", "cairn_settle"],
-      "ai": [
-        {
-          "if": { "targetStatus": "exposed", "next": "cairn_settle" },
-          "do": "skill",
-          "skill": "cairn_slam"
-        }
-      ],
       "experience": 30,
       "gold": 14
     },

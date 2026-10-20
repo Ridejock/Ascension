@@ -519,73 +519,64 @@ bool HoldsStatus(const CombatantState& who, std::string_view id)
     return false;
 }
 
-// Strikes until the warden has landed the second Cairn Slam. The step still names Settle,
-// and it is the player's turn.
-bool AfterSecondSlam(Battle& battle)
-{
-    for (i32 turn = 0; turn < 16; ++turn) {
-        if (battle.Result() != BattleResult::Ongoing)
-            return false;
-        if (battle.Actor() == CombatantSide::Player) {
-            if (!battle.UseSkill("strike").Accepted)
-                return false;
-            continue;
-        }
-        const ActionResult act = battle.EnemyAct();
-        if (!act.Accepted)
-            return false;
-        if (act.SkillId == "cairn_slam" && battle.Enemy().PatternStep == 3 &&
-            battle.Actor() == CombatantSide::Player)
-            return true;
-    }
-    return false;
-}
-
 void TestAiSnapshot()
 {
-    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataCopy copy;
+    ReplaceInFile(copy.Path / "enemies.json",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    }",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    },\n    {\n      \"id\": \"rule_post\",\n      \"name\": "
+                  "\"Rule Post\",\n      \"description\": \"A post with a short pattern and two "
+                  "rules.\",\n      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"thrust\"],\n"
+                  "      \"pattern\": [\"harden\", \"thrust\"],\n      \"ai\": [\n        "
+                  "{ \"if\": { \"targetStatus\": \"exposed\", \"next\": \"harden\" }, "
+                  "\"do\": \"skill\", \"skill\": \"thrust\" }\n      ],\n      \"experience\": 0,\n"
+                  "      \"gold\": 0\n    }");
+    Database data(copy.Path);
     DataError loadError;
-    Check(data.Load(&loadError), "shipped data loads");
+    Check(data.Load(&loadError), "the rule post loads");
     if (!data.IsLoaded())
         return;
     std::string why;
-    Battle warden(data, std::make_unique<AgilityRoundModel>());
-    Check(warden.Start("fighter", 8, "cairn_warden", why) && AfterSecondSlam(warden),
-          "the second slam has landed");
-    Check(warden.UseSkill("strike").Accepted && warden.Actor() == CombatantSide::Enemy,
-          "the save is taken on the warden's turn");
-    Check(warden.Inflict(CombatantSide::Player, "exposed", why), "the fighter is Exposed");
-    const i32 step = warden.Enemy().PatternStep;
-    Check(step == 3 && HoldsStatus(warden.Player(), "exposed"),
-          "Settle is queued and the fighter is Exposed");
+    Battle post(data, std::make_unique<AgilityRoundModel>());
+    Check(post.Start("fighter", 1, "rule_post", why) &&
+              post.Inflict(CombatantSide::Player, "exposed", why),
+          "the fighter starts Exposed");
+    Check(post.UseSkill("strike").Accepted && post.Actor() == CombatantSide::Enemy,
+          "the save is taken on the post's turn");
+    const i32 step = post.Enemy().PatternStep;
+    Check(step == 0 && HoldsStatus(post.Player(), "exposed"),
+          "Harden is queued and the fighter is Exposed");
 
     Hero hero = StartHero(data);
     Inventory bag = StartBag(data);
     RunState run = Capture(hero, bag);
     run.Standing = RunStanding::Ongoing;
-    run.Fight = warden.ExportFight();
+    run.Fight = post.ExportFight();
     Check(run.Fight.Known && run.Fight.Actor == CombatantSide::Enemy &&
               run.Fight.Foes.size() == 1 && run.Fight.Foes[0].PatternStep == step,
-          "the snapshot is the warden's turn at the queued Settle");
+          "the snapshot is the post's turn at the queued Harden");
 
     TempDir dir("ascension-save-ai");
     RunSave saves(dir.Path);
-    Check(saves.Write(run, why), "the exposed warden fight is written");
+    Check(saves.Write(run, why), "the exposed post fight is written");
     const RunLoad loaded = saves.Read();
     Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.Fight.Known,
           "the snapshot loads at version 3");
 
     Battle again(data, std::make_unique<AgilityRoundModel>());
-    Check(again.Start("fighter", 8, "cairn_warden", why) &&
-              again.ImportFight(loaded.Run.Fight, why),
-          "the exposed warden snapshot is restored");
+    Check(again.Start("fighter", 1, "rule_post", why) && again.ImportFight(loaded.Run.Fight, why),
+          "the exposed post snapshot is restored");
     Check(again.Actor() == CombatantSide::Enemy && again.Enemy().PatternStep == step &&
               HoldsStatus(again.Player(), "exposed"),
           "step and Exposed survive the round trip");
     const ActionResult next = again.EnemyAct();
-    Check(next.Accepted && next.SkillId == "cairn_slam" && again.Enemy().PatternStep == step,
-          "the restored warden still inserts Cairn Slam and leaves the step");
-    if (next.SkillId != "cairn_slam" || again.Enemy().PatternStep != step)
+    Check(next.Accepted && next.SkillId == "thrust" && again.Enemy().PatternStep == step,
+          "the restored post still inserts Thrust and leaves the step");
+    if (next.SkillId != "thrust" || again.Enemy().PatternStep != step)
         std::printf("    restored: %s step %d\n", next.SkillId.c_str(), again.Enemy().PatternStep);
 }
 
