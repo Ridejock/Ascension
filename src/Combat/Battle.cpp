@@ -1142,6 +1142,17 @@ void Battle::SetPlayerHp(i32 hp)
     m_Player.Hp = hp;
 }
 
+void Battle::SetPlayerFocus(i32 focus)
+{
+    if (!m_Started)
+        return;
+    if (focus < 0)
+        focus = 0;
+    if (focus > m_Player.MaxFocus)
+        focus = m_Player.MaxFocus;
+    m_Player.Focus = focus;
+}
+
 void Battle::SetEnemyHp(i32 hp)
 {
     if (!m_Started || m_Target < 0 || m_Target >= static_cast<i32>(m_Enemies.size()))

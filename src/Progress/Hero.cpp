@@ -515,4 +515,66 @@ std::vector<AttributeSource> Hero::DerivedSources() const
     return sources;
 }
 
+void Hero::ExportCareer(CareerRecord& out) const
+{
+    out.ClassId = m_ClassId;
+    out.Xp = m_Xp;
+    out.Practiced = m_Practiced;
+    out.Uses = m_Uses;
+    out.Picked = m_Picked;
+    out.Custom = m_Custom;
+    out.ChoosingStarter = m_ChoosingStarter;
+    out.ClassPool = m_ClassPool;
+    out.SpendId = m_SpendId;
+    if (m_Custom) {
+        out.LevelSteps = m_LevelSteps;
+        out.Sources = m_ClassSources;
+    } else {
+        out.LevelSteps.clear();
+        out.Sources.clear();
+    }
+}
+
+bool Hero::ImportCareer(const CareerRecord& in, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the hero is not ready";
+        return false;
+    }
+    if (in.ClassId.empty() || m_Data->FindClass(in.ClassId) == nullptr) {
+        error = "class '" + in.ClassId + "' does not exist";
+        return false;
+    }
+    if (in.Practiced.size() != in.Uses.size()) {
+        error = "the save's skill list is damaged";
+        return false;
+    }
+    m_ClassId = in.ClassId;
+    m_Xp = in.Xp < 0 ? 0 : in.Xp;
+    if (m_Xp > kXpCap)
+        m_Xp = kXpCap;
+    m_Practiced = in.Practiced;
+    m_Uses = in.Uses;
+    for (i32& uses : m_Uses) {
+        if (uses < 0)
+            uses = 0;
+    }
+    m_Picked = in.Picked;
+    m_Custom = in.Custom;
+    m_ChoosingStarter = in.ChoosingStarter;
+    m_ClassPool = in.ClassPool < 0 ? 0 : in.ClassPool;
+    m_SpendId = in.SpendId;
+    if (m_Custom) {
+        m_LevelSteps = in.LevelSteps;
+        m_ClassSources = in.Sources;
+    } else {
+        m_LevelSteps.clear();
+        m_ClassSources.clear();
+        m_ClassPool = 0;
+        m_SpendId.clear();
+        m_ChoosingStarter = false;
+    }
+    return ApplyData(error);
+}
+
 } // namespace Ascension

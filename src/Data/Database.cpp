@@ -1697,6 +1697,35 @@ bool LoadEncounters(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool ReadRequires(const Parsed& parsed, const Json& entry, ItemDef& item, std::string& error)
+{
+    const auto requirement = entry.find("requires");
+    if (requirement == entry.end())
+        return true;
+    if (!requirement->is_object()) {
+        error = "'requires' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*requirement, {"defeated"}, unknown)) {
+        error = "'requires' unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!ReadIdList(*requirement, "defeated", item.RequiresDefeated, error))
+        return false;
+    if (item.RequiresDefeated.empty()) {
+        error = "'requires.defeated' must list at least one foe";
+        return false;
+    }
+    for (const std::string& foe : item.RequiresDefeated) {
+        if (FindId(parsed.Enemies, foe) == nullptr) {
+            error = "foe " + Quote(foe) + " does not exist";
+            return false;
+        }
+    }
+    return true;
+}
+
 bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("items");
@@ -1724,7 +1753,7 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "icon", "rarity", "slot", "bonus", "value",
-                        "twoHanded", "heal", "focus", "grants"},
+                        "twoHanded", "heal", "focus", "grants", "requires"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireString(entry, "icon", item.Icon, error) ||
@@ -1783,6 +1812,9 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         }
         if (!RequireInt(entry, "value", 0, 999999, item.Value, error))
             return fail(error);
+        std::string requiresError;
+        if (!ReadRequires(parsed, entry, item, requiresError))
+            return fail(requiresError);
         std::string grantError;
         if (!ReadGrantList(parsed, entry, "grants", SkillKind::Active, false, false, item.Grants,
                            grantError))

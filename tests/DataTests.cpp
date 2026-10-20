@@ -74,6 +74,36 @@ const ClassDef* MustClass(const Database& data, const char* id)
     return klass;
 }
 
+void CheckGearGates(const Database& data, const char* what)
+{
+    std::string boss;
+    for (const EnemyDef& enemy : data.GetEnemies()) {
+        if (enemy.Boss)
+            boss = enemy.Id;
+    }
+    Check(!boss.empty(), "the roster has a boss");
+    const std::vector<std::string> down{boss};
+    i32 gated = 0;
+    for (const ItemDef& item : data.GetItems()) {
+        if (item.RequiresDefeated.empty()) {
+            Check(ItemIsOffered(item, {}), "an item with no requirement is offered");
+            continue;
+        }
+        ++gated;
+        Check(item.RequiresDefeated.size() == 1 && item.RequiresDefeated[0] == boss,
+              "a gated item waits on the boss");
+        Check(!ItemIsOffered(item, {}), "a gated item is locked before that foe falls");
+        Check(ItemIsOffered(item, down), "defeating the required foe offers the item");
+        bool stocked = false;
+        for (const std::string& id : data.GetShop().Stock) {
+            if (id == item.Id)
+                stocked = true;
+        }
+        Check(stocked, "the shop lists a gated item");
+    }
+    Check(gated == 2, what);
+}
+
 void TestSample()
 {
     Database data(kSample);
@@ -284,6 +314,7 @@ void TestSample()
               plate->Slot == GearSlot::Armor && plate->Bonus.Defense == 6 &&
               plate->Bonus.Agility == -1,
           "Oathkeeper's Plate is +6 defense and -1 agility");
+    CheckGearGates(data, "the sample gates two items on the boss");
     Check(charm != nullptr && charm->Slot == GearSlot::Accessory && charm->Bonus.Agility == 2 &&
               charm->Value == 35,
           "wolfhide charm is +2 agility and costs 35");
@@ -446,6 +477,24 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "items.json", "\"slot\": \"weapon\"", "\"slot\": \"hat\"");
         TestRejected(copy.Path, "items.json", "slot", "an unknown gear slot is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"value\": 12",
+                      "\"value\": 12, \"requires\": { \"slain\": [\"wolf\"] }");
+        TestRejected(copy.Path, "items.json", "slain", "requires rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"defeated\": [\"oathkeeper_varn\"]",
+                      "\"defeated\": [\"no_such_foe\"]");
+        TestRejected(copy.Path, "items.json", "no_such_foe", "requires names a foe that exists");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "items.json", "\"defeated\": [\"oathkeeper_varn\"]",
+                      "\"defeated\": []");
+        TestRejected(copy.Path, "items.json", "defeated", "requires.defeated cannot be empty");
     }
     {
         TempCopy copy;
@@ -1472,6 +1521,7 @@ void TestShippedDescriptions()
     if (!data.IsLoaded())
         return;
     Check(BracedDescriptions(data) == 0, "shipped descriptions resolve with no braces");
+    CheckGearGates(data, "the shipped data gates two items on the boss");
 
     const SkillDef* wind = data.FindSkill("second_wind");
     const EffectDef* mend = wind != nullptr ? wind->FindEffect("mend") : nullptr;
@@ -1761,9 +1811,27 @@ void TestTunedAndRankedText()
 
 } // namespace
 
+void TestEveryRequiredFoe()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "items.json", "\"defeated\": [\"oathkeeper_varn\"]",
+                  "\"defeated\": [\"wolf\", \"bandit\"]");
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "an item can require two foes");
+    const ItemDef* axe = data.FindItem("notched_greataxe");
+    Check(axe != nullptr && axe->RequiresDefeated.size() == 2, "both foe ids are kept");
+    if (axe == nullptr)
+        return;
+    const std::vector<std::string> one{axe->RequiresDefeated[0]};
+    Check(!ItemIsOffered(*axe, one), "one of two required foes leaves the item locked");
+    Check(ItemIsOffered(*axe, axe->RequiresDefeated), "every required foe offers the item");
+}
+
 int main()
 {
     TestSample();
+    TestEveryRequiredFoe();
     TestHotReload();
     TestValidation();
     TestLayers();

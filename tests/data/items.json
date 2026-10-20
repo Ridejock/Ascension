@@ -19,7 +19,8 @@
       "slot": "weapon",
       "twoHanded": true,
       "bonus": { "strength": 6, "defense": -2 },
-      "value": 60
+      "value": 60,
+      "requires": { "defeated": ["oathkeeper_varn"] }
     },
     {
       "id": "oak_shield",
@@ -39,7 +40,8 @@
       "rarity": "uncommon",
       "slot": "armor",
       "bonus": { "defense": 6, "agility": -1 },
-      "value": 55
+      "value": 55,
+      "requires": { "defeated": ["oathkeeper_varn"] }
     },
     {
       "id": "wolfhide_charm",

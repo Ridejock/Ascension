@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,6 +16,16 @@ struct ItemStack {
     i32 Count = 0;
 
     [[nodiscard]] bool Empty() const { return Id.empty() || Count <= 0; }
+};
+
+// Gold, bag stacks, and worn ids. Empty stacks are kept so a slot stays put across a save.
+struct BagRecord {
+    i32 Gold = 0;
+    std::vector<ItemStack> Bag;
+    std::string Weapon;
+    std::string Offhand;
+    std::string Armor;
+    std::string Accessory;
 };
 
 // The hero's gold, 12-slot bag, and worn gear. Item ids are stored, not pointers, so a reload
@@ -79,6 +90,16 @@ public:
     // Removes one consumable after the fight has accepted the drink.
     bool Take(i32 bagIndex, std::string& error);
 
+    // Foe ids the run has defeated. Buy refuses an item whose requires list is not covered.
+    // The shop screen reads the same list. An empty list offers only ungated stock.
+    void SetDefeated(std::vector<std::string> defeated);
+    [[nodiscard]] std::span<const std::string> Defeated() const { return m_Defeated; }
+
+    void ExportBag(BagRecord& out) const;
+    // Replaces gold, stacks, and worn ids, then runs ApplyData so a two-handed weapon still
+    // clears the offhand. Fails when gold is out of range. The bag must already be started.
+    bool ImportBag(const BagRecord& in, std::string& error);
+
 private:
     [[nodiscard]] const ShopDef* Shop() const;
     [[nodiscard]] i32 StackCap() const;
@@ -95,6 +116,7 @@ private:
     std::string m_Armor;
     std::string m_Accessory;
     std::vector<ItemStack> m_Bag;
+    std::vector<std::string> m_Defeated;
 };
 
 } // namespace Ascension

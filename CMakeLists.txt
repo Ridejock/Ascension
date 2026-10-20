@@ -82,8 +82,10 @@ emerald_set_warnings(AscensionCombat)
 add_library(AscensionProgress STATIC
     src/Progress/Hero.cpp
     src/Progress/Inventory.cpp
+    src/Progress/RunSave.cpp
     include/Ascension/Progress/Hero.h
     include/Ascension/Progress/Inventory.h
+    include/Ascension/Progress/RunSave.h
 )
 target_link_libraries(AscensionProgress PUBLIC AscensionData)
 emerald_set_warnings(AscensionProgress)
@@ -169,6 +171,13 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
     emerald_set_warnings(AscensionInventoryTests)
     add_test(NAME Inventory COMMAND AscensionInventoryTests)
+
+    add_executable(AscensionSaveTests tests/SaveTests.cpp tests/Check.h)
+    target_link_libraries(AscensionSaveTests PRIVATE AscensionProgress AscensionCombat)
+    target_compile_definitions(AscensionSaveTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+    emerald_set_warnings(AscensionSaveTests)
+    add_test(NAME Save COMMAND AscensionSaveTests)
 
     add_executable(AscensionPlaytestTests
         tests/PlaytestTests.cpp

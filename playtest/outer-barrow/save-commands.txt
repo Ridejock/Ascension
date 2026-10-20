@@ -1,0 +1,6 @@
+# Save, quit, and load. Run from the repo root, after the debug build.
+# The first command writes a new run. The second loads it from the same folder.
+
+./build/debug/bin/Ascension --data data --level 1 --gold 20 --save-dir /tmp/ascension-save --keys-file playtest/outer-barrow/save-quit.keys --transcript /tmp/ascension-save-quit.txt
+
+./build/debug/bin/Ascension --data data --save-dir /tmp/ascension-save --keys-file playtest/outer-barrow/save-load.keys --transcript /tmp/ascension-save-load.txt

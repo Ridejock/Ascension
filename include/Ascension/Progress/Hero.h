@@ -25,6 +25,23 @@ struct AttributeSource {
     StatBlock Points;
 };
 
+// The career fields a save writes. Level is not stored: it is derived from XP and the curve.
+// Custom is the build-reset flag. When it is set, LevelSteps and Sources are the stats; when
+// it is clear, those lists are empty and the class formula is used instead.
+struct CareerRecord {
+    std::string ClassId;
+    i32 Xp = 0;
+    std::vector<std::string> Practiced;
+    std::vector<i32> Uses;
+    std::vector<std::string> Picked;
+    bool Custom = false;
+    bool ChoosingStarter = false;
+    i32 ClassPool = 0;
+    std::string SpendId;
+    std::vector<StatBlock> LevelSteps;
+    std::vector<AttributeSource> Sources;
+};
+
 // The Fighter's career: XP, level, skill uses, and the evolution they picked. Skill ids and the
 // class id are stored, not pointers, so a reload of the database does not dangle. Rank and level
 // are computed from the current progress.json whenever they are read.
@@ -135,6 +152,13 @@ public:
 
     // Adds XP (negative amounts are ignored) and may cross several levels at once.
     XpGrant GrantXp(i32 amount);
+
+    // Copies the career into `out`. The hero must already be started.
+    void ExportCareer(CareerRecord& out) const;
+    // Replaces the career. The hero must already be started on `data`, and ClassId must exist.
+    // A damaged skill list fails and leaves the previous career in place only when the class
+    // id is missing or the practiced list does not match its uses; otherwise the record is kept.
+    bool ImportCareer(const CareerRecord& in, std::string& error);
 
 private:
     void NoteLevelSteps();

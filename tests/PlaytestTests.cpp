@@ -199,6 +199,18 @@ void TestParseExampleAndEngineFlags()
     Check(!Parse({"--trace", "1"}, traced, why), "--trace does not take a value");
     CheckHas(why, "unexpected argument", "a value after --trace is a leftover argument");
 
+    PlaytestOptions saved;
+    Check(Parse({"--save-dir", "playtest-saves", "--keys", "f5 escape"}, saved, why),
+          "--save-dir and f5 parse");
+    Check(saved.SaveDir == "playtest-saves" && saved.Keys.size() == 2 &&
+              saved.Keys[0] == SDL_SCANCODE_F5 && saved.Keys[1] == SDL_SCANCODE_ESCAPE,
+          "the save folder and the save key are kept");
+    Check(!saved.DefinesRun(), "a save-dir command does not build a hero");
+    PlaytestOptions built;
+    built.Level = 1;
+    Check(built.DefinesRun(), "a level command builds a hero and skips the save");
+    Check(!Parse({"--save-dir"}, saved, why), "a missing save directory fails");
+
     Check(!Parse({"--bogus"}, items, why), "an unknown flag fails");
     CheckHas(why, "--bogus", "the unknown flag is named");
     Check(!Parse({"leftover"}, items, why), "a positional argument fails");
@@ -681,9 +693,8 @@ void TestOuterBarrowReplayKeys()
           "Brace + Second Wind does not swap that Second Wind and Rage");
     i32 braceWords = 0;
     for (usize index = 0; index < brace.size();) {
-        while (index < brace.size() &&
-               (brace[index] == ' ' || brace[index] == '\t' || brace[index] == '\n' ||
-                brace[index] == '\r'))
+        while (index < brace.size() && (brace[index] == ' ' || brace[index] == '\t' ||
+                                        brace[index] == '\n' || brace[index] == '\r'))
             ++index;
         if (index >= brace.size())
             break;
@@ -695,6 +706,44 @@ void TestOuterBarrowReplayKeys()
     if (braceWords != 109)
         std::printf("    Brace + Second Wind has %d words\n", braceWords);
     Check(braceWords == 109, "Brace + Second Wind is 109 words");
+}
+
+// Save, quit, and load. Separate from the eight fight replays so their word counts stay put.
+void TestSaveQuitLoadKeys()
+{
+    struct KeysFile {
+        const char* File;
+        i32 Words;
+    };
+    const KeysFile rows[] = {
+        {"save-quit.keys", 5},
+        {"save-load.keys", 2},
+    };
+    const fs::path root = ASCENSION_SOURCE_DIR;
+    const fs::path commandsPath = root / "playtest/outer-barrow/save-commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && !commands.empty(), "the save command list is present");
+    Check(commands.find("--keys ") == std::string::npos,
+          "the save commands read key files and do not inline a list");
+    Check(commands.find("--save-dir") != std::string::npos, "the save commands name a folder");
+
+    for (const KeysFile& row : rows) {
+        const fs::path keysPath = root / "playtest/outer-barrow" / row.File;
+        const std::string flag = std::string("--keys-file playtest/outer-barrow/") + row.File;
+        Check(commands.find(flag) != std::string::npos, "the command names this key file");
+        std::string why;
+        PlaytestOptions options;
+        Check(Parse({"--keys-file", keysPath.string()}, options, why), "the save key file parses");
+        Check(static_cast<i32>(options.Keys.size()) == row.Words, "the save key count is stable");
+        if (static_cast<i32>(options.Keys.size()) != row.Words)
+            std::printf("    %s has %zu keys, expected %d\n", row.File, options.Keys.size(),
+                        row.Words);
+    }
+    Check(commands.find("save-quit") != std::string::npos &&
+              commands.find("save-load") != std::string::npos,
+          "the commands cover save, quit, and load");
 }
 
 } // namespace
@@ -710,6 +759,7 @@ int main()
     TestStartupFailureText();
     TestNextFightAndScriptedKeys();
     TestOuterBarrowReplayKeys();
+    TestSaveQuitLoadKeys();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

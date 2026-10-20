@@ -8,6 +8,7 @@
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
+#include "Ascension/Progress/RunSave.h"
 #include "Emerald/Core/Application.h"
 #include "Playtest.h"
 
@@ -47,6 +48,18 @@ private:
     void ClampCamp();
     void HandleCamp(SDL_Scancode scancode);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // A resumed victory or defeat, with no fight on screen. N and R still start one.
+    void DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    [[nodiscard]] bool BetweenFights() const;
+    // A scripted hero (--level, --class, and the rest) is not written unless --save-dir is set.
+    [[nodiscard]] bool SavesProgress() const;
+    [[nodiscard]] std::filesystem::path SaveFolder() const;
+    bool WriteSave();
+    // Loads the slot when this command does not build its own hero. A missing file is a new
+    // run. A damaged file with no backup is a new run as well.
+    bool TryResume(std::string& error);
+    void RememberFoe(std::string_view id);
+    void RememberVictory();
     // The icon sheet and its accent layer. Nearest filtering, so a scaled pixel stays a square.
     void EnsureIcons();
     // --choose, once the evolution choice is open, then --pick for each open skill pick.
@@ -80,6 +93,12 @@ private:
     bool m_Camp = false;
     i32 m_CampColumn = 0;
     i32 m_CampRow = 0;
+    std::vector<std::string> m_Defeated;
+    RunStanding m_Standing = RunStanding::None;
+    bool m_ResumeResources = false;
+    bool m_AnnounceResume = false;
+    i32 m_ResumeHp = 0;
+    i32 m_ResumeFocus = 0;
     bool m_Picking = false;
     i32 m_PickRow = 0;
     Emerald::AssetHandle<Emerald::TextureAtlas> m_Icons;

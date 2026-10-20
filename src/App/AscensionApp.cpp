@@ -470,6 +470,9 @@ void AscensionApp::AwardVictory()
     }
     if (grant.ChoiceOpened || grant.PickOpened)
         TakeAutoPath();
+    RememberVictory();
+    m_Standing = RunStanding::Victory;
+    WriteSave();
 }
 
 void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
@@ -541,8 +544,15 @@ void AscensionApp::BeginFight()
     std::string error;
     if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
         m_StartError = error;
+        m_ResumeResources = false;
         return;
     }
+    if (m_ResumeResources) {
+        m_Battle->SetPlayerHp(m_ResumeHp);
+        m_Battle->SetPlayerFocus(m_ResumeFocus);
+        m_ResumeResources = false;
+    }
+    m_Standing = RunStanding::Ongoing;
     PushRanks();
     if (m_Battle->Result() != BattleResult::Ongoing) {
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
@@ -559,6 +569,10 @@ void AscensionApp::BeginFight()
         Note("You move first.");
     }
     ResolveFoe();
+    if (m_AnnounceResume) {
+        Note("Resumed.");
+        m_AnnounceResume = false;
+    }
 }
 
 void AscensionApp::OnStart()
@@ -583,19 +597,32 @@ void AscensionApp::OnStart()
     }
     PlaytestSetup setup;
     std::string why;
-    if (!ApplyPlaytest(m_Hero, m_Inventory, m_Data, m_Play, setup, why)) {
-        m_StartError = std::move(why);
-        std::fprintf(stderr, "%s\n", m_StartError.c_str());
-        Note(m_StartError);
-        Quit();
-        return;
+    bool resumed = false;
+    if (!m_Play.DefinesRun())
+        resumed = TryResume(why);
+    if (!resumed) {
+        if (!ApplyPlaytest(m_Hero, m_Inventory, m_Data, m_Play, setup, why)) {
+            m_StartError = std::move(why);
+            std::fprintf(stderr, "%s\n", m_StartError.c_str());
+            Note(m_StartError);
+            Quit();
+            return;
+        }
+        // An encounter id is a place in encounters.json. A lone enemy id is started by name.
+        m_EnemyIndex = setup.EnemyIndex;
+        m_DirectEnemy = std::move(setup.DirectEnemy);
+        m_Inventory.SetDefeated(m_Defeated);
     }
-    // An encounter id is a place in encounters.json. A lone enemy id is started by name.
-    m_EnemyIndex = setup.EnemyIndex;
-    m_DirectEnemy = std::move(setup.DirectEnemy);
     if (!TakeAutoPath())
         return;
     EnsureIcons();
+    if (resumed && (m_Standing == RunStanding::Victory || m_Standing == RunStanding::Defeat)) {
+        Note(m_Standing == RunStanding::Victory ? "Victory." : "Defeat.");
+        Note("Resumed.");
+        return;
+    }
+    if (resumed)
+        m_AnnounceResume = true;
     BeginFight();
 }
 
@@ -604,6 +631,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat)
         return;
     if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
+        WriteSave();
         Quit();
         return;
     }
@@ -614,6 +642,11 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     window.FromScript = m_ApplyingScript;
     if (DecideScriptedPress(window) == ScriptedPress::IgnoreWindow)
         return;
+    if (event.key.scancode == SDL_SCANCODE_F5) {
+        if (WriteSave())
+            Note("Saved.");
+        return;
+    }
     if (event.key.scancode == SDL_SCANCODE_R) {
         BeginFight();
         return;
@@ -644,10 +677,10 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         HandleCamp(event.key.scancode);
         return;
     }
-    if (m_Battle == nullptr || !m_StartError.empty())
+    if (!m_StartError.empty())
         return;
 
-    if (m_Picking) {
+    if (m_Battle != nullptr && m_Picking) {
         if (m_Battle->Result() != BattleResult::Ongoing ||
             m_Battle->Actor() != CombatantSide::Player)
             m_Picking = false;
@@ -658,7 +691,9 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     }
 
     const int digit = static_cast<int>(event.key.scancode) - static_cast<int>(SDL_SCANCODE_1);
-    if (m_Battle->Result() != BattleResult::Ongoing) {
+    // A resumed victory has no battle. The path, the skill pick, and a build reset still use
+    // the number keys, the same as a fight whose result is already decided.
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing) {
         const bool pickingClass = m_Hero.ChoosingStarter();
         const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
         const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
@@ -842,8 +877,9 @@ void AscensionApp::PlayScriptedKey()
         return;
     // Finish a foe turn left over from the previous frame before this press is spent.
     if (m_Battle != nullptr) {
-        for (i32 pass = 0; pass < kScriptPumpPasses && m_Battle->Result() == BattleResult::Ongoing &&
-                           m_Battle->Actor() == CombatantSide::Enemy;
+        for (i32 pass = 0;
+             pass < kScriptPumpPasses && m_Battle->Result() == BattleResult::Ongoing &&
+             m_Battle->Actor() == CombatantSide::Enemy;
              ++pass)
             ResolveFoe();
     }
@@ -947,6 +983,177 @@ void AscensionApp::OnUpdate(f32 dt)
     Note("Data reloaded.");
 }
 
+bool AscensionApp::BetweenFights() const
+{
+    return m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady() && m_Battle == nullptr;
+}
+
+bool AscensionApp::SavesProgress() const
+{
+    return !m_Play.SaveDir.empty() || !m_Play.DefinesRun();
+}
+
+std::filesystem::path AscensionApp::SaveFolder() const
+{
+    if (!m_Play.SaveDir.empty())
+        return m_Play.SaveDir;
+    return RunSave::DefaultFolder();
+}
+
+bool AscensionApp::WriteSave()
+{
+    if (!SavesProgress() || !m_Hero.IsReady() || !m_Inventory.IsReady())
+        return false;
+    RunState run;
+    m_Hero.ExportCareer(run.Career);
+    m_Inventory.ExportBag(run.Bag);
+    run.Defeated = m_Defeated;
+    run.Position = m_EnemyIndex;
+    run.DirectEnemy = m_DirectEnemy;
+    run.Standing = m_Standing;
+    if (m_Battle != nullptr) {
+        if (m_Battle->Result() == BattleResult::Victory)
+            run.Standing = RunStanding::Victory;
+        else if (m_Battle->Result() == BattleResult::Defeat)
+            run.Standing = RunStanding::Defeat;
+        else {
+            run.Standing = RunStanding::Ongoing;
+            run.ResourcesKnown = true;
+            run.Hp = m_Battle->Player().Hp;
+            run.Focus = m_Battle->Player().Focus;
+        }
+    }
+    RunSave saves(SaveFolder());
+    std::string error;
+    if (!saves.Write(run, error)) {
+        Note(error.empty() ? "could not write the save" : error);
+        return false;
+    }
+    return true;
+}
+
+bool AscensionApp::TryResume(std::string& error)
+{
+    const RunSave saves(SaveFolder());
+    const RunLoad loaded = saves.Read();
+    if (!loaded) {
+        if (loaded.Error != RunSaveError::NotFound)
+            Note("The save could not be read. A new run starts.");
+        return false;
+    }
+    if (!m_Hero.Start(m_Data, error) || !m_Inventory.Start(m_Data, error))
+        return false;
+    if (!m_Hero.ImportCareer(loaded.Run.Career, error) ||
+        !m_Inventory.ImportBag(loaded.Run.Bag, error))
+        return false;
+    m_Defeated = loaded.Run.Defeated;
+    m_Inventory.SetDefeated(m_Defeated);
+    m_EnemyIndex = loaded.Run.Position < 0 ? 0 : loaded.Run.Position;
+    m_DirectEnemy = loaded.Run.DirectEnemy;
+    m_Standing = loaded.Run.Standing;
+    m_ResumeResources = false;
+    if (loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.ResourcesKnown) {
+        m_ResumeResources = true;
+        m_ResumeHp = loaded.Run.Hp;
+        m_ResumeFocus = loaded.Run.Focus;
+    }
+    if (loaded.FromBackup)
+        Note("The save was damaged. The previous one was loaded.");
+    error.clear();
+    return true;
+}
+
+void AscensionApp::RememberFoe(std::string_view id)
+{
+    if (id.empty())
+        return;
+    for (const std::string& held : m_Defeated) {
+        if (held == id)
+            return;
+    }
+    m_Defeated.emplace_back(id);
+    m_Inventory.SetDefeated(m_Defeated);
+}
+
+void AscensionApp::RememberVictory()
+{
+    if (!m_DirectEnemy.empty()) {
+        RememberFoe(m_DirectEnemy);
+        return;
+    }
+    const auto encounters = m_Data.GetEncounters();
+    if (m_EnemyIndex < 0 || m_EnemyIndex >= static_cast<i32>(encounters.size()))
+        return;
+    for (const std::string& id : encounters[static_cast<usize>(m_EnemyIndex)].Enemies)
+        RememberFoe(id);
+}
+
+void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    const Emerald::Vec2 left{28.0f, 24.0f};
+    const Emerald::Vec2 leftSize{600.0f, height - 188.0f};
+    const Emerald::Vec2 right{648.0f, 24.0f};
+    const Emerald::Vec2 rightSize{width - 676.0f, height - 188.0f};
+    DrawPanel(renderer, left, leftSize);
+    DrawPanel(renderer, right, rightSize);
+    DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
+
+    std::string title = m_Hero.ClassId();
+    if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
+        title = heroClass->Name;
+    f32 y = left.y + 24.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(title), kInk, 3);
+    y += Emerald::DebugTextLineHeight(3) + 8.0f;
+    const std::string levelLine = "Level " + std::to_string(m_Hero.Level()) + "   XP " +
+                                  std::to_string(m_Hero.Xp()) + "   GOLD " +
+                                  std::to_string(m_Inventory.Gold());
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(levelLine), kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 8.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(WornLine(m_Data, m_Inventory)),
+                           kInk, 1, leftSize.x - 56.0f);
+    y += Emerald::DebugTextLineHeight(1) + 12.0f;
+    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "THE NEXT FIGHT WAITS.", kInk, 2);
+    if (const char* block = m_Hero.NextFightBlock()) {
+        y += Emerald::DebugTextLineHeight(2) + 8.0f;
+        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(block), kError, 2,
+                               leftSize.x - 56.0f);
+    }
+
+    y = right.y + 24.0f;
+    Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, "FELLED", kFrame, 2);
+    y += Emerald::DebugTextLineHeight(2) + 8.0f;
+    if (m_Defeated.empty()) {
+        Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, "NONE YET", kDim, 2);
+    } else {
+        for (const std::string& id : m_Defeated) {
+            if (y > right.y + rightSize.y - 28.0f)
+                break;
+            const EnemyDef* foe = m_Data.FindEnemy(id);
+            const std::string name = foe != nullptr ? foe->Name : id;
+            Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, Upper(name), kInk, 2);
+            y += Emerald::DebugTextLineHeight(2) + 2.0f;
+        }
+    }
+
+    const char* banner = "BETWEEN FIGHTS";
+    Emerald::Vec4 bannerColor = kFrame;
+    if (m_Standing == RunStanding::Victory)
+        banner = "VICTORY";
+    else if (m_Standing == RunStanding::Defeat) {
+        banner = "DEFEAT";
+        bannerColor = kError;
+    }
+    Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, banner, bannerColor, 2);
+    f32 logY = height - 96.0f;
+    for (const std::string& line : m_Log) {
+        Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(line), kDim, 1, width - 96.0f);
+        logY += Emerald::DebugTextLineHeight(1) + 1.0f;
+    }
+    Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f},
+                           "R FIGHT    N NEXT    I SHOP    F5 SAVE    ESC QUIT", kDim, 1,
+                           width - 96.0f);
+}
+
 void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 {
     const Emerald::Vec2i pixels = GetWindowSizeInPixels();
@@ -964,7 +1171,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     DrawPanel(renderer, right, rightSize);
     DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
 
-    if (!m_Data.IsLoaded() || m_Battle == nullptr || !m_StartError.empty()) {
+    if (m_Camp && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
+        DrawCamp(renderer, width, height);
+        renderer.End();
+        return;
+    }
+    if (!m_Data.IsLoaded() || !m_StartError.empty() || (m_Battle == nullptr && !BetweenFights())) {
         Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 28.0f}, "ASCENSION", kFrame, 3);
         // No fight yet. A load error keeps its file and field. A fight block (a path still
         // open, a class to pick, points to spend) keeps the sentence NextFightBlock produced.
@@ -976,8 +1188,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         return;
     }
 
-    if (m_Camp) {
-        DrawCamp(renderer, width, height);
+    if (BetweenFights()) {
+        DrawBetween(renderer, width, height);
         renderer.End();
         return;
     }
@@ -1466,8 +1678,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             help += "SPACE WAIT    ";
             if (fightOver)
                 help += "I " + KeeperWord(m_Data.GetShop()) + "    ";
-            help +=
-                "R FIGHT    N NEXT FOE    ESC QUIT    REV " + std::to_string(m_Data.GetRevision());
+            help += "R FIGHT    N NEXT FOE    F5 SAVE    ESC QUIT    REV " +
+                    std::to_string(m_Data.GetRevision());
         }
         Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(help), kDim, 1,
                                width - 96.0f);
@@ -1899,6 +2111,8 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
         const bool marked = !bagSide && m_CampRow == stockIndex;
         const Emerald::Vec4 rowColor = marked ? kFrame : kInk;
         const ItemDef* goods = m_Data.FindItem(shop.Stock[static_cast<usize>(stockIndex)]);
+        const bool locked = goods != nullptr && !ItemIsOffered(*goods, m_Inventory.Defeated());
+        const Emerald::Vec4 ink = locked && !marked ? kDim : rowColor;
         std::string lead = marked ? "> " : "  ";
         std::string name;
         std::string tail;
@@ -1909,10 +2123,9 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
             tail = "   " + std::to_string(goods->Value) + " gold";
             tail += GearLine(m_Data, *goods, true);
         }
-        const Emerald::Vec4 nameColor =
-            goods != nullptr ? RarityTint(m_Data, *goods, rowColor) : rowColor;
+        const Emerald::Vec4 nameColor = goods != nullptr ? RarityTint(m_Data, *goods, ink) : ink;
         y = DrawGearRow(renderer, art, {right.x + 16.0f, y}, stockWidth, goods, nameColor, lead,
-                        name, tail, rowColor);
+                        name, tail, ink);
     }
 
     const f32 helpY = height - 36.0f;

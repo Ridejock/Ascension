@@ -213,8 +213,11 @@ public:
     ActionResult UseItem(const ItemDef& item);
 
     // Clamps to 1..MaxHp. The sandbox never calls this; tests place a wound so a passive that
-    // reads health can be checked at a known total.
+    // reads health can be checked at a known total. A resumed fight uses it for the saved wound.
     void SetPlayerHp(i32 hp);
+
+    // Clamps to 0..MaxFocus. A resumed fight restores the saved pool with this.
+    void SetPlayerFocus(i32 focus);
 
     // Clamps the selected enemy to 0..MaxHp. 0 may end the fight. Crossing that enemy's phase
     // threshold starts phase 2.
