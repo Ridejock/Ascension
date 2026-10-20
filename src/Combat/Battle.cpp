@@ -103,6 +103,25 @@ i32 ClampPoolTo(i32 value, i32 least, i32 most)
     return value;
 }
 
+// Health that fits under max HP. 0 when the unit is already full or `amount` is empty.
+i32 RestoreHp(CombatantState& who, i32 amount)
+{
+    if (amount <= 0 || who.Hp >= who.MaxHp)
+        return 0;
+    const i32 room = who.MaxHp - who.Hp;
+    const i32 gained = amount < room ? amount : room;
+    who.Hp += gained;
+    return gained;
+}
+
+// One sentence for a heal effect. `gained` is what RestoreHp put back, not the power.
+void NoteHeal(std::string& text, i32 gained)
+{
+    text += " Heals ";
+    text += std::to_string(gained);
+    text += ".";
+}
+
 void ApplySnap(CombatantState& who, const CombatantSnapshot& shot, bool hero)
 {
     const i32 leastHp = hero ? 1 : 0;
@@ -877,11 +896,7 @@ void Battle::RunTrigger(CombatantState& who, EffectTrigger trigger) const
             if (effect.Op == EffectOp::GrantFocus) {
                 GrantFocus(who, effect.Amount.value_or(0));
             } else if (effect.Op == EffectOp::Heal) {
-                const i32 amount = effect.Power.value_or(0);
-                if (amount <= 0 || who.Hp >= who.MaxHp)
-                    continue;
-                const i32 room = who.MaxHp - who.Hp;
-                who.Hp += amount < room ? amount : room;
+                RestoreHp(who, effect.Power.value_or(0));
             } else if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value()) {
                 const StatusDef* status = m_Data->FindStatus(*effect.Status);
                 if (status != nullptr)
@@ -1602,12 +1617,11 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
             i32 scaling = 0;
             if (effect.Scaling.has_value())
                 scaling = user.Stats.Get(*effect.Scaling);
-            const i32 amount = HealAmount(power, scaling, m_Rules);
-            const i32 before = user.Hp;
-            const i32 room = user.MaxHp - user.Hp;
-            user.Hp = before + (amount < room ? amount : room);
-            result.Healing = user.Hp - before;
+            const i32 gained = RestoreHp(user, HealAmount(power, scaling, m_Rules));
+            result.Healing += gained;
             sawHeal = true;
+            if (gained > 0)
+                NoteHeal(extra, gained);
         } else if (effect.Op == EffectOp::Empower) {
             user.EmpowerPercent = effect.Amount.value_or(0);
             sawEmpower = true;
@@ -1754,12 +1768,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
     } else if (sawGuard) {
         result.Text = user.Name + " uses " + skill.Name + ". The next hit is reduced by " +
                       std::to_string(guardAmount) + " percent.";
-    } else if (sawHeal) {
-        if (result.Healing == 0)
-            result.Text = user.Name + " uses " + skill.Name + " but is already at full health.";
-        else
-            result.Text = user.Name + " uses " + skill.Name + " and heals " +
-                          std::to_string(result.Healing) + ".";
+    } else if (sawHeal && result.Healing == 0) {
+        result.Text = user.Name + " uses " + skill.Name + " but is already at full health.";
     } else if (sawEmpower) {
         result.Text = user.Name + " uses " + skill.Name + ". The next blow hits harder.";
     } else if (sawHarden) {
