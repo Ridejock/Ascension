@@ -392,6 +392,14 @@ void AscensionApp::Note(const ActionResult& result)
     // Battle text is the multi-enemy log: Cleave names each hit, and a summon says
     // "Rubble Shard 2 joins the fight." The transcript is this same line.
     Note(result.Text);
+    // --trace stays on stderr so a transcript diff still compares the combat log alone.
+    if (!m_Play.Trace || m_Battle == nullptr)
+        return;
+    const std::string state = m_Battle->TraceState();
+    if (state.empty())
+        return;
+    std::fprintf(stderr, "%s | %s\n", state.c_str(), result.Text.c_str());
+    std::fflush(stderr);
 }
 
 void AscensionApp::NoteMarked(i32 previous)
@@ -847,8 +855,11 @@ void AscensionApp::PlayScriptedKey()
     script.FightOngoing = ongoing;
     script.PlayerTurn = !ongoing || m_Battle->Actor() == CombatantSide::Player;
     script.NeedsPlayerTurn = KeyNeedsPlayerTurn(scancode);
-    if (DecideScriptedPress(script) == ScriptedPress::WaitForTurn)
+    if (DecideScriptedPress(script) == ScriptedPress::WaitForTurn) {
+        if (m_Play.Trace)
+            std::fprintf(stderr, "trace wait foe-turn\n");
         return;
+    }
     ++m_KeyCursor;
     // SDL_Event is a union. Value-initialization only has to clear the first member, so
     // key.repeat can be leftover stack data. OnEvent drops a press when repeat is set,

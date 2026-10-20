@@ -53,6 +53,8 @@ struct PlaytestOptions {
     std::string ChooseId;
     // --pick, in the order they were passed. Applied one open pick at a time.
     std::vector<std::string> PickIds;
+    // --trace writes one state line per action to stderr. The transcript stays the combat log.
+    bool Trace = false;
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;

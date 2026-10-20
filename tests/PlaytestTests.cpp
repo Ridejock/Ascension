@@ -193,6 +193,12 @@ void TestParseExampleAndEngineFlags()
     Check(!Parse({"--give", "minor_potion:0"}, items, why), "a zero count fails");
     Check(!Parse({"--level"}, items, why), "a missing level fails");
     Check(!Parse({"--level", "6", "--level", "7"}, items, why), "a repeated level fails");
+    PlaytestOptions traced;
+    Check(Parse({"--trace", "--keys", "1"}, traced, why), "--trace parses");
+    Check(traced.Trace && traced.Keys.size() == 1, "--trace is a switch and keeps the keys");
+    Check(!Parse({"--trace", "1"}, traced, why), "--trace does not take a value");
+    CheckHas(why, "unexpected argument", "a value after --trace is a leftover argument");
+
     Check(!Parse({"--bogus"}, items, why), "an unknown flag fails");
     CheckHas(why, "--bogus", "the unknown flag is named");
     Check(!Parse({"leftover"}, items, why), "a positional argument fails");
