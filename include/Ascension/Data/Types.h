@@ -416,11 +416,57 @@ struct ShopDef {
     std::string Id;
     std::string Name;
     std::string Keeper;
+    // Dialogue id, a file under data/dialogue/. Empty means the shop opens straight away.
+    std::string Dialogue;
     i32 BagSlots = 0;
     i32 StackSize = 1;
     i32 SellNumerator = 1;
     i32 SellDenominator = 1;
     std::vector<std::string> Stock;
+};
+
+// A flag expression. Negate flips the result. Tail empty means Head is a flag set by
+// a node or a choice. Tail set means Head is a named id list and Tail is a member:
+// found.alphas_fang is true while that id is in the list named found. The lists are
+// supplied by the run. This struct does not know which list is drops or foes.
+struct FlagExpr {
+    bool Negate = false;
+    std::string Head;
+    std::string Tail;
+};
+
+// Where a choice goes. Next is another node in the same file. End closes the talk.
+// Action is a verb id the game already knows how to perform, such as shop_open.
+enum class TalkChoiceKind : u8 { Next, End, Action };
+
+struct DialogueChoice {
+    std::string Text;
+    TalkChoiceKind Kind = TalkChoiceKind::Next;
+    std::string Next;
+    std::string Action;
+    std::vector<FlagExpr> Requires;
+    std::vector<std::string> Sets;
+};
+
+// One line of a talk. Note is tone for the writer and is not drawn. Line may contain
+// '/' to break the box; the slash is not drawn. Requires gates this node. The first
+// node in the file whose requirements hold is where the talk starts. Sets is applied
+// when the node is entered.
+struct DialogueNode {
+    std::string Id;
+    std::string Line;
+    std::string Note;
+    std::vector<FlagExpr> Requires;
+    std::vector<std::string> Sets;
+    std::vector<DialogueChoice> Choices;
+};
+
+// One NPC file under data/dialogue/. Id matches the file name.
+struct DialogueDef {
+    std::string Id;
+    std::vector<DialogueNode> Nodes;
+
+    [[nodiscard]] const DialogueNode* FindNode(std::string_view id) const;
 };
 
 // True when every foe in RequiresDefeated is in `defeated`. An item with an empty list is
@@ -584,6 +630,15 @@ inline const EffectDef* SkillDef::FindEffect(std::string_view id) const
     for (const EffectDef& effect : Effects) {
         if (effect.Id == id)
             return &effect;
+    }
+    return nullptr;
+}
+
+inline const DialogueNode* DialogueDef::FindNode(std::string_view id) const
+{
+    for (const DialogueNode& node : Nodes) {
+        if (node.Id == id)
+            return &node;
     }
     return nullptr;
 }

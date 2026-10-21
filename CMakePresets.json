@@ -36,5 +36,15 @@
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "debug-full", "configurePreset": "debug-full" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true }
+    },
+    { "name": "debug", "inherits": "base", "configurePreset": "debug" },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "debug-full", "inherits": "base", "configurePreset": "debug-full" }
   ]
 }

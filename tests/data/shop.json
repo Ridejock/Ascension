@@ -3,6 +3,7 @@
     "id": "pells_provisions",
     "name": "Old Pell's Provisions",
     "keeper": "Pell Harrow",
+    "dialogue": "pell",
     "bagSlots": 12,
     "stackSize": 5,
     "sellNumerator": 1,

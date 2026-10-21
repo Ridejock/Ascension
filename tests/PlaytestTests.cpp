@@ -14,6 +14,7 @@
 
 #include "Check.h"
 #include "Playtest.h"
+#include "TalkInput.h"
 
 namespace {
 
@@ -746,6 +747,48 @@ void TestSaveQuitLoadKeys()
           "the commands cover save, quit, and load");
 }
 
+// Three Strikes, then the rumor: Down onto "Heard any rumors?", E through that chain, Down onto Leave.
+void TestPellRumorKeys()
+{
+    const fs::path root = ASCENSION_SOURCE_DIR;
+    const fs::path keysPath = root / "playtest/dialogue/pell-rumor.keys";
+    const fs::path commandsPath = root / "playtest/dialogue/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && commands.find("--keys-file playtest/dialogue/pell-rumor.keys") != std::string::npos,
+          "the dialogue command names the rumor key file");
+
+    std::string why;
+    PlaytestOptions options;
+    Check(Parse({"--keys-file", keysPath.string()}, options, why), "the rumor key file parses");
+    const SDL_Scancode expect[] = {
+        SDL_SCANCODE_1, SDL_SCANCODE_1, SDL_SCANCODE_1, SDL_SCANCODE_I, SDL_SCANCODE_DOWN,
+        SDL_SCANCODE_E, SDL_SCANCODE_E, SDL_SCANCODE_E, SDL_SCANCODE_E, SDL_SCANCODE_DOWN,
+        SDL_SCANCODE_E,
+    };
+    Check(options.Keys.size() == std::size(expect), "the rumor walk is eleven keys");
+    if (options.Keys.size() == std::size(expect)) {
+        bool same = true;
+        for (usize index = 0; index < std::size(expect); ++index) {
+            if (options.Keys[index] != expect[index])
+                same = false;
+        }
+        Check(same, "the keys strike, talk, take the rumor, and leave");
+    }
+
+    Check(TalkCommandFromKey(SDL_SCANCODE_UP) == TalkCommand::Up, "Up moves the talk menu");
+    Check(TalkCommandFromKey(SDL_SCANCODE_E) == TalkCommand::Confirm, "E speaks");
+    Check(TalkCommandFromKey(SDL_SCANCODE_RETURN) == TalkCommand::Confirm, "Enter speaks");
+    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_UP) == TalkCommand::Up, "the d-pad moves the menu");
+    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_DOWN) == TalkCommand::Down,
+          "the d-pad moves down");
+    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_SOUTH) == TalkCommand::Confirm,
+          "the south button speaks");
+    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_EAST) == TalkCommand::None,
+          "the other face buttons are not the menu");
+}
+
 } // namespace
 
 int main()
@@ -760,6 +803,7 @@ int main()
     TestNextFightAndScriptedKeys();
     TestOuterBarrowReplayKeys();
     TestSaveQuitLoadKeys();
+    TestPellRumorKeys();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

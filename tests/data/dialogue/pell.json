@@ -1,0 +1,89 @@
+{
+  "dialogue": {
+    "id": "pell",
+    "nodes": [
+      {
+        "id": "pell_greet_b",
+        "line": "Back again, what's that you've got?/No. Don't take it out. I can feel it.",
+        "note": "rare unease; the grumble drops away.",
+        "requires": ["found.alphas_fang"],
+        "choices": [
+          { "text": "The wolf had it.", "next": "pell_fang_1" },
+          { "text": "Browse wares", "action": "shop_open" },
+          { "text": "Just passing through.", "next": "pell_bye" }
+        ]
+      },
+      {
+        "id": "pell_greet_a",
+        "line": "Back again? Good. Knee says rain./Buying, or just leaning on my counter?",
+        "note": "dry, grumbling warmth.",
+        "requires": ["!found.alphas_fang"],
+        "choices": [
+          { "text": "Browse wares", "action": "shop_open" },
+          { "text": "Heard any rumors?", "next": "pell_rumor_1" },
+          { "text": "Just passing through.", "next": "pell_bye" }
+        ]
+      },
+      {
+        "id": "pell_rumor_1",
+        "line": "Rumors. Hm./Wolf pack's got a new leader out in/the Outer Barrow. Big. Dire big.",
+        "note": "he lowers his voice and leans in.",
+        "choices": [
+          { "text": "What's odd about it?", "next": "pell_rumor_2" },
+          { "text": "Wolves are wolves.", "next": "pell_rumor_2b" }
+        ]
+      },
+      {
+        "id": "pell_rumor_2",
+        "line": "Hunter saw it up close. Lived, barely./Says it's got a tooth that isn't/its own. Too long. Wrong color.",
+        "note": "matter-of-fact, which makes it worse.",
+        "choices": [
+          { "text": "Wrong how?", "next": "pell_rumor_3" },
+          { "text": "Thanks, Pell.", "next": "pell_bye" }
+        ]
+      },
+      {
+        "id": "pell_rumor_2b",
+        "line": "Not this one. Doesn't eat what it/kills. Hunter swears it's got a tooth/that isn't its own.",
+        "note": "a little offended that you'd brush it off.",
+        "choices": [
+          { "text": "Wrong how?", "next": "pell_rumor_3" },
+          { "text": "Thanks, Pell.", "next": "pell_bye" }
+        ]
+      },
+      {
+        "id": "pell_rumor_3",
+        "line": "Like bone that's been in the ground/too long. I dug these hills forty/years. Some things you leave buried.",
+        "note": "quiet; the one moment he isn't joking.",
+        "choices": [
+          { "text": "I'll take a look.", "next": "pell_rumor_end" },
+          { "text": "Sounds like a myth.", "next": "pell_rumor_end" }
+        ]
+      },
+      {
+        "id": "pell_rumor_end",
+        "line": "Then buy a potion first. Advice is/free. Potions aren't.",
+        "note": "back to grumbling, covering the unease.",
+        "choices": [
+          { "text": "Browse wares", "action": "shop_open" },
+          { "text": "Leave", "end": true }
+        ]
+      },
+      {
+        "id": "pell_fang_1",
+        "line": "Course it did./Things that come out of those hills/rarely come out alone. Watch yourself.",
+        "note": "a warning from someone who once heard the stone knock back.",
+        "choices": [
+          { "text": "Browse wares", "action": "shop_open" },
+          { "text": "Leave", "end": true }
+        ]
+      },
+      {
+        "id": "pell_bye",
+        "line": "Mind the barrow. And your knees./Trust me on the knees.",
+        "note": "fond and gruff.",
+        "choices": []
+      }
+    ]
+  }
+}

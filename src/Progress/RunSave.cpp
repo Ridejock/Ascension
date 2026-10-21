@@ -377,6 +377,10 @@ void Store(const RunState& run, Emerald::SaveData& data)
     for (i32 index = 0; index < static_cast<i32>(run.Found.size()); ++index)
         data.SetString(Key("found", index, {}), run.Found[static_cast<usize>(index)]);
 
+    data.SetInt("flag.count", static_cast<i32>(run.Flags.size()));
+    for (i32 index = 0; index < static_cast<i32>(run.Flags.size()); ++index)
+        data.SetString(Key("flag", index, {}), run.Flags[static_cast<usize>(index)]);
+
     data.SetInt("position", run.Position);
     data.SetString("direct", run.DirectEnemy);
     data.SetString("standing", StandingName(run.Standing));
@@ -415,9 +419,10 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     const i32 bags = data.GetInt("bag.count", 0);
     const i32 foes = data.GetInt("defeated.count", 0);
     const i32 found = data.GetInt("found.count", 0);
+    const i32 flags = data.GetInt("flag.count", 0);
     if (!CountOk(skills, error) || !CountOk(picks, error) || !CountOk(steps, error) ||
         !CountOk(sources, error) || !CountOk(bags, error) || !CountOk(foes, error) ||
-        !CountOk(found, error))
+        !CountOk(found, error) || !CountOk(flags, error))
         return false;
 
     run.Career.Practiced.resize(static_cast<usize>(skills));
@@ -494,6 +499,16 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
             return false;
         }
         run.Found[static_cast<usize>(index)] = id;
+    }
+
+    run.Flags.resize(static_cast<usize>(flags));
+    for (i32 index = 0; index < flags; ++index) {
+        const std::string id = data.GetString(Key("flag", index, {}));
+        if (id.empty()) {
+            error = "the save's dialogue flags are damaged";
+            return false;
+        }
+        run.Flags[static_cast<usize>(index)] = id;
     }
 
     run.Position = data.GetInt("position", 0);

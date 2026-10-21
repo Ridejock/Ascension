@@ -7,6 +7,7 @@
 #include "FoeAlert.h"
 #include "GearLine.h"
 #include "SourceTag.h"
+#include "TalkInput.h"
 
 #include <SDL3/SDL.h>
 
@@ -505,6 +506,7 @@ void AscensionApp::BeginFight()
 {
     if (const char* block = m_Hero.NextFightBlock()) {
         m_Camp = false;
+        m_Talk = false;
         m_Picking = false;
         if (m_Log.empty() || m_Log.back() != block)
             Note(block);
@@ -515,6 +517,7 @@ void AscensionApp::BeginFight()
     // R and N start the fight over. A unique drop already in m_Found is not granted again.
     m_XpAwarded = false;
     m_Camp = false;
+    m_Talk = false;
     m_Picking = false;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
@@ -589,6 +592,172 @@ void AscensionApp::BeginFight()
     }
 }
 
+AscensionApp::~AscensionApp()
+{
+    for (const HeldPad& held : m_Pads) {
+        if (held.Pad != nullptr)
+            SDL_CloseGamepad(held.Pad);
+    }
+    m_Pads.clear();
+}
+
+void AscensionApp::OpenPad(SDL_JoystickID id)
+{
+    for (const HeldPad& held : m_Pads) {
+        if (held.Id == id)
+            return;
+    }
+    SDL_Gamepad* pad = SDL_OpenGamepad(id);
+    if (pad == nullptr)
+        return;
+    HeldPad held;
+    held.Id = id;
+    held.Pad = pad;
+    m_Pads.push_back(held);
+}
+
+void AscensionApp::ClosePad(SDL_JoystickID id)
+{
+    for (usize index = 0; index < m_Pads.size(); ++index) {
+        if (m_Pads[index].Id != id)
+            continue;
+        if (m_Pads[index].Pad != nullptr)
+            SDL_CloseGamepad(m_Pads[index].Pad);
+        m_Pads.erase(m_Pads.begin() + static_cast<std::ptrdiff_t>(index));
+        return;
+    }
+}
+
+void AscensionApp::OpenPads()
+{
+    SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (ids == nullptr)
+        return;
+    for (int index = 0; index < count; ++index)
+        OpenPad(ids[index]);
+    SDL_free(ids);
+}
+
+void AscensionApp::FillTalkFacts(TalkList lists[2], TalkFacts& facts) const
+{
+    lists[0].Name = "found";
+    lists[0].Ids = m_Found;
+    lists[1].Name = "defeated";
+    lists[1].Ids = m_Defeated;
+    facts.Flags = m_TalkFlags;
+    facts.Lists = std::span<const TalkList>(lists, 2);
+}
+
+bool AscensionApp::OpenTalk()
+{
+    const std::string& id = m_Data.GetShop().Dialogue;
+    if (id.empty())
+        return false;
+    const DialogueDef* talk = m_Data.FindDialogue(id);
+    if (talk == nullptr)
+        return false;
+    TalkList lists[2];
+    TalkFacts facts;
+    FillTalkFacts(lists, facts);
+    const DialogueNode* node = TalkEntry(*talk, facts);
+    if (node == nullptr)
+        return false;
+    TalkApplySets(node->Sets, m_TalkFlags);
+    m_Talk = true;
+    m_TalkNode = node->Id;
+    m_TalkRow = 0;
+    m_Camp = false;
+    m_Picking = false;
+    NoteTalk(*node);
+    return true;
+}
+
+void AscensionApp::NoteTalk(const DialogueNode& node)
+{
+    std::vector<std::string> lines;
+    TalkBoxLines(node.Line, kTalkLineWidth, lines);
+    for (const std::string& line : lines)
+        Note(line);
+}
+
+void AscensionApp::RunTalkAction(std::string_view action)
+{
+    m_Talk = false;
+    m_TalkRow = 0;
+    if (action == "shop_open") {
+        m_Camp = true;
+        m_CampColumn = 0;
+        m_CampRow = 0;
+        m_Picking = false;
+    }
+}
+
+void AscensionApp::HandleTalk(SDL_Scancode scancode)
+{
+    if (scancode == SDL_SCANCODE_I) {
+        m_Talk = false;
+        return;
+    }
+    const DialogueDef* talk = m_Data.FindDialogue(m_Data.GetShop().Dialogue);
+    const DialogueNode* node = talk != nullptr ? talk->FindNode(m_TalkNode) : nullptr;
+    if (talk == nullptr || node == nullptr) {
+        m_Talk = false;
+        return;
+    }
+    TalkList lists[2];
+    TalkFacts facts;
+    FillTalkFacts(lists, facts);
+    std::vector<i32> visible;
+    TalkVisible(*talk, *node, facts, visible);
+    if (m_TalkRow >= static_cast<i32>(visible.size()))
+        m_TalkRow = visible.empty() ? 0 : static_cast<i32>(visible.size()) - 1;
+    if (m_TalkRow < 0)
+        m_TalkRow = 0;
+
+    const TalkCommand command = TalkCommandFromKey(scancode);
+    if (command == TalkCommand::Up) {
+        if (m_TalkRow > 0)
+            --m_TalkRow;
+        return;
+    }
+    if (command == TalkCommand::Down) {
+        if (m_TalkRow + 1 < static_cast<i32>(visible.size()))
+            ++m_TalkRow;
+        return;
+    }
+
+    i32 pick = -1;
+    const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
+    if (digit >= 0 && digit < kMaxHotkeys && digit < static_cast<int>(visible.size()))
+        pick = digit;
+    else if (command == TalkCommand::Confirm)
+        pick = visible.empty() ? -1 : m_TalkRow;
+    else
+        return;
+
+    TalkMove move;
+    if (!TalkChoose(*talk, m_TalkNode, m_TalkFlags, facts, pick, move))
+        return;
+    if (move.Step == TalkStep::Ended) {
+        m_Talk = false;
+        m_TalkRow = 0;
+        return;
+    }
+    if (move.Step == TalkStep::Action) {
+        RunTalkAction(move.Action);
+        return;
+    }
+    m_TalkRow = 0;
+    const DialogueNode* next = talk->FindNode(m_TalkNode);
+    if (next == nullptr) {
+        m_Talk = false;
+        return;
+    }
+    NoteTalk(*next);
+}
+
 void AscensionApp::OnStart()
 {
     if (!m_Play.Transcript.empty()) {
@@ -629,6 +798,7 @@ void AscensionApp::OnStart()
     }
     if (!TakeAutoPath())
         return;
+    OpenPads();
     EnsureIcons();
     if (resumed && (m_Standing == RunStanding::Victory || m_Standing == RunStanding::Defeat)) {
         Note(m_Standing == RunStanding::Victory ? "Victory." : "Defeat.");
@@ -642,6 +812,37 @@ void AscensionApp::OnStart()
 
 void AscensionApp::OnEvent(const SDL_Event& event)
 {
+    if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
+        OpenPad(event.gdevice.which);
+        return;
+    }
+    if (event.type == SDL_EVENT_GAMEPAD_REMOVED) {
+        ClosePad(event.gdevice.which);
+        return;
+    }
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        if (!m_Talk)
+            return;
+        const TalkCommand command =
+            TalkCommandFromPad(static_cast<SDL_GamepadButton>(event.gbutton.button));
+        SDL_Scancode key = SDL_SCANCODE_UNKNOWN;
+        if (command == TalkCommand::Up)
+            key = SDL_SCANCODE_UP;
+        else if (command == TalkCommand::Down)
+            key = SDL_SCANCODE_DOWN;
+        else if (command == TalkCommand::Confirm)
+            key = SDL_SCANCODE_E;
+        else
+            return;
+        SDL_Event keyEvent;
+        SDL_zero(keyEvent);
+        keyEvent.type = SDL_EVENT_KEY_DOWN;
+        keyEvent.key.scancode = key;
+        keyEvent.key.down = true;
+        keyEvent.key.repeat = false;
+        OnEvent(keyEvent);
+        return;
+    }
     if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat)
         return;
     if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
@@ -659,6 +860,10 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     if (event.key.scancode == SDL_SCANCODE_F5) {
         if (WriteSave())
             Note("Saved.");
+        return;
+    }
+    if (m_Talk) {
+        HandleTalk(event.key.scancode);
         return;
     }
     if (event.key.scancode == SDL_SCANCODE_R) {
@@ -681,7 +886,13 @@ void AscensionApp::OnEvent(const SDL_Event& event)
             Note("Finish the fight. " + KeeperWord(m_Data.GetShop()) + " waits between battles.");
             return;
         }
-        m_Camp = !m_Camp;
+        if (m_Camp) {
+            m_Camp = false;
+            return;
+        }
+        if (OpenTalk())
+            return;
+        m_Camp = true;
         m_CampColumn = 0;
         m_CampRow = 0;
         m_Picking = false;
@@ -1023,6 +1234,7 @@ bool AscensionApp::WriteSave()
     m_Inventory.ExportBag(run.Bag);
     run.Defeated = m_Defeated;
     run.Found = m_Found;
+    run.Flags = m_TalkFlags;
     run.Position = m_EnemyIndex;
     run.DirectEnemy = m_DirectEnemy;
     run.Standing = m_Standing;
@@ -1056,6 +1268,7 @@ bool AscensionApp::TryResume(std::string& error)
         return false;
     m_Defeated = loaded.Run.Defeated;
     m_Found = loaded.Run.Found;
+    m_TalkFlags = loaded.Run.Flags;
     m_Inventory.SetDefeated(m_Defeated);
     m_EnemyIndex = loaded.Run.Position < 0 ? 0 : loaded.Run.Position;
     m_DirectEnemy = loaded.Run.DirectEnemy;
@@ -1183,6 +1396,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     DrawPanel(renderer, right, rightSize);
     DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
 
+    if (m_Talk && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
+        DrawTalk(renderer, width, height);
+        renderer.End();
+        return;
+    }
     if (m_Camp && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
         DrawCamp(renderer, width, height);
         renderer.End();
@@ -2159,6 +2377,57 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
                "X SELL    U UNEQUIP    I CLOSE    PICK A SKILL BEFORE THE NEXT FIGHT    ESC QUIT";
     }
     Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, help, kDim, 1, width - 96.0f);
+}
+
+void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    const DialogueDef* talk = m_Data.FindDialogue(m_Data.GetShop().Dialogue);
+    const DialogueNode* node = talk != nullptr ? talk->FindNode(m_TalkNode) : nullptr;
+    if (talk == nullptr || node == nullptr) {
+        m_Talk = false;
+        return;
+    }
+    TalkList lists[2];
+    TalkFacts facts;
+    FillTalkFacts(lists, facts);
+    std::vector<i32> visible;
+    TalkVisible(*talk, *node, facts, visible);
+    if (m_TalkRow < 0)
+        m_TalkRow = 0;
+    if (m_TalkRow >= static_cast<i32>(visible.size()))
+        m_TalkRow = visible.empty() ? 0 : static_cast<i32>(visible.size()) - 1;
+
+    std::vector<std::string> lines;
+    TalkBoxLines(node->Line, kTalkLineWidth, lines);
+
+    DrawPanel(renderer, {28.0f, 24.0f}, {width - 56.0f, height - 48.0f});
+    const f32 lineH = Emerald::DebugTextLineHeight(2);
+    f32 y = 44.0f;
+    Emerald::DrawDebugText(renderer, {52.0f, y}, Upper(m_Data.GetShop().Keeper), kFrame, 2);
+    y += lineH + 10.0f;
+    for (const std::string& line : lines) {
+        if (y > height - 120.0f)
+            break;
+        Emerald::DrawDebugText(renderer, {52.0f, y}, Upper(line), kInk, 2, width - 104.0f);
+        y += lineH + 2.0f;
+    }
+    y += 10.0f;
+    for (i32 index = 0; index < static_cast<i32>(visible.size()); ++index) {
+        if (y > height - 72.0f)
+            break;
+        const usize choiceIndex = static_cast<usize>(visible[static_cast<usize>(index)]);
+        const DialogueChoice& choice = node->Choices[choiceIndex];
+        const bool marked = index == m_TalkRow;
+        std::string text = marked ? "> " : "  ";
+        text += choice.Text;
+        const Emerald::Vec4 color = marked ? kFrame : kInk;
+        Emerald::DrawDebugText(renderer, {52.0f, y}, Upper(text), color, 2, width - 104.0f);
+        y += lineH + 2.0f;
+    }
+    const char* help = "UP DOWN MOVE    E SPEAK    I CLOSE";
+    if (visible.empty())
+        help = "E CONTINUE    I CLOSE";
+    Emerald::DrawDebugText(renderer, {52.0f, height - 56.0f}, help, kDim, 1, width - 104.0f);
 }
 
 } // namespace Ascension

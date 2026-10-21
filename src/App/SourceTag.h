@@ -4,9 +4,8 @@
 
 namespace Ascension {
 
-// "  (Rusty Sword)" for a skill a worn piece gives. Parentheses, because the debug font
-// has no brackets. A class skill with no other source has no tag. A merge lists every
-// source, class first.
+// "  (Rusty Sword)" for a skill a worn piece gives. A class skill with no other source
+// has no tag. A merge lists every source, class first.
 [[nodiscard]] inline std::string SourceTag(const Database& data, const HeroGrant& grant)
 {
     if (grant.Origins.size() == 1 && grant.Origins[0].Source == GrantSource::Class)
