@@ -387,6 +387,40 @@
       ]
     },
     {
+      "id": "heavy_swipe",
+      "name": "Heavy Swipe",
+      "description": "A heavy blow.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 13, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "rending_maul",
+      "name": "Rending Maul",
+      "description": "A maul that tears: {cut.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" },
+        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "enrage",
+      "name": "Enrage",
+      "description": "Pain becomes {rage.status}: {rage.status.dealt} percent more damage dealt, and {rage.status.taken} percent more taken.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "rage", "trigger": "onUse", "op": "applyStatus", "status": "enraged" }
+      ]
+    },
+    {
       "id": "rend",
       "name": "Rend",
       "description": "Tear a deep wound: {cut.status}, twice over. A foe that is already bleeding takes a deeper cut.",

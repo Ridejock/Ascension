@@ -114,6 +114,37 @@
       "gold": 20
     },
     {
+      "id": "bear",
+      "name": "Bear",
+      "description": "A lone bear past the Stillbarrow door. It mauls until the wound sticks, and low health turns it Enraged.",
+      "level": 7,
+      "stats": {
+        "vitality": 52,
+        "strength": 17,
+        "defense": 5,
+        "agility": 4,
+        "focus": 0
+      },
+      "skills": ["heavy_swipe", "rending_maul", "enrage"],
+      "pattern": ["heavy_swipe", "rending_maul", "heavy_swipe"],
+      "ai": [
+        {
+          "if": { "selfHpAtMost": 40, "selfStatusAbsent": "enraged" },
+          "do": "skill",
+          "skill": "enrage"
+        },
+        {
+          "if": { "targetStatusAbsent": "bleed" },
+          "do": "skill",
+          "skill": "rending_maul"
+        }
+      ],
+      "experience": 20,
+      "gold": 24,
+      "unique": true,
+      "color": "#7E4E2E"
+    },
+    {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
       "description": "Oathkeeper Varn keeps the Stillbarrow. Once he is worn down, he cannot be stunned, and the barrow throws rubble shards into the fight.",

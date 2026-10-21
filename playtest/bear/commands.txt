@@ -1,0 +1,5 @@
+# Headless rate tables. The bear is one foe, so the seed does not change the fight.
+# Same level-6 kit as the Barrow Sentry: rusty sword, oak shield, Strike at 10 uses.
+
+./build/debug/bin/Ascension --sim --enemy bear
+./build/debug/bin/Ascension --sim --enemy barrow_sentry

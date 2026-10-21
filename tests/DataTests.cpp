@@ -1648,13 +1648,40 @@ void TestShippedDescriptions()
 
     const EnemyDef* wolf = data.FindEnemy("wolf");
     const EnemyDef* dire = data.FindEnemy("dire_wolf");
-    bool onlyDire = dire != nullptr && !dire->Ai.empty();
+    const EnemyDef* bear = data.FindEnemy("bear");
+    bool knownRules = dire != nullptr && !dire->Ai.empty() && bear != nullptr && !bear->Ai.empty();
     for (const EnemyDef& enemy : data.GetEnemies()) {
-        if (enemy.Id != "dire_wolf" && !enemy.Ai.empty())
-            onlyDire = false;
+        if (enemy.Id == "dire_wolf" || enemy.Id == "bear")
+            continue;
+        if (!enemy.Ai.empty())
+            knownRules = false;
     }
-    Check(onlyDire && !data.GetEnemies().empty(),
-          "the dire wolf is the only shipped foe with ai rules");
+    Check(knownRules && !data.GetEnemies().empty(),
+          "the dire wolf and the bear are the shipped foes with ai rules");
+    const bool bearShape =
+        bear != nullptr && bear->Unique && bear->Level == 7 && bear->Stats.Vitality == 52 &&
+        bear->Stats.Strength == 17 && bear->Stats.Defense == 5 && bear->Stats.Agility == 4 &&
+        bear->Experience == 20 && bear->Gold == 24 && bear->HasColor && bear->Red == 0x7E &&
+        bear->Green == 0x4E && bear->Blue == 0x2E && bear->Pattern.size() == 3 &&
+        bear->Pattern[0] == "heavy_swipe" && bear->Pattern[1] == "rending_maul" &&
+        bear->Pattern[2] == "heavy_swipe" && bear->Ai.size() == 2 &&
+        bear->Ai[0].Action == AiAction::Skill && bear->Ai[0].Skill == "enrage" &&
+        bear->Ai[0].If.SelfHpAtMost == 40 && bear->Ai[0].If.SelfStatusAbsent == "enraged" &&
+        bear->Ai[1].Skill == "rending_maul" && bear->Ai[1].If.TargetStatusAbsent == "bleed";
+    Check(bearShape, "the bear mauls a foe who is not bleeding and enrages at 40 percent");
+    const auto shippedFights = data.GetEncounters();
+    i32 sentryAt = -1;
+    i32 bearAt = -1;
+    for (i32 index = 0; index < static_cast<i32>(shippedFights.size()); ++index) {
+        if (shippedFights[static_cast<usize>(index)].Id == "barrow_sentry")
+            sentryAt = index;
+        if (shippedFights[static_cast<usize>(index)].Id == "bear")
+            bearAt = index;
+    }
+    const EncounterDef* bearFight = data.FindEncounter("bear");
+    Check(bearFight != nullptr && bearAt == sentryAt + 1 && bearFight->Zone.empty() &&
+              bearFight->Enemies.size() == 1 && bearFight->Enemies[0] == "bear",
+          "the bear is the single foe after the barrow sentry");
     const bool direPattern = dire != nullptr && dire->Pattern.size() == 5 &&
                              dire->Pattern[0] == "bite" && dire->Pattern[1] == "howl" &&
                              dire->Pattern[2] == "stalk" && dire->Pattern[3] == "circle" &&

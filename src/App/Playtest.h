@@ -55,8 +55,23 @@ struct PlaytestOptions {
     std::string ChooseId;
     // --pick, in the order they were passed. Applied one open pick at a time.
     std::vector<std::string> PickIds;
+    // --focus, with --sim. The enemy id the policy kills first. Empty on a one-off marks
+    // a random living foe each turn. Empty on the matrix prints every kill order.
+    std::string FocusId;
+    // --runs, with --sim. Requested seeded fights for a row whose mark can change.
+    // A fixed kill order is still one fight. Default 1000. Range 1 to 100000.
+    i32 Runs = 1000;
+    // --seed, with --sim. First xorshift32 state for default targeting and for --slip.
+    // 0 is stored as 1. Damage, turn order, and foe AI do not read it.
+    i32 Seed = 1;
+    // --slip, with --sim. Percent of player turns that mark a random living foe instead
+    // of the named focus. 0 keeps that order exact. Range 0 to 100.
+    i32 Slip = 0;
     // --trace writes one state line per action to stderr. The transcript stays the combat log.
     bool Trace = false;
+    // --sim plays the fight without a window. With no class and no focus, --enemy prints
+    // a rate table for every class build.
+    bool Sim = false;
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
@@ -65,7 +80,7 @@ struct PlaytestOptions {
     [[nodiscard]] bool DefinesRun() const
     {
         return Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || Gold.has_value() ||
-               !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty();
+               !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty() || Sim;
     }
 };
 

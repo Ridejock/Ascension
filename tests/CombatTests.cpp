@@ -1913,6 +1913,60 @@ void TestAllyHp()
         std::printf("    solo: %s\n", soloAct.Text.c_str());
 }
 
+void StrikeIfPlayer(Battle& battle)
+{
+    if (battle.Actor() == CombatantSide::Player)
+        battle.UseSkill("strike");
+}
+
+void TestBear()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the bear");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    Battle maul(data, std::make_unique<AgilityRoundModel>());
+    Check(maul.Start("fighter", 1, "bear", error), "the bear fight starts");
+    Check(maul.Enemies().size() == 1 && maul.Enemy().Id == "bear", "the bear is fought alone");
+    Check(maul.Actor() == CombatantSide::Player, "a level-1 fighter is quicker than the bear");
+    StrikeIfPlayer(maul);
+    const ActionResult opened = maul.EnemyAct();
+    Check(opened.Accepted && opened.SkillId == "rending_maul" && maul.Enemy().PatternStep == 0 &&
+              Holds(maul.Player(), "bleed"),
+          "with no Bleed the bear mauls and leaves the swipe queued");
+    if (opened.SkillId != "rending_maul" || maul.Enemy().PatternStep != 0)
+        std::printf("    maul: %s step %d\n", opened.SkillId.c_str(), maul.Enemy().PatternStep);
+
+    Battle swipe(data, std::make_unique<AgilityRoundModel>());
+    Check(swipe.Start("fighter", 1, "bear", error) &&
+              swipe.Inflict(CombatantSide::Player, "bleed", error),
+          "the fighter starts Bleeding");
+    StrikeIfPlayer(swipe);
+    const ActionResult heavy = swipe.EnemyAct();
+    Check(heavy.Accepted && heavy.SkillId == "heavy_swipe" && swipe.Enemy().PatternStep == 1 &&
+              !Holds(swipe.Enemy(), "enraged"),
+          "Bleed already up, so the bear swipes and consumes that pattern step");
+    if (heavy.SkillId != "heavy_swipe" || swipe.Enemy().PatternStep != 1)
+        std::printf("    swipe: %s step %d\n", heavy.SkillId.c_str(), swipe.Enemy().PatternStep);
+
+    Battle rage(data, std::make_unique<AgilityRoundModel>());
+    Check(rage.Start("fighter", 1, "bear", error), "the enrage fight starts");
+    rage.SetEnemyHp(rage.Enemy().MaxHp * 40 / 100);
+    Check(rage.Enemy().Hp * 100 <= rage.Enemy().MaxHp * 40, "the bear is at 40 percent or below");
+    StrikeIfPlayer(rage);
+    const ActionResult enraged = rage.EnemyAct();
+    Check(enraged.Accepted && enraged.SkillId == "enrage" && Holds(rage.Enemy(), "enraged") &&
+              rage.Enemy().PatternStep == 0,
+          "low health inserts Enrage and leaves the pattern where it was");
+    if (enraged.SkillId != "enrage" || rage.Enemy().PatternStep != 0)
+        std::printf("    enrage: %s step %d\n", enraged.SkillId.c_str(), rage.Enemy().PatternStep);
+}
+
 void TestStatusNameOnce()
 {
     Database data(ASCENSION_SHIPPED_DATA_DIR);
@@ -1982,6 +2036,7 @@ int main()
     TestLoggedHeal();
     TestFoeRules();
     TestAllyHp();
+    TestBear();
     TestStatusNameOnce();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
