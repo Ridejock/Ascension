@@ -462,6 +462,12 @@ void AscensionApp::AwardVictory()
         Note(std::to_string(amount) + " XP.");
     if (gold > 0)
         Note(std::to_string(gold) + " gold.");
+    std::vector<std::string> killed;
+    for (const CombatantState& foe : m_Battle->Enemies())
+        killed.push_back(foe.Id);
+    const std::vector<std::string> found = m_Inventory.TakeDrops(killed, m_Found);
+    for (const std::string& line : found)
+        Note(line);
     if (grant.LevelAfter > grant.LevelBefore)
         Note("Level " + std::to_string(grant.LevelAfter) + ".");
     if (grant.ChoiceOpened) {
@@ -534,6 +540,7 @@ void AscensionApp::BeginFight()
     }
     m_Log.clear();
     m_StartError.clear();
+    // R and N start the fight over. A unique drop already in m_Found is not granted again.
     m_XpAwarded = false;
     m_Camp = false;
     m_Picking = false;
@@ -1043,6 +1050,7 @@ bool AscensionApp::WriteSave()
     m_Hero.ExportCareer(run.Career);
     m_Inventory.ExportBag(run.Bag);
     run.Defeated = m_Defeated;
+    run.Found = m_Found;
     run.Position = m_EnemyIndex;
     run.DirectEnemy = m_DirectEnemy;
     run.Standing = m_Standing;
@@ -1083,6 +1091,7 @@ bool AscensionApp::TryResume(std::string& error)
         !m_Inventory.ImportBag(loaded.Run.Bag, error))
         return false;
     m_Defeated = loaded.Run.Defeated;
+    m_Found = loaded.Run.Found;
     m_Inventory.SetDefeated(m_Defeated);
     m_EnemyIndex = loaded.Run.Position < 0 ? 0 : loaded.Run.Position;
     m_DirectEnemy = loaded.Run.DirectEnemy;

@@ -48,6 +48,25 @@ Database Sample()
     return data;
 }
 
+struct ShippedCopy {
+    fs::path Path;
+
+    ShippedCopy()
+    {
+        Path = fs::temp_directory_path() / "ascension-save-shipped";
+        std::error_code error;
+        fs::remove_all(Path, error);
+        fs::create_directories(Path);
+        fs::copy(ASCENSION_SHIPPED_DATA_DIR, Path, fs::copy_options::recursive);
+    }
+
+    ~ShippedCopy()
+    {
+        std::error_code error;
+        fs::remove_all(Path, error);
+    }
+};
+
 struct DataCopy {
     fs::path Path;
 
@@ -127,6 +146,15 @@ i32 StackCount(const Inventory& bag, std::string_view id)
             total += bag.BagAt(slot).Count;
     }
     return total;
+}
+
+i32 BagIndex(const Inventory& bag, std::string_view id)
+{
+    for (i32 index = 0; index < bag.BagSlots(); ++index) {
+        if (bag.BagAt(index).Id == id)
+            return index;
+    }
+    return -1;
 }
 
 const HeroGrant* FindGrant(const std::vector<HeroGrant>& grants, std::string_view id)
@@ -580,6 +608,222 @@ void TestAiSnapshot()
         std::printf("    restored: %s step %d\n", next.SkillId.c_str(), again.Enemy().PatternStep);
 }
 
+bool ListedSkill(const Battle& battle, std::string_view id)
+{
+    for (const std::string& skill : battle.PlayerSkillIds()) {
+        if (skill == id)
+            return true;
+    }
+    return false;
+}
+
+bool ClassWearsFang(const Database& data, std::string_view classId)
+{
+    Inventory bag;
+    std::string why;
+    if (!bag.Start(data, why) || !bag.Give("alphas_fang", 1, why))
+        return false;
+    const i32 slot = BagIndex(bag, "alphas_fang");
+    if (slot < 0 || !bag.Equip(slot, why))
+        return false;
+    if (bag.Equipped(GearSlot::Accessory) != "alphas_fang")
+        return false;
+
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    battle.SetWornItems({"alphas_fang"});
+    if (!battle.Start(classId, 5, "wolf", why))
+        return false;
+    for (i32 step = 0; step < 8 && battle.Result() == BattleResult::Ongoing &&
+                       battle.Actor() != CombatantSide::Player;
+         ++step)
+        battle.EnemyAct();
+    if (battle.Result() != BattleResult::Ongoing || battle.Actor() != CombatantSide::Player)
+        return false;
+    if (!ListedSkill(battle, "fang_bloodlust"))
+        return false;
+    const ActionResult used = battle.UseSkill("fang_bloodlust");
+    return used.Accepted && HoldsStatus(battle.Player(), "bloodlust");
+}
+
+void AddWanderer(const fs::path& classes)
+{
+    ReplaceInFile(classes,
+                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"rage\", \"tune\": "
+                  "{ \"focusCost\": 2 } }] }\n      ]\n    }\n  ]\n}",
+                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"rage\", \"tune\": "
+                  "{ \"focusCost\": 2 } }] }\n      ]\n    },\n"
+                  "    {\n"
+                  "      \"id\": \"wanderer\",\n"
+                  "      \"name\": \"Wanderer\",\n"
+                  "      \"description\": \"A traveler with the same drills.\",\n"
+                  "      \"starter\": true,\n"
+                  "      \"stats\": {\n"
+                  "        \"vitality\": 18,\n"
+                  "        \"strength\": 8,\n"
+                  "        \"defense\": 6,\n"
+                  "        \"agility\": 5,\n"
+                  "        \"focus\": 4\n"
+                  "      },\n"
+                  "      \"growth\": {\n"
+                  "        \"vitality\": 4,\n"
+                  "        \"strength\": 2,\n"
+                  "        \"defense\": 1,\n"
+                  "        \"agility\": 1,\n"
+                  "        \"focus\": 1\n"
+                  "      },\n"
+                  "      \"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"],\n"
+                  "      \"passives\": []\n"
+                  "    }\n"
+                  "  ]\n}");
+}
+
+void TestFangAnyClass()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the fang");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    for (const ClassDef& klass : data.GetClasses()) {
+        const bool wore = ClassWearsFang(data, klass.Id);
+        if (!wore)
+            std::printf("    %s could not equip the fang\n", klass.Id.c_str());
+        Check(wore, "every shipped class equips Alpha's Fang and uses its skill");
+    }
+
+    ShippedCopy copy;
+    AddWanderer(copy.Path / "classes.json");
+    Database future(copy.Path);
+    DataError again;
+    Check(future.Load(&again), "a future starter loads beside the shipped classes");
+    if (!again.Message.empty())
+        std::printf("    %s\n", again.Message.c_str());
+    if (!future.IsLoaded())
+        return;
+    const ClassDef* wanderer = future.FindClass("wanderer");
+    Check(wanderer != nullptr && wanderer->Starter, "wanderer is a starter");
+    i32 checked = 0;
+    for (const ClassDef& klass : future.GetClasses()) {
+        const bool wore = ClassWearsFang(future, klass.Id);
+        if (!wore)
+            std::printf("    %s could not equip the fang\n", klass.Id.c_str());
+        Check(wore, "every class on the roster, including a future starter, equips the fang");
+        ++checked;
+    }
+    Check(checked == static_cast<i32>(data.GetClasses().size()) + 1,
+          "the future roster is the shipped classes plus wanderer");
+}
+
+void TestFangDrop()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the drop");
+    if (!data.IsLoaded())
+        return;
+    Inventory bag = StartBag(data);
+    std::vector<std::string> found;
+    const std::vector<std::string> first =
+        bag.TakeDrops(std::vector<std::string>{"dire_wolf"}, found);
+    Check(first.size() == 1 && first[0] == "The Alpha falls. The fang slides free, still warm." &&
+              StackCount(bag, "alphas_fang") == 1 && found.size() == 1 && found[0] == "alphas_fang",
+          "the first dire wolf kill prints the fang line");
+    const std::vector<std::string> second =
+        bag.TakeDrops(std::vector<std::string>{"dire_wolf"}, found);
+    Check(second.empty() && StackCount(bag, "alphas_fang") == 1 && found.size() == 1,
+          "a second kill does not drop the fang again");
+    std::string why;
+    const i32 slot = BagIndex(bag, "alphas_fang");
+    Check(slot >= 0 && bag.Sell(slot, why) && StackCount(bag, "alphas_fang") == 0,
+          "the fang can be sold");
+    const std::vector<std::string> sold =
+        bag.TakeDrops(std::vector<std::string>{"dire_wolf"}, found);
+    Check(sold.empty() && StackCount(bag, "alphas_fang") == 0 && found.size() == 1,
+          "a kill after the sale still does not drop the fang");
+
+    Hero hero = StartHero(data);
+    RunState run = Capture(hero, bag);
+    run.Found = found;
+    TempDir dir("ascension-save-fang");
+    RunSave saves(dir.Path);
+    Check(saves.Write(run, why), "the claimed fang is written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.Run.Found.size() == 1 &&
+              loaded.Run.Found[0] == "alphas_fang",
+          "the save keeps the claimed fang");
+    Inventory fresh = StartBag(data);
+    std::vector<std::string> claimed = loaded.Run.Found;
+    const std::vector<std::string> again =
+        fresh.TakeDrops(std::vector<std::string>{"dire_wolf"}, claimed);
+    Check(again.empty() && StackCount(fresh, "alphas_fang") == 0,
+          "a loaded claim blocks the drop on an empty bag");
+}
+
+void SetWolfDrops(const fs::path& dir, std::string_view drops)
+{
+    const std::string to =
+        std::string("\"skills\": [\"bite\"],\n      \"experience\": 8,\n      \"gold\": 3,\n"
+                    "      \"drops\": ") +
+        std::string(drops);
+    ReplaceInFile(dir / "enemies.json",
+                  "\"skills\": [\"bite\"],\n      \"experience\": 8,\n      \"gold\": 3", to);
+}
+
+void TestGenericDrop()
+{
+    {
+        DataCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\" }]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a drop without a message loads");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        if (!data.IsLoaded())
+            return;
+        Inventory bag = StartBag(data);
+        std::vector<std::string> found;
+        const std::vector<std::string> first =
+            bag.TakeDrops(std::vector<std::string>{"wolf"}, found);
+        const std::vector<std::string> second =
+            bag.TakeDrops(std::vector<std::string>{"wolf"}, found);
+        Check(first.size() == 1 && first[0] == "Found Minor Potion." && second.size() == 1 &&
+                  second[0] == "Found Minor Potion." && StackCount(bag, "minor_potion") == 2 &&
+                  found.empty(),
+              "a common drop repeats and uses the generic line");
+    }
+    {
+        DataCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\", \"message\": \"A cold vial.\" }]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a drop message loads");
+        if (!data.IsLoaded())
+            return;
+        Inventory bag = StartBag(data);
+        std::vector<std::string> found;
+        const std::vector<std::string> line =
+            bag.TakeDrops(std::vector<std::string>{"wolf"}, found);
+        Check(line.size() == 1 && line[0] == "A cold vial." && StackCount(bag, "minor_potion") == 1,
+              "a drop message is the log line");
+    }
+}
+
+void TestFoundOptional()
+{
+    TempDir dir("ascension-save-found-absent");
+    Emerald::SaveData older;
+    older.SetString("class", "fighter");
+    Emerald::SaveSystem version3(dir.Path, 3);
+    Check(version3.Save("run", older, "plain"), "a version 3 file without found is written");
+    RunSave saves(dir.Path);
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.Found.empty(),
+          "a version 3 file with no found list has claimed nothing");
+}
+
 } // namespace
 
 int main()
@@ -594,6 +838,10 @@ int main()
     TestVersion2Restarts();
     TestCorruptFallsBack();
     TestAiSnapshot();
+    TestFangAnyClass();
+    TestFangDrop();
+    TestGenericDrop();
+    TestFoundOptional();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();
     return g_Failures == 0 ? 0 : 1;

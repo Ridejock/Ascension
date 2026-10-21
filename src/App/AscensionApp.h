@@ -94,6 +94,8 @@ private:
     i32 m_CampColumn = 0;
     i32 m_CampRow = 0;
     std::vector<std::string> m_Defeated;
+    // Unique drops already claimed. R starts the fight over and does not clear this.
+    std::vector<std::string> m_Found;
     RunStanding m_Standing = RunStanding::None;
     bool m_ResumeResources = false;
     bool m_AnnounceResume = false;

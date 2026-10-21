@@ -22,6 +22,8 @@ struct RunState {
     CareerRecord Career;
     BagRecord Bag;
     std::vector<std::string> Defeated;
+    // Drop item ids already claimed. A version 3 file with no list has claimed nothing.
+    std::vector<std::string> Found;
     i32 Position = 0;
     std::string DirectEnemy;
     RunStanding Standing = RunStanding::None;
@@ -57,6 +59,8 @@ struct RunLoad {
 // the previous good copy. The folder is the per-user path unless a test passes its own.
 class RunSave {
 public:
+    // Version 3. Found ids are optional in this version, so an older file of it needs no
+    // migration: a missing list is a run that has claimed no drops.
     static constexpr u32 kVersion = 3;
 
     explicit RunSave(std::filesystem::path folder);

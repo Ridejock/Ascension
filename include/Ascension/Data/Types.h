@@ -309,6 +309,13 @@ struct AiRule {
     std::string Skill;
 };
 
+// One entry of an enemy's drops list. Item is an item id. Message, when set, is the
+// victory log line. An empty Message uses "Found <item name>."
+struct DropDef {
+    std::string Item;
+    std::string Message;
+};
+
 struct EnemyDef {
     std::string Id;
     std::string Name;
@@ -318,9 +325,9 @@ struct EnemyDef {
     std::vector<SkillGrant> Skills; // active grants; each is its own copy
     i32 Experience = 0;
     i32 Gold = 0;
-    bool Boss = false;                // the roster has one boss, last in the sample
-    bool Unique = false;              // at most one of this id in an encounter; other ids may set it too
-    bool HasColor = false;            // when set, the fight draws a square in Red/Green/Blue
+    bool Boss = false;     // the roster has one boss, last in the sample
+    bool Unique = false;   // at most one of this id in an encounter; other ids may set it too
+    bool HasColor = false; // when set, the fight draws a square in Red/Green/Blue
     u8 Red = 0;
     u8 Green = 0;
     u8 Blue = 0;
@@ -336,6 +343,10 @@ struct EnemyDef {
     std::string SummonId;
     i32 SummonEvery = 0;
     BlockedSummon IfBlocked = BlockedSummon::Fizzle;
+    // Granted when this foe is in a victorious fight. Empty means no drop.
+    // A rarity with UniquePerType is claimed once; other drops can land again.
+    // Message on a drop, when set, replaces the generic "Found <item name>." line.
+    std::vector<DropDef> Drops;
 };
 
 // A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack),
@@ -364,24 +375,26 @@ struct IconDef {
 };
 
 // One row of rarities.json. Red, green, and blue are the #RRGGBB color: the accent layer is
-// multiplied by it, and the item name is drawn in it. A later row can add a flag (unique: at
-// most one of that item, with fixed stats) without a new drawing path. The item already names
-// its own icon, so a unique piece can have a dedicated picture.
+// multiplied by it, and the item name is drawn in it. The display name is also appended on
+// shop, bag, and worn rows. UniquePerType comes from the optional uniquePerType flag. A rarity
+// with that flag may be used by at most one item of each slot. Slot is the item type: weapon,
+// offhand, armor, accessory, or consumable. The item already names its own icon.
 struct RarityDef {
     std::string Id;
     std::string Name;
     u8 Red = 0;
     u8 Green = 0;
     u8 Blue = 0;
+    bool UniquePerType = false;
 };
 
 struct ItemDef {
     std::string Id;
     std::string Name;
     std::string Description;
-    std::string Icon;   // id in the icon sheet
-    std::string Rarity; // id in rarities.json
-    GearSlot Slot = GearSlot::Weapon;
+    std::string Icon;                 // id in the icon sheet
+    std::string Rarity;               // id in rarities.json
+    GearSlot Slot = GearSlot::Weapon; // item type for UniquePerType
     StatBlock Bonus;
     i32 Value = 0;          // gold to buy one
     bool TwoHanded = false; // weapons only; fills the offhand as well

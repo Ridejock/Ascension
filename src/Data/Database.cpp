@@ -1633,8 +1633,7 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
         if (!OptionalRange(*condition, "selfHpAtMost", 0, 100, rule.If.SelfHpAtMost, error) ||
             !OptionalRange(*condition, "selfHpAtLeast", 0, 100, rule.If.SelfHpAtLeast, error) ||
             !OptionalRange(*condition, "targetHpAtMost", 0, 100, rule.If.TargetHpAtMost, error) ||
-            !OptionalRange(*condition, "targetHpAtLeast", 0, 100, rule.If.TargetHpAtLeast,
-                           error) ||
+            !OptionalRange(*condition, "targetHpAtLeast", 0, 100, rule.If.TargetHpAtLeast, error) ||
             !OptionalRange(*condition, "allyHpAtMost", 0, 100, rule.If.AllyHpAtMost, error) ||
             !OptionalRange(*condition, "targetGuardAtLeast", 0, 100, rule.If.TargetGuardAtLeast,
                            error) ||
@@ -1645,8 +1644,8 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
             !OptionalStatusId(parsed, *condition, "selfStatusAbsent", rule.If.SelfStatusAbsent,
                               error) ||
             !OptionalStatusId(parsed, *condition, "targetStatus", rule.If.TargetStatus, error) ||
-            !OptionalStatusId(parsed, *condition, "targetStatusAbsent",
-                              rule.If.TargetStatusAbsent, error) ||
+            !OptionalStatusId(parsed, *condition, "targetStatusAbsent", rule.If.TargetStatusAbsent,
+                              error) ||
             !OptionalId(*condition, "next", rule.If.Next, error)) {
             error = where + ": " + error;
             return false;
@@ -1692,6 +1691,67 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
 
 bool ParseColor(std::string_view text, u8& red, u8& green, u8& blue, std::string& error);
 
+// A drops entry is an object: item is required, message is an optional victory log line.
+// A missing message stays empty, and the fight log uses "Found <item name>."
+bool ReadDrops(const Json& entry, std::vector<DropDef>& out, std::string& error)
+{
+    const auto it = entry.find("drops");
+    if (it == entry.end()) {
+        error = "'drops' is required";
+        return false;
+    }
+    if (!it->is_array()) {
+        error = "'drops' must be a list";
+        return false;
+    }
+    out.clear();
+    for (const Json& dropJson : *it) {
+        if (!dropJson.is_object()) {
+            error = "'drops' entries must be objects";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(dropJson, {"item", "message"}, unknown)) {
+            error = "'drops' unknown field " + Quote(unknown);
+            return false;
+        }
+        DropDef drop;
+        if (!RequireString(dropJson, "item", drop.Item, error)) {
+            error = "'drops' " + error;
+            return false;
+        }
+        if (!IsId(drop.Item)) {
+            error = "'drops' item " + Quote(drop.Item) +
+                    " is not an id (letters, digits and _, starting with a letter)";
+            return false;
+        }
+        for (const DropDef& existing : out) {
+            if (existing.Item == drop.Item) {
+                error = "'drops' " + Quote(drop.Item) + " is listed twice";
+                return false;
+            }
+        }
+        const auto message = dropJson.find("message");
+        if (message != dropJson.end()) {
+            if (!message->is_string()) {
+                error = "'drops' 'message' must be a string";
+                return false;
+            }
+            drop.Message = message->get<std::string>();
+            if (drop.Message.empty()) {
+                error = "'drops' 'message' must not be empty";
+                return false;
+            }
+        }
+        out.push_back(std::move(drop));
+    }
+    if (out.empty()) {
+        error = "'drops' must list at least one item";
+        return false;
+    }
+    return true;
+}
+
 bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("enemies");
@@ -1720,7 +1780,7 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (!AllowKeys(entry,
                        {"id", "name", "description", "level", "stats", "skills", "experience",
                         "gold", "boss", "unique", "color", "pattern", "phaseAtPercent",
-                        "phaseStatus", "summon", "ai"},
+                        "phaseStatus", "summon", "ai", "drops"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
@@ -1741,6 +1801,11 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (!RequireInt(entry, "experience", 0, 999999, enemy.Experience, error) ||
             !RequireInt(entry, "gold", 0, 999999, enemy.Gold, error))
             return fail(error);
+        if (entry.contains("drops")) {
+            std::string dropError;
+            if (!ReadDrops(entry, enemy.Drops, dropError))
+                return fail(dropError);
+        }
         const auto boss = entry.find("boss");
         if (boss != entry.end()) {
             if (!boss->is_boolean())
@@ -2080,7 +2145,7 @@ bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
             return false;
         }
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "name", "color"}, unknown)) {
+        if (!AllowKeys(entry, {"id", "name", "color", "uniquePerType"}, unknown)) {
             error = where + ": unknown field " + Quote(unknown);
             return false;
         }
@@ -2094,6 +2159,14 @@ bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
         if (!ParseColor(color, rarity.Red, rarity.Green, rarity.Blue, why)) {
             error = where + ": " + why;
             return false;
+        }
+        const auto unique = entry.find("uniquePerType");
+        if (unique != entry.end()) {
+            if (!unique->is_boolean()) {
+                error = where + ": 'uniquePerType' must be true or false";
+                return false;
+            }
+            rarity.UniquePerType = unique->get<bool>();
         }
         parsed.Rarities.push_back(std::move(rarity));
     }
@@ -2762,6 +2835,30 @@ bool DescriptionsResolve(const Parsed& parsed, std::string& error)
     return true;
 }
 
+// A rarity with UniquePerType may appear on one item of each slot. Slot is the item type.
+bool CheckUniquePerType(const Parsed& parsed, std::string& error)
+{
+    for (const RarityDef& rarity : parsed.Rarities) {
+        if (!rarity.UniquePerType)
+            continue;
+        for (usize later = 0; later < parsed.Items.size(); ++later) {
+            const ItemDef& item = parsed.Items[later];
+            if (item.Rarity != rarity.Id)
+                continue;
+            for (usize earlier = 0; earlier < later; ++earlier) {
+                const ItemDef& prior = parsed.Items[earlier];
+                if (prior.Rarity != rarity.Id || prior.Slot != item.Slot)
+                    continue;
+                error = "item " + Quote(item.Id) + ": rarity " + Quote(rarity.Id) +
+                        " allows one item per slot, and " + Quote(prior.Id) + " is already slot " +
+                        Quote(ToString(item.Slot));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool CrossCheck(const Parsed& parsed, std::string& error)
 {
     for (const EffectDef& recipe : parsed.Effects) {
@@ -2860,6 +2957,12 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             error = enemyWhere + ": summon " + Quote(enemy.SummonId) + " does not exist";
             return false;
         }
+        for (const DropDef& drop : enemy.Drops) {
+            if (FindId(parsed.Items, drop.Item) == nullptr) {
+                error = enemyWhere + ": drop " + Quote(drop.Item) + " does not exist";
+                return false;
+            }
+        }
     }
     for (const ItemDef& item : parsed.Items) {
         const std::string itemWhere = "item " + Quote(item.Id);
@@ -2874,6 +2977,8 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             return false;
         }
     }
+    if (!CheckUniquePerType(parsed, error))
+        return false;
     for (const std::string& stocked : parsed.Shop.Stock) {
         if (FindId(parsed.Items, stocked) == nullptr) {
             error = "shop stock " + Quote(stocked) + " does not exist";

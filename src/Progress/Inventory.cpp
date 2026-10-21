@@ -18,6 +18,31 @@ const ItemStack& EmptyStack()
     return kEmpty;
 }
 
+bool ListedId(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& held : ids) {
+        if (held == id)
+            return true;
+    }
+    return false;
+}
+
+bool HoldsId(const Inventory& bag, std::string_view id)
+{
+    const GearSlot slots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
+                              GearSlot::Accessory};
+    for (const GearSlot slot : slots) {
+        if (bag.Equipped(slot) == id)
+            return true;
+    }
+    for (i32 index = 0; index < bag.BagSlots(); ++index) {
+        const ItemStack& stack = bag.BagAt(index);
+        if (!stack.Empty() && stack.Id == id)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool Inventory::Start(const Database& data, std::string& error)
@@ -203,6 +228,43 @@ bool Inventory::Give(std::string_view itemId, i32 count, std::string& error)
     m_Bag = std::move(next);
     error.clear();
     return true;
+}
+
+std::vector<std::string> Inventory::TakeDrops(std::span<const std::string> enemyIds,
+                                              std::vector<std::string>& found)
+{
+    std::vector<std::string> lines;
+    if (m_Data == nullptr)
+        return lines;
+    for (const std::string& enemyId : enemyIds) {
+        const EnemyDef* enemy = m_Data->FindEnemy(enemyId);
+        if (enemy == nullptr)
+            continue;
+        for (const DropDef& drop : enemy->Drops) {
+            const ItemDef* item = m_Data->FindItem(drop.Item);
+            if (item == nullptr)
+                continue;
+            const RarityDef* rarity = m_Data->FindRarity(item->Rarity);
+            const bool once = rarity != nullptr && rarity->UniquePerType;
+            if (once && ListedId(found, drop.Item))
+                continue;
+            if (once && HoldsId(*this, drop.Item)) {
+                if (!ListedId(found, drop.Item))
+                    found.emplace_back(drop.Item);
+                continue;
+            }
+            std::string why;
+            if (!Give(drop.Item, 1, why))
+                continue;
+            if (once)
+                found.emplace_back(drop.Item);
+            if (!drop.Message.empty())
+                lines.push_back(drop.Message);
+            else
+                lines.push_back("Found " + item->Name + ".");
+        }
+    }
+    return lines;
 }
 
 const ShopDef* Inventory::Shop() const

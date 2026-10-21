@@ -54,6 +54,17 @@
       "value": 35
     },
     {
+      "id": "alphas_fang",
+      "name": "Alpha's Fang",
+      "description": "The fang of the wolf that led the pack.",
+      "icon": "ring",
+      "rarity": "mythic",
+      "slot": "accessory",
+      "bonus": { "strength": 2 },
+      "value": 80,
+      "grants": ["fang_bloodlust"]
+    },
+    {
       "id": "minor_potion",
       "name": "Minor Potion",
       "description": "A bitter draught that knits a wound.",
