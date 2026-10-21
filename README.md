@@ -2,7 +2,7 @@
 
 A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox. A Fighter earns XP, ranks skills by using them, and at level 5 chooses Berserker or Guardian. The window draws that fight with rectangles and Emerald's built-in debug font.
 
-Emerald is fetched by CMake and pinned to commit `f45d5a65ab03fe533f2d0f37282602991da67165` (see `CMakeLists.txt`). To use a local checkout instead:
+Emerald is fetched by CMake and pinned to commit `f45d5a65ab03fe533f2d0f37282602991da67165` (see `CMakeLists.txt`). `patches/emerald-debug-font.patch` adds the glyphs that commit's debug font does not draw. To use a local checkout instead:
 
 ```sh
 cmake --preset debug -DASCENSION_EMERALD_SOURCE_DIR=C:/dev/Emerald
@@ -55,8 +55,10 @@ Release is the same preset name used for the zip (`cmake --preset release`, then
 ## Tests
 
 ```sh
-ctest --test-dir build/debug --output-on-failure
+ctest --preset debug
 ```
+
+`release` and `debug-full` are the same kind of test preset. Each one runs the tests in that preset's build directory and prints a failing check.
 
 `AscensionDataTests` loads `tests/data/`, a frozen copy of the data the checks were written against, checks the Fighter tree, and rejects broken files. `AscensionCombatTests` plays a Fighter against those sample enemies and checks the damage formula. `AscensionProgressTests` checks the XP curve, skill ranks, and the level-5 choice. `AscensionInventoryTests` checks the bag, worn gear, and the shop. `AscensionSaveTests` checks a save round trip, a migration from the previous data version, and a truncated file falling back to the previous copy. `AscensionPlaytestTests` checks the playtest flags, unknown ids, and a `--data` folder that hot-reloads. `AscensionDialogueTests` checks talk loading, flag gates, and Pell's lines. None of them open a window. One data check loads the shipped `data/` and asserts that every description expands. It does not lock the wording, so a retune of a number does not move it. The other checks stay on `tests/data/`.
 
@@ -112,7 +114,7 @@ An enemy may set `ai`, an ordered list of rules. The first match wins, and a rul
 
 `shop.json` is Pell Harrow's shop, Old Pell's Provisions. `bagSlots` is 12 and `stackSize` is 5, so a sixth potion of the same kind opens another slot and sixty potions fill the bag. Worn gear is added to the class stats before passives. A two-handed weapon sends the offhand piece back to the bag, and a shield cannot be worn until that weapon comes off. If a reload makes the worn weapon two-handed while a shield is still in the offhand, the shield's defense stops immediately and the shield is moved into the bag. A full bag sets the last stack down to make that slot. The offhand can always be taken off. The fight starts with an empty bag and no gold. Number keys stop at 8, so `C` opens every consumable stack during the player's turn. Drinking still spends the turn. Keys are fixed in the app; the data has no binding table.
 
-`shop.json` may name a `dialogue` id. That file is `data/dialogue/<id>.json`. `I` starts the talk wherever the shop would have opened, and `I` closes it again. A node has an id, a line, an optional `note` (tone, not drawn), and `choices`. A `/` in a line is a box break. The box also wraps at 40 characters. The font has no brackets, so the menu marks the row with `>`. Up and Down move, `E` speaks, and a gamepad d-pad and south button do the same. A choice has text and one of `next` (a node id), `end` (closes the talk), or `action`. `shop_open` is the action that opens the shop screen. The first node whose `requires` hold is the start. A requirement is a flag: `met`, `!met`, or `list.id`. `found.alphas_fang` reads the run's found list, the same list that records a claimed drop. `sets` on a node or a choice stores a plain flag. Lines are not descriptions: a `{placeholder}` fails the load.
+`shop.json` may name a `dialogue` id. That file is `data/dialogue/<id>.json`. `I` starts the talk wherever the shop would have opened, and `I` closes it again. A node has an id, a line, an optional `note` (tone, not drawn), and `choices`. A `/` in a line is a box break. The box also wraps at 40 characters. The menu marks the row with `>`. Up and Down move, `E` speaks, and a gamepad d-pad and south button do the same. A choice has text and one of `next` (a node id), `end` (closes the talk), or `action`. `shop_open` is the action that opens the shop screen. The first node whose `requires` hold is the start. A requirement is a flag: `met`, `!met`, or `list.id`. `found.alphas_fang` reads the run's found list, the same list that records a claimed drop. `sets` on a node or a choice stores a plain flag. Lines are not descriptions: a `{placeholder}` fails the load.
 
 A description may contain `{placeholders}` filled from that entity's own fields. There is no arithmetic and no conditional. A brace that is not a real field fails the load and names the file, the entity, and the placeholder, for example `skills.json: skill 'bulwark' description: unknown placeholder {def.amout}`. The same expander runs when the screen draws the text, so a rank or an item tune shows the numbers on that copy. Damage and reflect `{power}` add `(rank - 1) * powerPerRank`. A new hero is the first class with `"starter": true`.
 

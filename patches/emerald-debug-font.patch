@@ -1,0 +1,194 @@
+diff --git a/include/Emerald/Renderer/DebugText.h b/include/Emerald/Renderer/DebugText.h
+index acc4e0d..5ff3e91 100644
+--- a/include/Emerald/Renderer/DebugText.h
++++ b/include/Emerald/Renderer/DebugText.h
+@@ -4,7 +4,7 @@
+ // no atlas: the quads go through Renderer2D's sprite batch. Call DrawDebugText between Begin
+ // and End. Letters are uppercase only ('a' is drawn as 'A').
+ //
+-// Glyphs: A-Z, 0-9, and . , : - + / ! ? ' ( )
++// Glyphs: A-Z, 0-9, and . , : ; - + / ! ? ' ( ) [ ] > %
+ // Space advances and draws nothing. '\n' starts a line, '\r' is skipped. Any other byte is a
+ // hollow box. For real UI text, use Font and DrawString.
+ 
+@@ -35,6 +35,10 @@ inline constexpr i32 kDebugTextLineHeight = 9; // rows, plus a two-row gap
+ // wrap. Empty text is (0, one line). A non-positive scale is (0, 0).
+ [[nodiscard]] Vec2 MeasureDebugText(std::string_view text, i32 scale = 1, f32 maxWidth = 0.0f);
+ 
++// True when DrawDebugText draws `code` as itself. Space, newline, and carriage return are
++// layout. A letter matches in either case. A byte that draws the hollow box is false.
++[[nodiscard]] bool DebugTextHasGlyph(char code);
++
+ // Top-left of the first line. `maxWidth` of 0 draws one line per '\n' and does not wrap; a
+ // positive width wraps on spaces before a word that would pass the right edge. A word longer
+ // than the width stays on one line. Returns the y just below the last line (`position.y` when
+diff --git a/src/Renderer/DebugText.cpp b/src/Renderer/DebugText.cpp
+index a1c417a..2927be7 100644
+--- a/src/Renderer/DebugText.cpp
++++ b/src/Renderer/DebugText.cpp
+@@ -7,6 +7,15 @@ namespace Emerald {
+ namespace {
+ 
+ // Five columns, seven rows. '#' is ink. A run of '#' on one row is one rectangle.
++// One object, so a missing glyph is this pointer and not a lookalike literal.
++constexpr char kMissingRows[] = "#####"
++                                 "#...#"
++                                 "#...#"
++                                 "#...#"
++                                 "#...#"
++                                 "#...#"
++                                 "#####";
++
+ const char* GlyphRows(char code)
+ {
+     switch (code) {
+@@ -386,14 +395,48 @@ const char* GlyphRows(char code)
+                "..#.."
+                "..#.."
+                ".#...";
++    case ';':
++        return "....."
++               "..#.."
++               "..#.."
++               "....."
++               "..#.."
++               "..#.."
++               ".#...";
++    case '[':
++        return ".##.."
++               ".#..."
++               ".#..."
++               ".#..."
++               ".#..."
++               ".#..."
++               ".##..";
++    case ']':
++        return "..##."
++               "...#."
++               "...#."
++               "...#."
++               "...#."
++               "...#."
++               "..##.";
++    case '>':
++        return ".#..."
++               "..#.."
++               "...#."
++               "....#"
++               "...#."
++               "..#.."
++               ".#...";
++    case '%':
++        return "##..#"
++               "##.#."
++               "...#."
++               "..#.."
++               ".#..."
++               ".#.##"
++               "#..##";
+     default:
+-        return "#####"
+-               "#...#"
+-               "#...#"
+-               "#...#"
+-               "#...#"
+-               "#...#"
+-               "#####";
++        return kMissingRows;
+     }
+ }
+ 
+@@ -488,6 +531,13 @@ Layout LayoutText(const Vec2& position, std::string_view text, i32 scale, f32 ma
+ 
+ } // namespace
+ 
++bool DebugTextHasGlyph(char code)
++{
++    if (code == ' ' || code == '\n' || code == '\r')
++        return true;
++    return GlyphRows(Upper(code)) != kMissingRows;
++}
++
+ Vec2 MeasureDebugText(std::string_view text, i32 scale, f32 maxWidth)
+ {
+     const Layout layout =
+diff --git a/tests/DebugTextTests.cpp b/tests/DebugTextTests.cpp
+index 5f74c8d..73a657e 100644
+--- a/tests/DebugTextTests.cpp
++++ b/tests/DebugTextTests.cpp
+@@ -400,6 +400,46 @@ const GlyphSpec kGlyphs[] = {
+      "..#.."
+      "..#.."
+      ".#..."},
++    {';',
++     "....."
++     "..#.."
++     "..#.."
++     "....."
++     "..#.."
++     "..#.."
++     ".#..."},
++    {'[',
++     ".##.."
++     ".#..."
++     ".#..."
++     ".#..."
++     ".#..."
++     ".#..."
++     ".##.."},
++    {']',
++     "..##."
++     "...#."
++     "...#."
++     "...#."
++     "...#."
++     "...#."
++     "..##."},
++    {'>',
++     ".#..."
++     "..#.."
++     "...#."
++     "....#"
++     "...#."
++     "..#.."
++     ".#..."},
++    {'%',
++     "##..#"
++     "##.#."
++     "...#."
++     "..#.."
++     ".#..."
++     ".#.##"
++     "#..##"},
+ };
+ 
+ const char* kBox = "#####"
+@@ -530,7 +570,11 @@ TEST(DebugTextWrapsOnSpaces)
+ 
+ TEST(DebugTextGlyphCoverage)
+ {
+-    CHECK(sizeof(kGlyphs) / sizeof(kGlyphs[0]) == 47);
++    CHECK(sizeof(kGlyphs) / sizeof(kGlyphs[0]) == 52);
++    CHECK(DebugTextHasGlyph('A') && DebugTextHasGlyph('a') && DebugTextHasGlyph(' '));
++    CHECK(DebugTextHasGlyph('>') && DebugTextHasGlyph('[') && DebugTextHasGlyph(']'));
++    CHECK(DebugTextHasGlyph(';') && DebugTextHasGlyph('%'));
++    CHECK(!DebugTextHasGlyph('@') && !DebugTextHasGlyph('{') && !DebugTextHasGlyph('_'));
+ 
+     std::vector<u64> masks;
+     masks.reserve(48);
+@@ -580,7 +624,7 @@ TEST(DebugTextGlyphCoverage)
+ 
+     Renderer2D unknown;
+     unknown.Begin(Mat4::Identity());
+-    DrawDebugText(unknown, at, "@%\t", kInk, scale);
++    DrawDebugText(unknown, at, "@#\t", kInk, scale);
+     unknown.End();
+     const std::vector<Rect> boxes = Drawn(unknown);
+     std::vector<Rect> expected;
+@@ -611,5 +655,5 @@ TEST(DebugTextGlyphCoverage)
+     CHECK_NEAR(right, 15.0f);
+     CHECK_NEAR(MeasureDebugText("E", 3).x, 18.0f);
+ 
+-    CHECK(alphabet.size() == 47);
++    CHECK(alphabet.size() == 52);
+ }

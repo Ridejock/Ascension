@@ -6,11 +6,16 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Database.h"
 #include "Check.h"
+#include "FoeAlert.h"
 #include "GearLine.h"
 #include "SourceTag.h"
+
+#include "Emerald/Renderer/DebugText.h"
 
 namespace {
 
@@ -2212,6 +2217,204 @@ void TestAiValidation()
     }
 }
 
+struct MissingGlyph {
+    char Code = 0;
+    std::string Where;
+};
+
+void ConsiderGlyphs(std::string_view where, std::string_view text, std::vector<MissingGlyph>& missing)
+{
+    for (unsigned char raw : text) {
+        const char code = static_cast<char>(raw);
+        if (Emerald::DebugTextHasGlyph(code))
+            continue;
+        bool seen = false;
+        for (const MissingGlyph& row : missing) {
+            if (row.Code == code)
+                seen = true;
+        }
+        if (seen)
+            continue;
+        MissingGlyph row;
+        row.Code = code;
+        row.Where = std::string(where);
+        missing.push_back(std::move(row));
+    }
+}
+
+// Labels the screens draw that are not a row in the data files. A new mark or a new
+// piece of punctuation belongs in this list, so the font check sees it.
+const char* kUiLabels[] = {
+    "> ",
+    "HP 0/0",
+    "FOCUS 0/0",
+    "1-8 DRINK",
+    "THE NEXT FIGHT WAITS.",
+    "6  RESET BUILD",
+    "No encounters in data/.",
+    "Wait for your turn.",
+    "Build reset. Skill ranks cleared. Pick a starter class.",
+    "Choose a path.",
+    "Choose a skill.",
+    "class points left.",
+    "You move first.",
+    " uses  for .",
+    " and heals ",
+    "Focus +",
+    " returns.",
+    " Victory.",
+    " is stunned.",
+    " but nothing changes.",
+    "The next hit loses ",
+    "The next hit is reduced by ",
+    "but is already at full health.",
+    "The next blow hits harder.",
+    "Defense +",
+    " joins the fight.",
+    "Bought  for  gold.",
+    "Sold  for  gold.",
+    "Equipped .",
+    "Put  in the bag.",
+    "Finish the fight.",
+    "Data reloaded.",
+    "Saved.",
+    "Resumed.",
+    "The save could not be read. A new run starts.",
+    "The save was damaged. The previous one was loaded.",
+    "ANY STARTER. CLASS POINTS STAY IN THE POOL.",
+    "CLEARS SKILL RANKS. CLASS POINTS RETURN TO THE POOL.",
+    "E DRINKS THE MARKED ROW. 1-8 DRINK THAT ROW.",
+    "UP DOWN MOVE    E SPEAK    I CLOSE",
+    "E CONTINUE    I CLOSE",
+    "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT    ESC QUIT",
+    "SPACE WAIT    R FIGHT    N NEXT FOE    F5 SAVE    ESC QUIT",
+    "BOTH HANDS",
+    "EMPTY",
+    " x",
+    " heal ",
+    " sell ",
+    " gold",
+    "PHASE ",
+    "TARGET",
+    "ACTS",
+    "DOWN",
+    "YOUR TURN",
+    "VICTORY",
+    "DEFEAT",
+    "BETWEEN FIGHTS",
+    "CHOOSE A PATH",
+    "CHOOSE A CLASS",
+    "CHOOSE A SKILL",
+    "CHOOSE AN ITEM",
+    "SPEND CLASS POINTS",
+    "ASCENSION",
+    "WORN AND BAG",
+    "STOCK",
+    "SKILLS",
+    "DRINKS",
+    "FELLED",
+    "NONE YET",
+    "BOSS",
+    "POOL ",
+    "AGILITY ",
+    "Acts with you",
+    "Incoming",
+    "Passive ",
+    " per ",
+    " up to ",
+    " on block",
+    "Upgrades ",
+    "reaches rank ",
+    "Found ",
+    "( )",
+};
+
+void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
+{
+    for (const DialogueDef& talk : data.GetDialogues()) {
+        for (const DialogueNode& node : talk.Nodes) {
+            ConsiderGlyphs(node.Id, node.Line, missing);
+            for (const DialogueChoice& choice : node.Choices)
+                ConsiderGlyphs(node.Id, choice.Text, missing);
+        }
+    }
+    for (const ItemDef& item : data.GetItems()) {
+        ConsiderGlyphs(item.Id, item.Name, missing);
+        ConsiderGlyphs(item.Id, data.Describe(item), missing);
+    }
+    const i32 rank = data.GetProgress().MaxSkillRank;
+    for (const SkillDef& skill : data.GetSkills()) {
+        ConsiderGlyphs(skill.Id, skill.Name, missing);
+        ConsiderGlyphs(skill.Id, data.DescribeSkill(skill), missing);
+        if (rank > 1)
+            ConsiderGlyphs(skill.Id, data.DescribeSkill(skill, rank), missing);
+    }
+    for (const ClassDef& klass : data.GetClasses()) {
+        ConsiderGlyphs(klass.Id, klass.Name, missing);
+        ConsiderGlyphs(klass.Id, data.Describe(klass), missing);
+    }
+    for (const EnemyDef& enemy : data.GetEnemies()) {
+        ConsiderGlyphs(enemy.Id, enemy.Name, missing);
+        ConsiderGlyphs(enemy.Id, data.Describe(enemy), missing);
+        for (const DropDef& drop : enemy.Drops)
+            ConsiderGlyphs(enemy.Id, drop.Message, missing);
+    }
+    for (const StatusDef& status : data.GetStatuses()) {
+        ConsiderGlyphs(status.Id, status.Name, missing);
+        ConsiderGlyphs(status.Id, data.Describe(status), missing);
+    }
+    for (const StatDef& stat : data.GetStats())
+        ConsiderGlyphs(stat.Id, stat.Name, missing);
+    for (const EncounterDef& encounter : data.GetEncounters()) {
+        ConsiderGlyphs(encounter.Id, encounter.Name, missing);
+        ConsiderGlyphs(encounter.Id, encounter.Zone, missing);
+    }
+    for (const RarityDef& rarity : data.GetRarities())
+        ConsiderGlyphs(rarity.Id, rarity.Name, missing);
+    const ShopDef& shop = data.GetShop();
+    ConsiderGlyphs(shop.Id, shop.Name, missing);
+    ConsiderGlyphs(shop.Id, shop.Keeper, missing);
+
+    CombatantState foe;
+    foe.GuardPercent = 50;
+    foe.BonusDefense = 150;
+    foe.BonusDefenseTurns = 2;
+    ConsiderGlyphs("guard", FoeGuardAlert(foe), missing);
+    ConsiderGlyphs("defense", FoeDefenseAlert(data, foe), missing);
+    for (const char* label : kUiLabels)
+        ConsiderGlyphs("ui", label, missing);
+}
+
+void TestFontGlyphs()
+{
+    Check(Emerald::DebugTextHasGlyph('>') && Emerald::DebugTextHasGlyph('[') &&
+              Emerald::DebugTextHasGlyph(']'),
+          "the font draws the choice marker and brackets");
+    const char* dirs[] = {ASCENSION_DATA_DIR, ASCENSION_SHIPPED_DATA_DIR};
+    const char* names[] = {"sample text uses glyphs the font draws",
+                           "shipped text uses glyphs the font draws"};
+    for (i32 index = 0; index < 2; ++index) {
+        Database data(dirs[index]);
+        DataError error;
+        const char* loaded = index == 0 ? "sample data loads for the font check"
+                                        : "shipped data loads for the font check";
+        Check(data.Load(&error), loaded);
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        if (!data.IsLoaded())
+            continue;
+        std::vector<MissingGlyph> missing;
+        ConsiderCatalog(data, missing);
+        if (!missing.empty()) {
+            for (const MissingGlyph& row : missing) {
+                std::printf("    %s uses '%c' (%d), which the debug font does not draw\n",
+                            row.Where.c_str(), row.Code, static_cast<int>(row.Code));
+            }
+        }
+        Check(missing.empty(), names[index]);
+    }
+}
+
 int main()
 {
     TestSample();
@@ -2227,6 +2430,7 @@ int main()
     TestSkillPicks();
     TestDescriptionsResolve();
     TestShippedDescriptions();
+    TestFontGlyphs();
     TestIcons();
     TestMythicUnique();
     TestDropEntries();
