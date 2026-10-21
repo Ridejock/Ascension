@@ -168,7 +168,7 @@ Waiting against the Wolf loses. Strike three times and it dies (8 XP, level 2). 
 
 ## Playtest
 
-A scripted run sets the hero and the fight from the command line, so a playtest does not have to grind or edit `data/`. Emerald still owns `--frames`, `--screenshot`, `--capture`, `--capture-fps`, `--record`, `--replay`, `--profile`, and `--profile-trace` (and `--gpu`). Ascension reads the flags below and leaves those alone. A value can be the next argument or `--flag=value`. Fights are deterministic, so there is no seed.
+A scripted run sets the hero and the fight from the command line, so a playtest does not have to grind or edit `data/`. Emerald still owns `--frames`, `--screenshot`, `--capture`, `--capture-fps`, `--record`, `--replay`, `--profile`, and `--profile-trace` (and `--gpu`). Ascension reads the flags below and leaves those alone. A value can be the next argument or `--flag=value`. Fights are deterministic: damage, turn order, and foe AI do not use a seed. `--sim` can still mark a random living foe from `--seed`.
 
 | Flag | Effect |
 |---|---|
@@ -177,8 +177,11 @@ A scripted run sets the hero and the fight from the command line, so a playtest 
 | `--level N` | Start at level N. N has to be on the curve in `progress.json` |
 | `--class id` | Start as that class. An evolution is taken only when that choice is open, so `--level` has to be at least the path's evolve level |
 | `--enemy id` | Start on that fight. An id from `encounters.json` (such as `wolf_pack`) is that encounter. An id from `enemies.json` that is not an encounter is that one enemy. When an id is both, the encounter wins |
-| `--sim` | Play the goblin pack with no window. `--enemy goblin_pack` and no `--class` prints a table: each class build, with and without Alpha's Fang. Shaman focus kills the grunt next, so the chief is left alone. Chief focus kills the shaman next. Pass `--class` to play one build. The sim uses level 6, a rusty sword, and an oak shield. Pass this or `--keys`, not both. A loss still exits 0 |
-| `--focus id` | With `--sim`, the enemy id that one build kills first. The one-off default is the chief |
+| `--sim` | Play an encounter with no window. `--enemy` is required and has to be an encounter id. With no `--class` and no `--focus`, it prints a rate table: each class build, each kill order, with and without Alpha's Fang. Goblin orders are shaman (then the grunt), chief (then the shaman), grunt (then the shaman), and default. Wolf orders are the dire wolf (then a wolf), a wolf (then the dire wolf), and default. A one-enemy fight, such as the Barrow Sentry, is one row. The sim uses level 6, a rusty sword, and an oak shield. Pass this or `--keys`, not both. A loss still exits 0 |
+| `--focus id` | With `--sim`, the enemy id that one build kills first. Empty marks a random living foe each turn |
+| `--runs N` | With `--sim`, how many seeds to play when the mark can change. Default 1000. Range 1 to 100000. A named focus with `--slip 0`, and any one-enemy fight, is one outcome, so the Runs column stays 1 |
+| `--seed N` | With `--sim`, the first xorshift32 state. Default 1. `0` is stored as 1. It only chooses the player's mark |
+| `--slip N` | With `--sim`, the percent of player turns that ignore a named focus and mark a random living foe. Default 0, so a named order stays exact. Range 0 to 100 |
 | `--gold N` | Start with N gold |
 | `--give id[:count],...` | Put items in the bag. A missing count is 1 |
 | `--equip id,...` | Wear those pieces. An id that was also given comes out of the bag; anything else is added and then worn. A two-handed weapon still fills the offhand |

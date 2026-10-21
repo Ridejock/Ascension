@@ -1,8 +1,9 @@
 # Headless goblin pack. The Playtest suite checks this file.
-# Run from the repo root. The first command prints five builds, shaman or chief
-# first, with and without Alpha's Fang. A loss still exits 0.
+# Run from the repo root. The first command prints the rate table: each class
+# build, shaman, chief, grunt, and default targeting, with and without
+# Alpha's Fang. Default targeting plays 1000 seeds. A named focus is one fight.
 # --sim forces level 6, a rusty sword, and an oak shield. --level and the other
-# worn pieces are checked at startup and then ignored by the sim.
+# worn pieces are checked at startup and then ignored by the sim, except the fang.
 
 ./build/debug/bin/Ascension --sim --enemy goblin_pack
 

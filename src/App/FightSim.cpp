@@ -1,6 +1,8 @@
 #include "FightSim.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -192,13 +194,93 @@ void NoteFirstDown(const Battle& battle, std::vector<char>& wasAlive, std::strin
     }
 }
 
-bool PrepareHero(const Database& data, const BuildSpec& build, bool fang, Hero& hero,
-                 Inventory& inventory, std::string& error)
+// Kill order for one rate row. Random marks a uniform living foe every player turn.
+// First is the enemy id killed first. Then is the id marked once First is dead.
+struct FocusOrder {
+    std::string Label;
+    std::string First;
+    std::string Then;
+    bool Random = false;
+};
+
+struct RunSpec {
+    const BuildSpec* Build = nullptr;
+    bool Fang = false;
+    std::string_view EncounterId;
+    std::string_view FocusId;
+    std::string_view ThenId;
+    bool RandomFocus = false;
+    i32 Slip = 0;
+    u32 RngState = 1;
+};
+
+// xorshift32. State 0 is stuck, so a zero result is replaced.
+u32 NextRandom(u32& state)
+{
+    u32 value = state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    if (value == 0)
+        value = 1;
+    state = value;
+    return value;
+}
+
+u32 RunState(i32 seed, i32 index)
+{
+    u32 state = seed > 0 ? static_cast<u32>(seed) : 1u;
+    state += static_cast<u32>(index) * 0x9E3779B9u;
+    if (state == 0)
+        state = 1;
+    return state;
+}
+
+i32 LivingCount(const Battle& battle)
+{
+    i32 count = 0;
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Alive())
+            ++count;
+    }
+    return count;
+}
+
+i32 RandomLivingSeat(const Battle& battle, u32& state)
+{
+    const i32 living = LivingCount(battle);
+    if (living < 1)
+        return -1;
+    i32 pick = static_cast<i32>(NextRandom(state) % static_cast<u32>(living));
+    const auto foes = battle.Enemies();
+    for (i32 index = 0; index < static_cast<i32>(foes.size()); ++index) {
+        if (!foes[static_cast<usize>(index)].Alive())
+            continue;
+        if (pick == 0)
+            return index;
+        --pick;
+    }
+    return -1;
+}
+
+// Slip is a percent. A roll under it marks at random even when a focus was named.
+// Default targeting does not roll slip: every turn is already a fresh mark.
+i32 ChooseSeat(const Battle& battle, const RunSpec& spec, u32& state)
+{
+    if (spec.RandomFocus)
+        return RandomLivingSeat(battle, state);
+    if (spec.Slip > 0 && static_cast<i32>(NextRandom(state) % 100u) < spec.Slip)
+        return RandomLivingSeat(battle, state);
+    return FocusSeat(battle, spec.FocusId, spec.ThenId);
+}
+
+bool PrepareHero(const Database& data, const BuildSpec& build, bool fang,
+                 std::string_view encounterId, Hero& hero, Inventory& inventory, std::string& error)
 {
     PlaytestOptions options;
     options.Level = kGoblinLevel;
     options.ClassId = build.ClassId;
-    options.Fight.Id = "goblin_pack";
+    options.Fight.Id = std::string(encounterId);
     options.Equip.emplace_back("rusty_sword");
     options.Equip.emplace_back("oak_shield");
     if (fang)
@@ -225,17 +307,16 @@ bool PrepareHero(const Database& data, const BuildSpec& build, bool fang, Hero& 
     return true;
 }
 
-GoblinSimRow SimulateBuild(const Database& data, const BuildSpec& build, bool fang,
-                           std::string_view focusId, std::string_view thenId)
+GoblinSimRow SimulateBuild(const Database& data, const RunSpec& spec)
 {
     GoblinSimRow row;
-    row.Build = build.Label;
-    row.FocusId = std::string(focusId);
-    row.Fang = fang;
+    row.Build = spec.Build->Label;
+    row.FocusId = std::string(spec.FocusId);
+    row.Fang = spec.Fang;
 
     Hero hero;
     Inventory inventory;
-    if (!PrepareHero(data, build, fang, hero, inventory, row.Error))
+    if (!PrepareHero(data, *spec.Build, spec.Fang, spec.EncounterId, hero, inventory, row.Error))
         return row;
 
     const ClassDef* klass = data.FindClass(hero.ClassId());
@@ -254,13 +335,14 @@ GoblinSimRow SimulateBuild(const Database& data, const BuildSpec& build, bool fa
     battle.SetPickedSkills(hero.PickedIds());
     PushRanks(battle, hero, data, {});
     std::string why;
-    if (!battle.Start(hero.ClassId(), hero.Level(), "goblin_pack", why)) {
+    if (!battle.Start(hero.ClassId(), hero.Level(), spec.EncounterId, why)) {
         row.Error = why;
         return row;
     }
 
     std::vector<char> wasAlive;
     NoteFirstDown(battle, wasAlive, row.FirstDown);
+    u32 state = spec.RngState == 0 ? 1u : spec.RngState;
     i32 steps = 0;
     while (battle.Result() == BattleResult::Ongoing && steps < kActionCap) {
         ++steps;
@@ -271,7 +353,7 @@ GoblinSimRow SimulateBuild(const Database& data, const BuildSpec& build, bool fa
         }
         ++row.PlayerTurns;
         std::string_view skill = ChoosePlayerSkill(battle, grants, perTurn);
-        i32 seat = FocusSeat(battle, focusId, thenId);
+        i32 seat = ChooseSeat(battle, spec, state);
         if (skill == "heavy_blow") {
             const i32 winding = WindingSeat(battle);
             if (winding >= 0)
@@ -302,6 +384,128 @@ GoblinSimRow SimulateBuild(const Database& data, const BuildSpec& build, bool fa
     return row;
 }
 
+bool SeenId(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& have : ids) {
+        if (have == id)
+            return true;
+    }
+    return false;
+}
+
+void AddOrder(std::vector<FocusOrder>& orders, std::string label, std::string first,
+              std::string thenId, bool random)
+{
+    FocusOrder order;
+    order.Label = std::move(label);
+    order.First = std::move(first);
+    order.Then = std::move(thenId);
+    order.Random = random;
+    orders.push_back(std::move(order));
+}
+
+// Known packs use the kill orders the rate table reports. Anything else walks the
+// member list so a new encounter still has a row per foe.
+std::vector<FocusOrder> OrdersFor(const EncounterDef& encounter)
+{
+    std::vector<FocusOrder> orders;
+    if (encounter.Id == "goblin_pack") {
+        AddOrder(orders, "shaman", "goblin_shaman", "goblin", false);
+        AddOrder(orders, "chief", "goblin_chief", "goblin_shaman", false);
+        AddOrder(orders, "grunt", "goblin", "goblin_shaman", false);
+        AddOrder(orders, "default", "", "", true);
+        return orders;
+    }
+    if (encounter.Id == "wolf_pack") {
+        AddOrder(orders, "dire wolf", "dire_wolf", "wolf", false);
+        AddOrder(orders, "wolf", "wolf", "dire_wolf", false);
+        AddOrder(orders, "default", "", "", true);
+        return orders;
+    }
+    if (encounter.Enemies.size() <= 1) {
+        const std::string id = encounter.Enemies.empty() ? std::string() : encounter.Enemies[0];
+        const std::string label = encounter.Id == "barrow_sentry" ? "sentry" : id;
+        AddOrder(orders, label, id, "", false);
+        return orders;
+    }
+
+    std::vector<std::string> ids;
+    for (const std::string& enemy : encounter.Enemies) {
+        if (!SeenId(ids, enemy))
+            ids.push_back(enemy);
+    }
+    for (usize index = 0; index < ids.size(); ++index) {
+        const usize next = (index + 1) % ids.size();
+        AddOrder(orders, ids[index], ids[index], ids[next], false);
+    }
+    AddOrder(orders, "default", "", "", true);
+    return orders;
+}
+
+// One living foe cannot be marked differently, and a named focus with no slip never
+// reads the seed. Repeating those fights would copy one outcome.
+bool OrderVaries(const FocusOrder& order, i32 slip, i32 enemyCount)
+{
+    if (enemyCount < 2)
+        return false;
+    if (order.Random)
+        return true;
+    return slip > 0;
+}
+
+i32 Percentile10(std::vector<i32>& samples)
+{
+    if (samples.empty())
+        return 0;
+    std::sort(samples.begin(), samples.end());
+    const usize last = samples.size() - 1;
+    return samples[last * 10 / 100];
+}
+
+SimRateRow SimulateRate(const Database& data, const EncounterDef& encounter, const BuildSpec& build,
+                        const FocusOrder& order, bool fang, const SimRateQuery& query)
+{
+    SimRateRow rate;
+    rate.Encounter = encounter.Name;
+    rate.Build = build.Label;
+    rate.Focus = order.Label;
+    rate.Fang = fang;
+
+    const i32 enemyCount = static_cast<i32>(encounter.Enemies.size());
+    const i32 runs = OrderVaries(order, query.Slip, enemyCount) ? query.Runs : 1;
+    std::vector<i32> samples;
+    samples.reserve(static_cast<usize>(runs));
+    for (i32 index = 0; index < runs; ++index) {
+        RunSpec spec;
+        spec.Build = &build;
+        spec.Fang = fang;
+        spec.EncounterId = encounter.Id;
+        spec.FocusId = order.First;
+        spec.ThenId = order.Then;
+        spec.RandomFocus = order.Random;
+        spec.Slip = query.Slip;
+        spec.RngState = RunState(query.Seed, index);
+        const GoblinSimRow row = SimulateBuild(data, spec);
+        if (!row.Ok) {
+            rate.Error = row.Error;
+            return rate;
+        }
+        rate.Runs += 1;
+        if (row.TimedOut)
+            rate.Timeouts += 1;
+        const bool won = row.Victory && !row.TimedOut;
+        if (won)
+            rate.Wins += 1;
+        const i32 left = won ? row.Hp : 0;
+        rate.SumHp += left;
+        rate.SumTurns += row.PlayerTurns;
+        samples.push_back(left);
+    }
+    rate.P10Hp = Percentile10(samples);
+    rate.Ok = true;
+    return rate;
+}
+
 std::string Pad(std::string_view text, i32 width)
 {
     std::string out(text);
@@ -319,13 +523,14 @@ bool EquipHas(const PlaytestOptions& options, std::string_view id)
     return false;
 }
 
-std::string ThenFocus(std::string_view focus)
+std::string OneDecimal(i64 tenths)
 {
-    if (focus == "goblin_shaman")
-        return "goblin";
-    if (focus == "goblin")
-        return "goblin_shaman";
-    return "goblin_shaman";
+    if (tenths < 0)
+        tenths = 0;
+    std::string text = std::to_string(tenths / 10);
+    text.push_back('.');
+    text.push_back(static_cast<char>('0' + static_cast<int>(tenths % 10)));
+    return text;
 }
 
 } // namespace
@@ -334,10 +539,23 @@ std::vector<GoblinSimRow> SimulateGoblinPack(const Database& data)
 {
     std::vector<GoblinSimRow> rows;
     for (const BuildSpec& build : kBuilds) {
-        rows.push_back(SimulateBuild(data, build, false, "goblin_shaman", "goblin"));
-        rows.push_back(SimulateBuild(data, build, true, "goblin_shaman", "goblin"));
-        rows.push_back(SimulateBuild(data, build, false, "goblin_chief", "goblin_shaman"));
-        rows.push_back(SimulateBuild(data, build, true, "goblin_chief", "goblin_shaman"));
+        RunSpec shaman;
+        shaman.Build = &build;
+        shaman.EncounterId = "goblin_pack";
+        shaman.FocusId = "goblin_shaman";
+        shaman.ThenId = "goblin";
+        rows.push_back(SimulateBuild(data, shaman));
+        shaman.Fang = true;
+        rows.push_back(SimulateBuild(data, shaman));
+
+        RunSpec chief;
+        chief.Build = &build;
+        chief.EncounterId = "goblin_pack";
+        chief.FocusId = "goblin_chief";
+        chief.ThenId = "goblin_shaman";
+        rows.push_back(SimulateBuild(data, chief));
+        chief.Fang = true;
+        rows.push_back(SimulateBuild(data, chief));
     }
     return rows;
 }
@@ -376,6 +594,87 @@ std::string FormatGoblinSim(const std::vector<GoblinSimRow>& rows)
     return text;
 }
 
+std::vector<SimRateRow> SimulateEncounterRates(const Database& data, const SimRateQuery& query,
+                                              std::string& error)
+{
+    error.clear();
+    const EncounterDef* encounter = data.FindEncounter(query.EncounterId);
+    if (encounter == nullptr) {
+        error = "no encounter '" + query.EncounterId + "'";
+        return {};
+    }
+    if (query.Runs < 1) {
+        error = "runs must be at least 1";
+        return {};
+    }
+
+    const std::vector<FocusOrder> orders = OrdersFor(*encounter);
+    std::vector<SimRateRow> rows;
+    for (const BuildSpec& build : kBuilds) {
+        for (const FocusOrder& order : orders) {
+            const SimRateRow plain = SimulateRate(data, *encounter, build, order, false, query);
+            rows.push_back(plain);
+            if (!plain.Ok) {
+                error = plain.Error;
+                return rows;
+            }
+            const SimRateRow fanged = SimulateRate(data, *encounter, build, order, true, query);
+            rows.push_back(fanged);
+            if (!fanged.Ok) {
+                error = fanged.Error;
+                return rows;
+            }
+        }
+    }
+    return rows;
+}
+
+std::string FormatSimRates(const std::vector<SimRateRow>& rows, const SimRateQuery& query)
+{
+    std::string text;
+    text += "Battle damage, turn order, and foe AI do not use a seed.\n";
+    text += "A named focus with slip 0 is one outcome, so Runs is 1.\n";
+    text += "default marks a uniform living foe each turn, once per seed.\n";
+    text += "A one-enemy fight does not change with the seed.\n";
+    text += "HP left is 0 on a loss or a timeout.\n";
+    text += "P10 is sorted HP at index (runs-1)*10/100.\n";
+    text += "Requested runs " + std::to_string(query.Runs);
+    text += ", seed " + std::to_string(query.Seed);
+    text += ", slip " + std::to_string(query.Slip) + ".\n";
+    text += Pad("Encounter", 16);
+    text += Pad("Build", 22);
+    text += Pad("Focus", 12);
+    text += Pad("Fang", 6);
+    text += Pad("Runs", 6);
+    text += Pad("Win%", 8);
+    text += Pad("Mean HP", 10);
+    text += Pad("P10 HP", 8);
+    text += "Turns\n";
+    for (const SimRateRow& row : rows) {
+        text += Pad(row.Encounter, 16);
+        text += Pad(row.Build, 22);
+        text += Pad(row.Focus, 12);
+        text += Pad(row.Fang ? "yes" : "no", 6);
+        if (!row.Ok) {
+            text += "setup failed: ";
+            text += row.Error;
+            text += "\n";
+            continue;
+        }
+        const i32 runs = row.Runs > 0 ? row.Runs : 1;
+        const i64 winTenths = static_cast<i64>(row.Wins) * 1000 / runs;
+        const i64 hpTenths = row.SumHp * 10 / runs;
+        const i64 turnTenths = row.SumTurns * 10 / runs;
+        text += Pad(std::to_string(row.Runs), 6);
+        text += Pad(OneDecimal(winTenths), 8);
+        text += Pad(OneDecimal(hpTenths), 10);
+        text += Pad(std::to_string(row.P10Hp), 8);
+        text += OneDecimal(turnTenths);
+        text += "\n";
+    }
+    return text;
+}
+
 int RunPlaytestSim(const PlaytestOptions& options)
 {
     const std::filesystem::path directory = PlaytestDataDirectory(options);
@@ -387,20 +686,32 @@ int RunPlaytestSim(const PlaytestOptions& options)
         std::fprintf(stderr, "%s\n", message.c_str());
         return 1;
     }
-    if (options.Fight.Id != "goblin_pack") {
-        std::fprintf(stderr, "--sim plays the goblin pack\n");
-        return 1;
-    }
+
+    SimRateQuery query;
+    query.EncounterId = options.Fight.Id;
+    query.Runs = options.Runs < 1 ? 1 : options.Runs;
+    query.Seed = options.Seed;
+    query.Slip = options.Slip;
+
     if (options.ClassId.empty() && options.PickIds.empty() && options.FocusId.empty()) {
-        const std::vector<GoblinSimRow> rows = SimulateGoblinPack(data);
-        std::fputs(FormatGoblinSim(rows).c_str(), stdout);
-        for (const GoblinSimRow& row : rows) {
-            if (!row.Ok) {
-                std::fprintf(stderr, "%s\n", row.Error.c_str());
-                return 1;
-            }
+        std::string error;
+        const std::vector<SimRateRow> rows = SimulateEncounterRates(data, query, error);
+        if (rows.empty()) {
+            std::fprintf(stderr, "%s\n", error.c_str());
+            return 1;
         }
-        return rows.empty() ? 1 : 0;
+        std::fputs(FormatSimRates(rows, query).c_str(), stdout);
+        if (!error.empty()) {
+            std::fprintf(stderr, "%s\n", error.c_str());
+            return 1;
+        }
+        return 0;
+    }
+
+    const EncounterDef* encounter = data.FindEncounter(options.Fight.Id);
+    if (encounter == nullptr) {
+        std::fprintf(stderr, "no encounter '%s'\n", options.Fight.Id.c_str());
+        return 1;
     }
 
     BuildSpec build;
@@ -412,13 +723,33 @@ int RunPlaytestSim(const PlaytestOptions& options)
         build.Practiced = "cleave";
     else if (options.ClassId == "guardian")
         build.Practiced = "shield_bash";
-    const std::string focus =
-        options.FocusId.empty() ? std::string("goblin_chief") : options.FocusId;
-    const std::string thenId = ThenFocus(focus);
-    const GoblinSimRow row =
-        SimulateBuild(data, build, EquipHas(options, "alphas_fang"), focus, thenId);
-    const std::vector<GoblinSimRow> one{row};
-    std::fputs(FormatGoblinSim(one).c_str(), stdout);
+
+    FocusOrder order;
+    if (options.FocusId.empty()) {
+        order.Label = "default";
+        order.Random = true;
+    } else {
+        order.Label = options.FocusId;
+        order.First = options.FocusId;
+        const std::vector<FocusOrder> orders = OrdersFor(*encounter);
+        for (const FocusOrder& known : orders) {
+            if (!known.Random && known.First == options.FocusId)
+                order.Then = known.Then;
+        }
+        if (order.Then.empty()) {
+            for (const std::string& enemy : encounter->Enemies) {
+                if (enemy != options.FocusId) {
+                    order.Then = enemy;
+                    break;
+                }
+            }
+        }
+    }
+
+    const bool fang = EquipHas(options, "alphas_fang");
+    const SimRateRow row = SimulateRate(data, *encounter, build, order, fang, query);
+    const std::vector<SimRateRow> one{row};
+    std::fputs(FormatSimRates(one, query).c_str(), stdout);
     if (!row.Ok) {
         std::fprintf(stderr, "%s\n", row.Error.c_str());
         return 1;
