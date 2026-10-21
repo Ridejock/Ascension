@@ -432,6 +432,8 @@ bool ParseAim(std::string_view text, EffectAim& out)
         out = EffectAim::AllEnemies;
     else if (text == "randomEnemy")
         out = EffectAim::RandomEnemy;
+    else if (text == "lowestHpAlly")
+        out = EffectAim::LowestHpAlly;
     else
         return false;
     return true;
@@ -590,7 +592,7 @@ bool FieldUsed(EffectTrigger trigger, EffectOp op, std::string_view key)
     if (trigger == EffectTrigger::OnUse && op == EffectOp::Damage)
         return key == "power" || key == "scaling" || key == "target";
     if (trigger == EffectTrigger::OnUse && op == EffectOp::Heal)
-        return key == "power" || key == "scaling";
+        return key == "power" || key == "scaling" || key == "target";
     if (trigger == EffectTrigger::OnTurnStart && op == EffectOp::Heal)
         return key == "power";
     if (trigger == EffectTrigger::OnUse && op == EffectOp::Guard)
@@ -770,7 +772,8 @@ bool AssignEffectField(EffectDef& effect, const std::string& key, const Json& fi
         const std::string text = fieldValue.get<std::string>();
         EffectAim aim = EffectAim::Target;
         if (!ParseAim(text, aim)) {
-            error = "'target' must be \"self\", \"target\", \"allEnemies\" or \"randomEnemy\"";
+            error = "'target' must be \"self\", \"target\", \"allEnemies\", \"randomEnemy\" "
+                    "or \"lowestHpAlly\"";
             return false;
         }
         effect.Aim = aim;
@@ -1626,9 +1629,9 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
         }
         if (!AllowKeys(*condition,
                        {"selfHpAtMost", "selfHpAtLeast", "targetHpAtMost", "targetHpAtLeast",
-                        "allyHpAtMost", "selfStatus", "selfStatusAbsent", "targetStatus",
-                        "targetStatusAbsent", "targetGuardAtLeast", "selfHardenAtLeast", "phase",
-                        "next"},
+                        "allyHpAtMost", "allyCountAtMost", "allyCountAtLeast", "selfStatus",
+                        "selfStatusAbsent", "targetStatus", "targetStatusAbsent",
+                        "targetGuardAtLeast", "selfHardenAtLeast", "phase", "next"},
                        unknown)) {
             error = where + ": unknown field " + Quote(unknown);
             return false;
@@ -1639,6 +1642,9 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
             !OptionalRange(*condition, "targetHpAtMost", 0, 100, rule.If.TargetHpAtMost, error) ||
             !OptionalRange(*condition, "targetHpAtLeast", 0, 100, rule.If.TargetHpAtLeast, error) ||
             !OptionalRange(*condition, "allyHpAtMost", 0, 100, rule.If.AllyHpAtMost, error) ||
+            !OptionalRange(*condition, "allyCountAtMost", 0, 9, rule.If.AllyCountAtMost, error) ||
+            !OptionalRange(*condition, "allyCountAtLeast", 0, 9, rule.If.AllyCountAtLeast,
+                           error) ||
             !OptionalRange(*condition, "targetGuardAtLeast", 0, 100, rule.If.TargetGuardAtLeast,
                            error) ||
             !OptionalRange(*condition, "selfHardenAtLeast", 0, 9999, rule.If.SelfHardenAtLeast,
@@ -3783,19 +3789,27 @@ const char* AimWords(EffectAim aim)
         return "every enemy";
     if (aim == EffectAim::RandomEnemy)
         return "a random enemy";
+    if (aim == EffectAim::LowestHpAlly)
+        return "the most wounded ally";
     return "the marked enemy";
 }
 
-// Empty for an op that does not pick someone. Battle aims damage, a status, and a stun.
-// A guard, a heal, and the other self effects ignore target, so they add no sentence.
-std::string EffectSentence(EffectOp op, EffectAim aim)
+// Empty for an op that does not pick someone. Battle aims damage, a status, a stun, and a
+// heal that names its own target. A guard and a heal with no target stay on the user, so
+// they add no sentence.
+std::string EffectSentence(const EffectDef& effect, EffectAim aim)
 {
+    if (effect.Op == EffectOp::Heal) {
+        if (!effect.Aim.has_value() || aim == EffectAim::Self)
+            return {};
+        return std::string("Heals ") + AimWords(aim) + ".";
+    }
     const char* verb = nullptr;
-    if (op == EffectOp::Damage)
+    if (effect.Op == EffectOp::Damage)
         verb = "Hits";
-    else if (op == EffectOp::ApplyStatus)
+    else if (effect.Op == EffectOp::ApplyStatus)
         verb = "Afflicts";
-    else if (op == EffectOp::StunIfWindingUp)
+    else if (effect.Op == EffectOp::StunIfWindingUp)
         verb = "Stuns";
     if (verb == nullptr)
         return {};
@@ -3811,7 +3825,7 @@ std::string Database::DescribeSkill(const SkillDef& skill, i32 rank) const
     scope.RankBonus = RankBonusFor(rank, m_Progress.PowerPerRank);
     std::string text = ExpandOrRaw(skill.Description, scope);
     for (const EffectDef& effect : skill.Effects) {
-        const std::string sentence = EffectSentence(effect.Op, AimFor(skill, effect));
+        const std::string sentence = EffectSentence(effect, AimFor(skill, effect));
         if (sentence.empty())
             continue;
         if (!text.empty())

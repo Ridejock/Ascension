@@ -1287,6 +1287,33 @@ void TestConditionalFields()
     }
     {
         TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, "
+            "\"target\": \"lowestHpAlly\" }");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "an onUse heal may name who it restores");
+        const SkillDef* wind = data.FindSkill("second_wind");
+        const EffectDef* mend = wind != nullptr ? wind->FindEffect("mend") : nullptr;
+        const std::string text = wind != nullptr ? data.DescribeSkill(*wind) : std::string();
+        Check(mend != nullptr && mend->Aim == EffectAim::LowestHpAlly &&
+                  text.find("Heals the most wounded ally.") != std::string::npos,
+              "lowestHpAlly is stored on the heal and the description names the ally");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", \"power\": 8, "
+            "\"target\": \"lowestHpAlly\" }");
+        ExpectUnused(copy.Path, "skills.json", "second_wind", "mend", "target",
+                     "onTurnStart heal does not use target");
+    }
+    {
+        TempCopy copy;
         ReplaceInFile(copy.Path / "skills.json",
                       "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": "
                       "50 }",
@@ -2241,6 +2268,44 @@ void TestAiValidation()
             sentry->Ai[0].If.TargetStatus == "exposed" && sentry->Ai[0].If.Next == "thrust" &&
             !sentry->Ai[0].If.TargetGuardAtLeast.has_value();
         Check(loaded, "the loaded rule keeps the skill, Exposed, and the pattern head");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyCountAtMost\": 10 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "allyCountAtMost",
+                     "an ally count above 9 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyCountAtLeast\": -1 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "allyCountAtLeast",
+                     "an ally count below 0 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyCountAtMost\": 0, "
+                      "\"allyCountAtLeast\": 0 }, \"do\": \"skill\", \"skill\": \"harden\" } ],");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "an ally count rule loads");
+        const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
+        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
+                            sentry->Ai[0].Action == AiAction::Skill &&
+                            sentry->Ai[0].Skill == "harden" &&
+                            sentry->Ai[0].If.AllyCountAtMost == 0 &&
+                            sentry->Ai[0].If.AllyCountAtLeast == 0;
+        Check(loaded, "ally counts are stored, and 0 means the foe is alone");
     }
 }
 
