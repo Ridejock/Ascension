@@ -2388,8 +2388,9 @@ void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
 void TestFontGlyphs()
 {
     Check(Emerald::DebugTextHasGlyph('>') && Emerald::DebugTextHasGlyph('[') &&
-              Emerald::DebugTextHasGlyph(']'),
-          "the font draws the choice marker and brackets");
+              Emerald::DebugTextHasGlyph(']') && Emerald::DebugTextHasGlyph(';') &&
+              Emerald::DebugTextHasGlyph('%'),
+          "the font draws the choice marker, brackets, semicolon, and percent");
     const char* dirs[] = {ASCENSION_DATA_DIR, ASCENSION_SHIPPED_DATA_DIR};
     const char* names[] = {"sample text uses glyphs the font draws",
                            "shipped text uses glyphs the font draws"};

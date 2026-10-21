@@ -2,7 +2,7 @@
 
 A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox. A Fighter earns XP, ranks skills by using them, and at level 5 chooses Berserker or Guardian. The window draws that fight with rectangles and Emerald's built-in debug font.
 
-Emerald is fetched by CMake and pinned to commit `f45d5a65ab03fe533f2d0f37282602991da67165` (see `CMakeLists.txt`). `patches/emerald-debug-font.patch` adds the glyphs that commit's debug font does not draw. To use a local checkout instead:
+Emerald is fetched by CMake and pinned to commit `697f356256d7657817e72cbdf27b23731b4821d1` (see `CMakeLists.txt`). That commit's debug font draws `>`, `[`, `]`, `;`, and `%`, and publishes `DebugTextHasGlyph`. To use a local checkout instead:
 
 ```sh
 cmake --preset debug -DASCENSION_EMERALD_SOURCE_DIR=C:/dev/Emerald

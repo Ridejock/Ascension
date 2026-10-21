@@ -42,17 +42,10 @@ if(ASCENSION_EMERALD_SOURCE_DIR)
 endif()
 
 include(FetchContent)
-# The pinned font does not draw '>' '[' ']' ';' or '%'. This patch adds them, and
-# DebugTextHasGlyph. A tree that already has the glyphs is left alone.
-set(ASCENSION_EMERALD_FONT_PATCH "${CMAKE_CURRENT_SOURCE_DIR}/patches/emerald-debug-font.patch")
 FetchContent_Declare(Emerald
     GIT_REPOSITORY https://github.com/Ridejock/Emerald.git
-    GIT_TAG        f45d5a65ab03fe533f2d0f37282602991da67165
+    GIT_TAG        697f356256d7657817e72cbdf27b23731b4821d1
     GIT_PROGRESS   TRUE
-    PATCH_COMMAND ${CMAKE_COMMAND}
-        -DEMERALD_SOURCE=<SOURCE_DIR>
-        -DEMERALD_PATCH=${ASCENSION_EMERALD_FONT_PATCH}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply-debug-font.cmake
 )
 FetchContent_MakeAvailable(Emerald) # also brings SDL3, spdlog, stb, nlohmann/json (and ImGui if enabled)
 
