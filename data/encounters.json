@@ -31,6 +31,11 @@
       "enemies": ["barrow_sentry"]
     },
     {
+      "id": "bear",
+      "name": "Bear",
+      "enemies": ["bear"]
+    },
+    {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
       "enemies": ["oathkeeper_varn"]

@@ -1,4 +1,5 @@
 #include "AscensionApp.h"
+#include "FightSim.h"
 
 #include <cstdio>
 #include <string>
@@ -26,6 +27,9 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "%s\n", why.c_str());
         return 1;
     }
+
+    if (play.Sim)
+        return Ascension::RunPlaytestSim(play);
 
     Emerald::ApplicationSpec spec;
     spec.Window.Title = "Ascension";
