@@ -4,6 +4,7 @@
     { "id": "uncommon", "name": "Uncommon", "color": "#5EC45E" },
     { "id": "rare", "name": "Rare", "color": "#4A90E2" },
     { "id": "epic", "name": "Epic", "color": "#A35BD9" },
-    { "id": "legendary", "name": "Legendary", "color": "#F0902E" }
+    { "id": "legendary", "name": "Legendary", "color": "#F0902E" },
+    { "id": "mythic", "name": "Mythic", "color": "#E8503A", "uniquePerType": true }
   ]
 }

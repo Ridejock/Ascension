@@ -193,6 +193,17 @@ void NoteHeal(std::string& text, i32 gained)
     text += ".";
 }
 
+// The "uses" sentence already names the skill. A status with that same name is not
+// repeated. A different name is its own sentence.
+void NoteStatus(std::string& extra, std::string_view skillName, std::string_view statusName)
+{
+    if (statusName == skillName)
+        return;
+    extra += " ";
+    extra += statusName;
+    extra += ".";
+}
+
 void ApplySnap(CombatantState& who, const CombatantSnapshot& shot, bool hero)
 {
     const i32 leastHp = hero ? 1 : 0;
@@ -1715,9 +1726,7 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     for (const AimRef& aim : aims) {
                         if (!Afflict(Aimed(aim), *inflicted))
                             continue;
-                        extra += " ";
-                        extra += inflicted->Name;
-                        extra += ".";
+                        NoteStatus(extra, skill.Name, inflicted->Name);
                     }
                 }
             }
@@ -1781,9 +1790,7 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 for (const AimRef& aim : aims) {
                     if (!Afflict(Aimed(aim), *inflicted))
                         continue;
-                    extra += " ";
-                    extra += inflicted->Name;
-                    extra += ".";
+                    NoteStatus(extra, skill.Name, inflicted->Name);
                 }
             }
         }

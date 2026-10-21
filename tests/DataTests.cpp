@@ -10,6 +10,7 @@
 #include "Ascension/Data/Database.h"
 #include "Check.h"
 #include "GearLine.h"
+#include "SourceTag.h"
 
 namespace {
 
@@ -120,6 +121,12 @@ void TestSample()
           "combat.json supplies the damage rules and focus regen");
     Check(data.GetEnemies().size() == 7, "seven enemies, counting the boss and the shard");
     Check(data.GetItems().size() == 7, "seven items");
+    i32 mythicItems = 0;
+    for (const ItemDef& item : data.GetItems()) {
+        if (item.Rarity == "mythic")
+            ++mythicItems;
+    }
+    Check(mythicItems == 0, "the frozen sample has no mythic item");
     const ShopDef& shop = data.GetShop();
     Check(shop.Id == "pells_provisions" && shop.Name == "Old Pell's Provisions" &&
               shop.Keeper == "Pell Harrow" && shop.BagSlots == 12 && shop.StackSize == 5 &&
@@ -1355,8 +1362,9 @@ void TestDescriptionsResolve()
               GearLine(data, *axe, true).find("Defense -2") != std::string::npos &&
               GearLine(data, *axe, true).find("two handed") != std::string::npos &&
               GearLine(data, *axe, false).find("two handed") == std::string::npos &&
-              GearLine(data, *axe, false).find("Strength +6") != std::string::npos,
-          "rows use stat names, and a worn row skips the handling words");
+              GearLine(data, *axe, false).find("Strength +6") != std::string::npos &&
+              GearLine(data, *axe, true).find("Uncommon") != std::string::npos,
+          "rows use stat names, a worn row skips the handling words, and the rarity name is last");
 }
 
 void RejectClass(const fs::path& dir, const char* klass, const char* part, const char* what)
@@ -1670,6 +1678,49 @@ void TestShippedDescriptions()
     Check(pack != nullptr && pack->Enemies.size() == 3 && pack->Enemies[0] == "dire_wolf" &&
               pack->Enemies[1] == "wolf" && pack->Enemies[2] == "wolf",
           "the wolf pack is one dire wolf leading two wolves");
+
+    i32 mythicItems = 0;
+    const ItemDef* fang = nullptr;
+    for (const ItemDef& item : data.GetItems()) {
+        if (item.Rarity != "mythic")
+            continue;
+        ++mythicItems;
+        fang = &item;
+    }
+    bool fangStocked = false;
+    for (const std::string& id : data.GetShop().Stock) {
+        if (id == "alphas_fang")
+            fangStocked = true;
+    }
+    const SkillDef* fangSkill = data.FindSkill("fang_bloodlust");
+    const EffectDef* fangRage = fangSkill != nullptr ? fangSkill->FindEffect("rage") : nullptr;
+    const bool fangDrop =
+        dire != nullptr && dire->Drops.size() == 1 && dire->Drops[0].Item == "alphas_fang" &&
+        dire->Drops[0].Message == "The Alpha falls. The fang slides free, still warm.";
+    Check(mythicItems == 1 && fang != nullptr && fang->Id == "alphas_fang" &&
+              fang->Slot == GearSlot::Accessory && fang->Icon == "ring" &&
+              data.FindIcon("ring") != nullptr && fang->Bonus.Strength == 2 &&
+              fang->Bonus.Agility == 2 && fang->Value == 80 &&
+              fang->Grants.size() == 1 && fang->Grants[0].Id == "fang_bloodlust" && !fangStocked,
+          "Alpha's Fang is the only mythic, an accessory, and Pell does not sell it");
+    Check(fangSkill != nullptr && fangSkill->Id != "bloodlust" &&
+              fangSkill->Id != "dire_bloodlust" && fangSkill->FocusCost == 1 &&
+              fangSkill->Kind == SkillKind::Active && fangRage != nullptr &&
+              fangRage->Op == EffectOp::ApplyStatus && fangRage->Status == "bloodlust",
+          "fang_bloodlust costs 1 and applies the Bloodlust status");
+    Check(fangDrop, "the dire wolf's drop line is the approved sentence");
+
+    const ClassDef* fighter = data.FindClass("fighter");
+    const std::vector<std::string> worn{"alphas_fang"};
+    const std::vector<HeroGrant> grants =
+        fighter != nullptr ? data.HeroGrants(*fighter, worn) : std::vector<HeroGrant>{};
+    const HeroGrant* fangGrant = FindGrant(grants, "fang_bloodlust");
+    const HeroGrant* strike = FindGrant(grants, "strike");
+    const std::string tag = fangGrant != nullptr ? SourceTag(data, *fangGrant) : std::string();
+    Check(tag == "  (Alpha's Fang)" && tag.find('[') == std::string::npos &&
+              tag.find(']') == std::string::npos,
+          "an item skill is tagged in parentheses");
+    Check(strike != nullptr && SourceTag(data, *strike).empty(), "a class skill has no source tag");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
@@ -1756,6 +1807,13 @@ void CheckSampleIcons(const Database& data, const char* where)
     Check(legendary != nullptr && legendary->Red == 240 && legendary->Green == 144 &&
               legendary->Blue == 46,
           "legendary is #F0902E");
+    const RarityDef* mythic = data.FindRarity("mythic");
+    Check(mythic != nullptr && mythic->Name == "Mythic" && mythic->UniquePerType &&
+              mythic->Red == 232 && mythic->Green == 80 && mythic->Blue == 58,
+          "mythic is #E8503A and one item per slot");
+    Check(common != nullptr && !common->UniquePerType && legendary != nullptr &&
+              !legendary->UniquePerType,
+          "common and legendary may repeat a slot");
     const ItemDef* sword = data.FindItem("rusty_sword");
     const ItemDef* axe = data.FindItem("notched_greataxe");
     const ItemDef* shield = data.FindItem("oak_shield");
@@ -1813,13 +1871,13 @@ void TestIcons()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "items.json", "\"rarity\": \"common\"", "\"rarity\": \"mythic\"");
+        ReplaceInFile(copy.Path / "items.json", "\"rarity\": \"common\"", "\"rarity\": \"fabled\"");
         Database data(copy.Path);
         DataError error;
         Check(!data.Load(&error), "an unknown rarity is rejected");
         CheckHas(error.Message, "items.json", "the error names the file");
         CheckHas(error.Message, "rusty_sword", "the error names the item");
-        CheckHas(error.Message, "mythic", "the error names the rarity");
+        CheckHas(error.Message, "fabled", "the error names the rarity");
     }
     {
         TempCopy copy;
@@ -1890,6 +1948,157 @@ void TestTunedAndRankedText()
     }
 }
 
+const char* kItemTail = "      \"focus\": 4,\n      \"value\": 15\n    }\n  ]\n}";
+
+std::string Piece(const char* id, const char* slot, const char* rarity)
+{
+    return std::string("    {\n      \"id\": \"") + id +
+           "\",\n      \"name\": \"Test\",\n      \"description\": \"A test piece.\",\n"
+           "      \"icon\": \"sword\",\n      \"rarity\": \"" +
+           rarity + "\",\n      \"slot\": \"" + slot +
+           "\",\n      \"bonus\": { \"strength\": 1 },\n      \"value\": 1\n    }";
+}
+
+void AppendItems(const fs::path& dir, std::string_view pieces)
+{
+    const std::string to = std::string("      \"focus\": 4,\n      \"value\": 15\n    },\n") +
+                           std::string(pieces) + "\n  ]\n}";
+    ReplaceInFile(dir / "items.json", kItemTail, to);
+}
+
+void SetWolfDrops(const fs::path& dir, std::string_view drops)
+{
+    const std::string to =
+        std::string("\"skills\": [\"bite\"],\n      \"experience\": 8,\n      \"gold\": 3,\n"
+                    "      \"drops\": ") +
+        std::string(drops);
+    ReplaceInFile(dir / "enemies.json",
+                  "\"skills\": [\"bite\"],\n      \"experience\": 8,\n      \"gold\": 3", to);
+}
+
+void TestMythicUnique()
+{
+    {
+        TempCopy copy;
+        AppendItems(copy.Path, Piece("alpha", "weapon", "mythic"));
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "one mythic weapon loads");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        const ItemDef* alpha = data.FindItem("alpha");
+        Check(alpha != nullptr && alpha->Rarity == "mythic" && alpha->Slot == GearSlot::Weapon,
+              "the made-up mythic weapon is kept");
+    }
+    {
+        TempCopy copy;
+        AppendItems(copy.Path,
+                    Piece("alpha", "weapon", "mythic") + ",\n" + Piece("beta", "weapon", "mythic"));
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "two mythic weapons fail");
+        CheckHas(error.Message, "items.json", "the error names the file");
+        CheckHas(error.Message, "alpha", "the error names the first weapon");
+        CheckHas(error.Message, "beta", "the error names the second weapon");
+        CheckHas(error.Message, "mythic", "the error names the rarity");
+        CheckHas(error.Message, "weapon", "the error names the slot");
+        CheckHas(error.Message, "slot", "the error says slot");
+    }
+    {
+        TempCopy copy;
+        AppendItems(copy.Path,
+                    Piece("alpha", "weapon", "mythic") + ",\n" + Piece("gamma", "armor", "mythic"));
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "mythic weapon and armor load");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        Check(data.FindItem("alpha") != nullptr && data.FindItem("gamma") != nullptr,
+              "different slots may each have one mythic");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "rarities.json", "\"uniquePerType\": true",
+                      "\"uniquePerType\": true },\n"
+                      "    { \"id\": \"relic\", \"name\": \"Relic\", \"color\": \"#E8503A\", "
+                      "\"uniquePerType\": true");
+        AppendItems(copy.Path,
+                    Piece("alpha", "weapon", "relic") + ",\n" + Piece("beta", "weapon", "relic"));
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "two relic weapons fail");
+        CheckHas(error.Message, "relic", "the error names the flagged rarity");
+        CheckHas(error.Message, "alpha", "the error names the first relic weapon");
+        CheckHas(error.Message, "beta", "the error names the second relic weapon");
+        Check(error.Message.find("mythic") == std::string::npos,
+              "the uniqueness error follows the flag, not the id mythic");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "rarities.json", "\"uniquePerType\": true",
+                      "\"uniquePerType\": \"yes\"");
+        TestRejected(copy.Path, "rarities.json", "uniquePerType",
+                     "uniquePerType must be true or false");
+    }
+}
+
+void TestDropEntries()
+{
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[\"minor_potion\"]");
+        TestRejected(copy.Path, "enemies.json", "objects", "a drop id string is rejected");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\", \"note\": \"hi\" }]");
+        TestRejected(copy.Path, "enemies.json", "note", "a drop rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\", \"message\": \"\" }]");
+        TestRejected(copy.Path, "enemies.json", "message", "an empty drop message is rejected");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\" }, { \"item\": \"minor_potion\" }]");
+        TestRejected(copy.Path, "enemies.json", "twice", "a drop item cannot be listed twice");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[]");
+        TestRejected(copy.Path, "enemies.json", "at least one", "drops cannot be an empty list");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"no_such\" }]");
+        TestRejected(copy.Path, "enemies.json", "no_such", "a drop must name an item");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\", \"message\": \"A cold vial.\" }]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a drop message loads");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        const EnemyDef* wolf = data.FindEnemy("wolf");
+        Check(wolf != nullptr && wolf->Drops.size() == 1 && wolf->Drops[0].Item == "minor_potion" &&
+                  wolf->Drops[0].Message == "A cold vial.",
+              "the drop keeps the item and the message from the file");
+    }
+    {
+        TempCopy copy;
+        SetWolfDrops(copy.Path, "[{ \"item\": \"minor_potion\" }]");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a drop without a message loads");
+        const EnemyDef* wolf = data.FindEnemy("wolf");
+        Check(wolf != nullptr && wolf->Drops.size() == 1 && wolf->Drops[0].Message.empty(),
+              "an omitted message stays empty");
+    }
+}
+
 } // namespace
 
 void TestEveryRequiredFoe()
@@ -1913,10 +2122,10 @@ void TestAiValidation()
 {
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "enemies.json",
-                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
-                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
-                      "      \"ai\": [ { \"if\": { \"mood\": \"angry\" }, \"do\": \"pattern\" } ],");
+        ReplaceInFile(
+            copy.Path / "enemies.json", "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+            "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+            "      \"ai\": [ { \"if\": { \"mood\": \"angry\" }, \"do\": \"pattern\" } ],");
         TestRejected(copy.Path, "enemies.json", "mood", "an ai condition rejects an unknown field");
     }
     {
@@ -1977,11 +2186,10 @@ void TestAiValidation()
         DataError error;
         Check(data.Load(&error), "an ally health rule loads");
         const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
-        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
-                            sentry->Ai[0].Action == AiAction::Skill &&
-                            sentry->Ai[0].Skill == "harden" &&
-                            sentry->Ai[0].If.AllyHpAtMost == 40 &&
-                            !sentry->Ai[0].If.TargetHpAtMost.has_value();
+        const bool loaded =
+            sentry != nullptr && sentry->Ai.size() == 1 &&
+            sentry->Ai[0].Action == AiAction::Skill && sentry->Ai[0].Skill == "harden" &&
+            sentry->Ai[0].If.AllyHpAtMost == 40 && !sentry->Ai[0].If.TargetHpAtMost.has_value();
         Check(loaded, "allyHpAtMost is stored as the combined-ally percent");
     }
     {
@@ -1995,12 +2203,11 @@ void TestAiValidation()
         DataError error;
         Check(data.Load(&error), "a test foe rule loads");
         const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
-        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
-                            sentry->Ai[0].Action == AiAction::Skill &&
-                            sentry->Ai[0].Skill == "harden" &&
-                            sentry->Ai[0].If.TargetStatus == "exposed" &&
-                            sentry->Ai[0].If.Next == "thrust" &&
-                            !sentry->Ai[0].If.TargetGuardAtLeast.has_value();
+        const bool loaded =
+            sentry != nullptr && sentry->Ai.size() == 1 &&
+            sentry->Ai[0].Action == AiAction::Skill && sentry->Ai[0].Skill == "harden" &&
+            sentry->Ai[0].If.TargetStatus == "exposed" && sentry->Ai[0].If.Next == "thrust" &&
+            !sentry->Ai[0].If.TargetGuardAtLeast.has_value();
         Check(loaded, "the loaded rule keeps the skill, Exposed, and the pattern head");
     }
 }
@@ -2021,6 +2228,8 @@ int main()
     TestDescriptionsResolve();
     TestShippedDescriptions();
     TestIcons();
+    TestMythicUnique();
+    TestDropEntries();
     TestBadDescriptions();
     TestTunedAndRankedText();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);

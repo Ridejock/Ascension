@@ -1913,6 +1913,39 @@ void TestAllyHp()
         std::printf("    solo: %s\n", soloAct.Text.c_str());
 }
 
+void TestStatusNameOnce()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the status log");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string why;
+
+    Battle fang(data, Sides({CombatantSide::Player}));
+    fang.SetWornItems({"alphas_fang"});
+    Check(fang.Start("fighter", 1, "wolf", why), "the fang fight starts");
+    const ActionResult cast = fang.UseSkill("fang_bloodlust");
+    Check(cast.Accepted && cast.Text == "Fighter uses Bloodlust." &&
+              Holds(fang.Player(), "bloodlust"),
+          "a status with the skill's name is logged once");
+    if (cast.Text != "Fighter uses Bloodlust.")
+        std::printf("    fang: %s\n", cast.Text.c_str());
+
+    Battle wolf(data, std::make_unique<AgilityRoundModel>());
+    Check(wolf.Start("fighter", 1, "dire_wolf", why), "the dire wolf fight starts");
+    wolf.SetPlayerHp(wolf.Player().MaxHp * 45 / 100);
+    Check(wolf.Actor() == CombatantSide::Enemy, "the dire wolf acts first");
+    const ActionResult rage = wolf.EnemyAct();
+    Check(rage.Accepted && rage.SkillId == "dire_bloodlust" &&
+              rage.Text == "Dire Wolf uses Bloodlust.",
+          "another skill that shares its status name is also logged once");
+    if (rage.Text != "Dire Wolf uses Bloodlust.")
+        std::printf("    dire: %s\n", rage.Text.c_str());
+}
+
 } // namespace
 
 int main()
@@ -1949,6 +1982,7 @@ int main()
     TestLoggedHeal();
     TestFoeRules();
     TestAllyHp();
+    TestStatusNameOnce();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

@@ -170,6 +170,17 @@
       ]
     },
     {
+      "id": "fang_bloodlust",
+      "name": "Bloodlust",
+      "description": "Call on the fang for {rage.status}: {rage.status.dealt} percent more damage for the rest of the fight.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 1,
+      "effects": [
+        { "id": "rage", "trigger": "onUse", "op": "applyStatus", "status": "bloodlust" }
+      ]
+    },
+    {
       "id": "bite",
       "name": "Bite",
       "description": "A quick snap.",

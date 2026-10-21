@@ -90,6 +90,14 @@ public:
     // Removes one consumable after the fight has accepted the drink.
     bool Take(i32 bagIndex, std::string& error);
 
+    // Grants each killed foe's drops, in that order. A rarity with UniquePerType is claimed
+    // in `found` when this call stores it, or when the hero already holds it, and a later
+    // call skips that id even after it leaves the bag. Other drops are offered every call.
+    // A full bag stores nothing and leaves a unique drop unclaimed. A stored drop with a
+    // message uses that text as its log line. Otherwise the line is "Found Name."
+    [[nodiscard]] std::vector<std::string> TakeDrops(std::span<const std::string> enemyIds,
+                                                     std::vector<std::string>& found);
+
     // Foe ids the run has defeated. Buy refuses an item whose requires list is not covered.
     // The shop screen reads the same list. An empty list offers only ungated stock.
     void SetDefeated(std::vector<std::string> defeated);

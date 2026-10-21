@@ -88,7 +88,13 @@
       "experience": 20,
       "gold": 3,
       "unique": true,
-      "color": "#3A3A3A"
+      "color": "#3A3A3A",
+      "drops": [
+        {
+          "item": "alphas_fang",
+          "message": "The Alpha falls. The fang slides free, still warm."
+        }
+      ]
     },
     {
       "id": "barrow_sentry",

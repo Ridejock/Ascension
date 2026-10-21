@@ -373,6 +373,10 @@ void Store(const RunState& run, Emerald::SaveData& data)
     for (i32 index = 0; index < static_cast<i32>(run.Defeated.size()); ++index)
         data.SetString(Key("defeated", index, {}), run.Defeated[static_cast<usize>(index)]);
 
+    data.SetInt("found.count", static_cast<i32>(run.Found.size()));
+    for (i32 index = 0; index < static_cast<i32>(run.Found.size()); ++index)
+        data.SetString(Key("found", index, {}), run.Found[static_cast<usize>(index)]);
+
     data.SetInt("position", run.Position);
     data.SetString("direct", run.DirectEnemy);
     data.SetString("standing", StandingName(run.Standing));
@@ -410,8 +414,10 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     const i32 sources = data.GetInt("source.count", 0);
     const i32 bags = data.GetInt("bag.count", 0);
     const i32 foes = data.GetInt("defeated.count", 0);
+    const i32 found = data.GetInt("found.count", 0);
     if (!CountOk(skills, error) || !CountOk(picks, error) || !CountOk(steps, error) ||
-        !CountOk(sources, error) || !CountOk(bags, error) || !CountOk(foes, error))
+        !CountOk(sources, error) || !CountOk(bags, error) || !CountOk(foes, error) ||
+        !CountOk(found, error))
         return false;
 
     run.Career.Practiced.resize(static_cast<usize>(skills));
@@ -478,6 +484,16 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
             return false;
         }
         run.Defeated[static_cast<usize>(index)] = id;
+    }
+
+    run.Found.resize(static_cast<usize>(found));
+    for (i32 index = 0; index < found; ++index) {
+        const std::string id = data.GetString(Key("found", index, {}));
+        if (id.empty()) {
+            error = "the save's found items are damaged";
+            return false;
+        }
+        run.Found[static_cast<usize>(index)] = id;
     }
 
     run.Position = data.GetInt("position", 0);

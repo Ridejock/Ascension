@@ -6,6 +6,7 @@
 
 #include "FoeAlert.h"
 #include "GearLine.h"
+#include "SourceTag.h"
 
 #include <SDL3/SDL.h>
 
@@ -287,35 +288,6 @@ const SkillGrant* OfferedGrant(const Database& data, std::string_view classId,
     return nullptr;
 }
 
-// "  [Rusty Sword]" for a skill a worn piece gives. A class skill with no other source has
-// no tag. A merge lists every source, class first.
-std::string SourceTag(const Database& data, const HeroGrant& grant)
-{
-    if (grant.Origins.size() == 1 && grant.Origins[0].Source == GrantSource::Class)
-        return {};
-    std::string tag;
-    for (const GrantOrigin& origin : grant.Origins) {
-        std::string name = origin.Id;
-        if (origin.Source == GrantSource::Item) {
-            const ItemDef* piece = data.FindItem(origin.Id);
-            if (piece != nullptr)
-                name = piece->Name;
-        } else {
-            const ClassDef* heroClass = data.FindClass(origin.Id);
-            if (heroClass != nullptr)
-                name = heroClass->Name;
-        }
-        if (!tag.empty())
-            tag += " ";
-        tag += "[";
-        tag += name;
-        tag += "]";
-    }
-    if (tag.empty())
-        return {};
-    return "  " + tag;
-}
-
 std::string StatusLine(const Database& data, const CombatantState& who)
 {
     std::string line;
@@ -462,6 +434,12 @@ void AscensionApp::AwardVictory()
         Note(std::to_string(amount) + " XP.");
     if (gold > 0)
         Note(std::to_string(gold) + " gold.");
+    std::vector<std::string> killed;
+    for (const CombatantState& foe : m_Battle->Enemies())
+        killed.push_back(foe.Id);
+    const std::vector<std::string> found = m_Inventory.TakeDrops(killed, m_Found);
+    for (const std::string& line : found)
+        Note(line);
     if (grant.LevelAfter > grant.LevelBefore)
         Note("Level " + std::to_string(grant.LevelAfter) + ".");
     if (grant.ChoiceOpened) {
@@ -534,6 +512,7 @@ void AscensionApp::BeginFight()
     }
     m_Log.clear();
     m_StartError.clear();
+    // R and N start the fight over. A unique drop already in m_Found is not granted again.
     m_XpAwarded = false;
     m_Camp = false;
     m_Picking = false;
@@ -1043,21 +1022,14 @@ bool AscensionApp::WriteSave()
     m_Hero.ExportCareer(run.Career);
     m_Inventory.ExportBag(run.Bag);
     run.Defeated = m_Defeated;
+    run.Found = m_Found;
     run.Position = m_EnemyIndex;
     run.DirectEnemy = m_DirectEnemy;
     run.Standing = m_Standing;
     if (m_Battle != nullptr) {
-        if (m_Battle->Result() == BattleResult::Victory)
-            run.Standing = RunStanding::Victory;
-        else if (m_Battle->Result() == BattleResult::Defeat)
-            run.Standing = RunStanding::Defeat;
-        else {
-            run.Standing = RunStanding::Ongoing;
-            run.ResourcesKnown = true;
-            run.Hp = m_Battle->Player().Hp;
-            run.Focus = m_Battle->Player().Focus;
+        RememberOutcome(run, m_Battle->Result(), m_Battle->Player().Hp, m_Battle->Player().Focus);
+        if (m_Battle->Result() == BattleResult::Ongoing)
             run.Fight = m_Battle->ExportFight();
-        }
     }
     RunSave saves(SaveFolder());
     std::string error;
@@ -1083,13 +1055,14 @@ bool AscensionApp::TryResume(std::string& error)
         !m_Inventory.ImportBag(loaded.Run.Bag, error))
         return false;
     m_Defeated = loaded.Run.Defeated;
+    m_Found = loaded.Run.Found;
     m_Inventory.SetDefeated(m_Defeated);
     m_EnemyIndex = loaded.Run.Position < 0 ? 0 : loaded.Run.Position;
     m_DirectEnemy = loaded.Run.DirectEnemy;
     m_Standing = loaded.Run.Standing;
     m_ResumeResources = false;
     m_ResumeFight = {};
-    if (loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.ResourcesKnown) {
+    if (ResumeWound(loaded.Run)) {
         m_ResumeResources = true;
         m_ResumeHp = loaded.Run.Hp;
         m_ResumeFocus = loaded.Run.Focus;
