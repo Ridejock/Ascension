@@ -748,7 +748,8 @@ void TestSaveQuitLoadKeys()
           "the commands cover save, quit, and load");
 }
 
-// Three Strikes, then the rumor: Down onto "Heard any rumors?", E through that chain, Down onto Leave.
+// Three Strikes, then the rumor: Down onto "Heard any rumors?", E through that chain, Down onto
+// Leave.
 void TestPellRumorKeys()
 {
     const fs::path root = ASCENSION_SOURCE_DIR;
@@ -757,16 +758,17 @@ void TestPellRumorKeys()
     std::ifstream commandsIn(commandsPath);
     const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
                                std::istreambuf_iterator<char>());
-    Check(commandsIn && commands.find("--keys-file playtest/dialogue/pell-rumor.keys") != std::string::npos,
+    Check(commandsIn &&
+              commands.find("--keys-file playtest/dialogue/pell-rumor.keys") != std::string::npos,
           "the dialogue command names the rumor key file");
 
     std::string why;
     PlaytestOptions options;
     Check(Parse({"--keys-file", keysPath.string()}, options, why), "the rumor key file parses");
     const SDL_Scancode expect[] = {
-        SDL_SCANCODE_1, SDL_SCANCODE_1, SDL_SCANCODE_1, SDL_SCANCODE_I, SDL_SCANCODE_DOWN,
-        SDL_SCANCODE_E, SDL_SCANCODE_E, SDL_SCANCODE_E, SDL_SCANCODE_E, SDL_SCANCODE_DOWN,
-        SDL_SCANCODE_E,
+        SDL_SCANCODE_1,    SDL_SCANCODE_1,    SDL_SCANCODE_1, SDL_SCANCODE_I,
+        SDL_SCANCODE_DOWN, SDL_SCANCODE_E,    SDL_SCANCODE_E, SDL_SCANCODE_E,
+        SDL_SCANCODE_E,    SDL_SCANCODE_DOWN, SDL_SCANCODE_E,
     };
     Check(options.Keys.size() == std::size(expect), "the rumor walk is eleven keys");
     if (options.Keys.size() == std::size(expect)) {
@@ -781,7 +783,8 @@ void TestPellRumorKeys()
     Check(TalkCommandFromKey(SDL_SCANCODE_UP) == TalkCommand::Up, "Up moves the talk menu");
     Check(TalkCommandFromKey(SDL_SCANCODE_E) == TalkCommand::Confirm, "E speaks");
     Check(TalkCommandFromKey(SDL_SCANCODE_RETURN) == TalkCommand::Confirm, "Enter speaks");
-    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_UP) == TalkCommand::Up, "the d-pad moves the menu");
+    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_UP) == TalkCommand::Up,
+          "the d-pad moves the menu");
     Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_DOWN) == TalkCommand::Down,
           "the d-pad moves down");
     Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_SOUTH) == TalkCommand::Confirm,
@@ -798,6 +801,28 @@ const SimRateRow* FindRate(const std::vector<SimRateRow>& rows, std::string_view
             return &row;
     }
     return nullptr;
+}
+
+// Alpha's Fang adds strength on top of the charm's agility, and its Bloodlust button
+// is spent only when that status shortens the kill. A fang row must still clear, and
+// it must not finish with less health or in more turns than the same build without it.
+void CheckFangNotWorse(const std::vector<SimRateRow>& rows, const char* fight)
+{
+    for (const SimRateRow& fang : rows) {
+        if (!fang.Fang)
+            continue;
+        const SimRateRow* plain = FindRate(rows, fang.Build, fang.Focus, false);
+        const std::string label = std::string(fight) + " " + fang.Build + " " + fang.Focus;
+        Check(plain != nullptr && plain->Ok && fang.Ok && fang.Runs == plain->Runs,
+              (label + " has a matching row").c_str());
+        if (plain == nullptr || !plain->Ok || !fang.Ok)
+            continue;
+        Check(plain->Wins == plain->Runs, (label + " still clears without the fang").c_str());
+        Check(fang.Wins == fang.Runs && fang.Wins >= plain->Wins,
+              (label + " still clears with the fang").c_str());
+        Check(fang.SumHp >= plain->SumHp, (label + " fang health is not lower").c_str());
+        Check(fang.SumTurns <= plain->SumTurns, (label + " fang does not take more turns").c_str());
+    }
 }
 
 void TestSimRates()
@@ -876,6 +901,7 @@ void TestSimRates()
     Check(dire != nullptr && dire->Ok && dire->Runs == 1, "dire-wolf focus is one fight");
     Check(wolfOpen != nullptr && wolfOpen->Ok && wolfOpen->Runs == 2,
           "wolf default targeting uses the seeds");
+    CheckFangNotWorse(wolves, "wolf pack");
 
     query.EncounterId = "barrow_sentry";
     query.Runs = 5;
@@ -885,6 +911,7 @@ void TestSimRates()
     Check(static_cast<i32>(sentry.size()) == 10, "five builds and the fang, one sentry row each");
     for (const SimRateRow& row : sentry)
         Check(row.Ok && row.Runs == 1, "one foe does not change with the seed");
+    CheckFangNotWorse(sentry, "sentry");
 
     query.EncounterId = "bear";
     const std::vector<SimRateRow> bears = SimulateEncounterRates(data, query, error);
@@ -892,6 +919,7 @@ void TestSimRates()
     Check(static_cast<i32>(bears.size()) == 10, "five builds and the fang, one bear row each");
     for (const SimRateRow& row : bears)
         Check(row.Ok && row.Runs == 1 && row.Error.empty(), "the bear is one fight");
+    CheckFangNotWorse(bears, "bear");
 
     query.EncounterId = "not_a_fight";
     const std::vector<SimRateRow> missing = SimulateEncounterRates(data, query, error);

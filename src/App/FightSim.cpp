@@ -108,17 +108,271 @@ bool FoeIsFinishing(const Battle& battle)
     return false;
 }
 
-// Commit to the marked foe. Buff once, heal or guard only when health is low, and
-// otherwise spend the best single-target attack that focus can pay. Cleave is left
-// unused so the kill order is the thing being measured.
+i32 ArmorOf(const CombatantState& who)
+{
+    const i64 defense = static_cast<i64>(who.Stats.Defense) + who.BonusDefense;
+    if (defense < 0)
+        return 0;
+    if (defense > 999999)
+        return 999999;
+    return static_cast<i32>(defense);
+}
+
+// The same missing-health bonus Battle adds when a blow scales. 0 at full health.
+i32 MissingStat(const std::vector<HeroGrant>& grants, const CombatantState& who,
+                std::string_view statId)
+{
+    i32 bonus = 0;
+    for (const HeroGrant& grant : grants) {
+        for (const EffectDef& effect : grant.Skill.Effects) {
+            if (effect.Trigger != EffectTrigger::Always || effect.Op != EffectOp::StatPerMissingHp)
+                continue;
+            if (!effect.Stat.has_value() || *effect.Stat != statId)
+                continue;
+            bonus += MissingHpBonus(effect.Amount.value_or(0), effect.Per.value_or(0),
+                                    effect.Max.value_or(0), who.Hp, who.MaxHp);
+        }
+    }
+    return bonus;
+}
+
+i32 ScalingOf(const std::vector<HeroGrant>& grants, const CombatantState& who,
+              const EffectDef& effect)
+{
+    if (!effect.Scaling.has_value())
+        return 0;
+    i32 stat = *effect.Scaling == "defense" ? ArmorOf(who) : who.Stats.Get(*effect.Scaling);
+    stat += MissingStat(grants, who, *effect.Scaling);
+    return stat;
+}
+
+i32 RankedBase(const Hero& hero, const Database& data, const SkillDef& skill, i32 base)
+{
+    i32 rank = hero.RankOf(skill.Id);
+    if (rank < 1)
+        rank = 1;
+    i64 power = static_cast<i64>(base);
+    power += static_cast<i64>(rank - 1) * data.GetProgress().PowerPerRank;
+    if (power < 0)
+        power = 0;
+    if (power > 9999)
+        power = 9999;
+    return static_cast<i32>(power);
+}
+
+bool SkillDealsDamage(const SkillDef& skill)
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Damage)
+            return true;
+    }
+    return false;
+}
+
+bool AppliesStatus(const SkillDef& skill, std::string_view id)
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value() && *effect.Status == id)
+            return true;
+    }
+    return false;
+}
+
+// Dealt percent from statuses this skill applies that are not already up. A second
+// effect that names the same status does not add the percent again.
+i32 UnheldDealtPercent(const Database& data, const CombatantState& who, const SkillDef& skill)
+{
+    i32 percent = 0;
+    std::vector<std::string> seen;
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger != EffectTrigger::OnUse || effect.Op != EffectOp::ApplyStatus)
+            continue;
+        if (!effect.Status.has_value() || Holds(who, *effect.Status))
+            continue;
+        bool repeat = false;
+        for (const std::string& id : seen) {
+            if (id == *effect.Status)
+                repeat = true;
+        }
+        if (repeat)
+            continue;
+        seen.emplace_back(*effect.Status);
+        const StatusDef* status = data.FindStatus(*effect.Status);
+        if (status != nullptr && status->DamageDealtPercent > 0)
+            percent += status->DamageDealtPercent;
+    }
+    return percent;
+}
+
+i32 AppliedTakenPercent(const Database& data, const SkillDef& skill, const CombatantState& foe)
+{
+    i32 percent = 0;
+    std::vector<std::string> seen;
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Op != EffectOp::ApplyStatus || !effect.Status.has_value())
+            continue;
+        if (Holds(foe, *effect.Status))
+            continue;
+        bool repeat = false;
+        for (const std::string& id : seen) {
+            if (id == *effect.Status)
+                repeat = true;
+        }
+        if (repeat)
+            continue;
+        seen.emplace_back(*effect.Status);
+        const StatusDef* status = data.FindStatus(*effect.Status);
+        if (status != nullptr)
+            percent += status->DamageTakenPercent;
+    }
+    return percent;
+}
+
+// One use of `attack` against `foe`. Steady counts a conditional blow once this skill
+// has applied the status it asks for, which is the second rend or the second bash.
+i32 BlowDamage(const Database& data, const Hero& hero, const std::vector<HeroGrant>& grants,
+               const CombatantState& player, const SkillDef& attack, const CombatantState& foe,
+               i32 dealtPercent, bool steady)
+{
+    i32 taken = StatusTakenPercent(foe, data.GetStatuses());
+    if (steady)
+        taken += AppliedTakenPercent(data, attack, foe);
+    const CombatRules& rules = data.GetRules();
+    i32 total = 0;
+    for (const EffectDef& effect : attack.Effects) {
+        if (effect.Trigger != EffectTrigger::OnUse || effect.Op != EffectOp::Damage)
+            continue;
+        if (effect.IfTargetHas.has_value()) {
+            const bool held = Holds(foe, *effect.IfTargetHas);
+            const bool coming = steady && AppliesStatus(attack, *effect.IfTargetHas);
+            if (!held && !coming)
+                continue;
+        }
+        StrikeQuery hit;
+        hit.Power = RankedBase(hero, data, attack, effect.Power.value_or(0));
+        hit.ScalingStat = ScalingOf(grants, player, effect);
+        hit.Defense = ArmorOf(foe);
+        i32 raw = StrikeDamage(hit, rules);
+        if (dealtPercent != 0)
+            raw = ScalePercent(raw, 100 + dealtPercent);
+        raw = GuardedDamage(raw, foe.GuardPercent);
+        if (taken != 0)
+            raw = ScalePercent(raw, 100 + taken);
+        total += raw;
+    }
+    return total;
+}
+
+// Attacks to finish one foe: the first blow, then the steady blow after its setup lands.
+i32 HitsToFell(i32 hp, i32 opening, i32 steady)
+{
+    if (hp <= 0)
+        return 0;
+    if (opening <= 0)
+        opening = steady;
+    if (steady <= 0)
+        steady = opening;
+    if (opening <= 0)
+        return 1000000;
+    if (opening >= hp)
+        return 1;
+    return 1 + (hp - opening + steady - 1) / steady;
+}
+
+const SkillDef* SustainedAttack(const std::vector<HeroGrant>& grants, i32 focus)
+{
+    if (CanCast(grants, "rend", focus))
+        return FindActive(grants, "rend");
+    if (CanCast(grants, "shield_bash", focus))
+        return FindActive(grants, "shield_bash");
+    if (CanCast(grants, "strike", focus))
+        return FindActive(grants, "strike");
+    return nullptr;
+}
+
+i32 AttacksToClear(const Battle& battle, const Database& data, const Hero& hero,
+                   const std::vector<HeroGrant>& grants, const SkillDef& attack, i32 dealtPercent)
+{
+    const CombatantState& player = battle.Player();
+    i32 hits = 0;
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (!foe.Alive())
+            continue;
+        const i32 opening =
+            BlowDamage(data, hero, grants, player, attack, foe, dealtPercent, false);
+        const i32 steady = BlowDamage(data, hero, grants, player, attack, foe, dealtPercent, true);
+        hits += HitsToFell(foe.Hp, opening, steady);
+    }
+    return hits;
+}
+
+// Rage is spent while health is high, on its own rule. That status percent is already
+// on the attacks either way, so a gear buff has to pay on top of it.
+i32 CommittedDealt(const Battle& battle, const Database& data, const std::vector<HeroGrant>& grants,
+                   i32 focus)
+{
+    const CombatantState& player = battle.Player();
+    if (HpPercent(player.Hp, player.MaxHp) <= 50)
+        return 0;
+    if (!CanCast(grants, "rage", focus))
+        return 0;
+    const SkillDef* rage = FindActive(grants, "rage");
+    if (rage == nullptr)
+        return 0;
+    return UnheldDealtPercent(data, player, *rage);
+}
+
+// True when spending this turn on the buff, then attacking, is strictly fewer attacks
+// than attacking now. The percent is the status's damageDealtPercent, not a fixed 25.
+bool DealtBuffPays(const Battle& battle, const Database& data, const Hero& hero,
+                   const std::vector<HeroGrant>& grants, i32 focus, i32 extraDealt)
+{
+    const SkillDef* attack = SustainedAttack(grants, focus);
+    if (attack == nullptr || extraDealt <= 0)
+        return false;
+    const i32 dealt = StatusDealtPercent(battle.Player(), data.GetStatuses()) +
+                      CommittedDealt(battle, data, grants, focus);
+    const i32 plain = AttacksToClear(battle, data, hero, grants, *attack, dealt);
+    const i32 buffed = AttacksToClear(battle, data, hero, grants, *attack, dealt + extraDealt);
+    return buffed + 1 < plain;
+}
+
+// A gear self-buff that only raises damage dealt. Rage is left to the rule below so a
+// class button still goes out while health is high. Anything else is spent only when
+// its status percent pays the turn back.
+std::string_view OpeningBuff(const Battle& battle, const std::vector<HeroGrant>& grants,
+                             const Database& data, const Hero& hero, i32 focus)
+{
+    const CombatantState& player = battle.Player();
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Id == "rage" || skill.Kind != SkillKind::Active ||
+            skill.Target != SkillTarget::Self)
+            continue;
+        if (skill.FocusCost > focus || SkillDealsDamage(skill))
+            continue;
+        const i32 extra = UnheldDealtPercent(data, player, skill);
+        if (extra <= 0)
+            continue;
+        if (DealtBuffPays(battle, data, hero, grants, focus, extra))
+            return skill.Id;
+    }
+    return {};
+}
+
+// Commit to the marked foe. A damage buff is spent only when it shortens the kill.
+// Heal or guard only when health is low, and otherwise spend the best single-target
+// attack that focus can pay. Cleave is left unused so the kill order is the thing
+// being measured.
 std::string_view ChoosePlayerSkill(const Battle& battle, const std::vector<HeroGrant>& grants,
-                                   i32 perTurn)
+                                   const Database& data, const Hero& hero, i32 perTurn)
 {
     const CombatantState& player = battle.Player();
     const i32 focus = SpendableFocus(player, perTurn);
     const i32 percent = HpPercent(player.Hp, player.MaxHp);
-    if (CanCast(grants, "fang_bloodlust", focus) && !Holds(player, "bloodlust"))
-        return "fang_bloodlust";
+    const std::string_view buff = OpeningBuff(battle, grants, data, hero, focus);
+    if (!buff.empty())
+        return buff;
     if (CanCast(grants, "rage", focus) && !Holds(player, "fury") && percent > 50)
         return "rage";
     const bool finishing = FoeIsFinishing(battle);
@@ -349,7 +603,7 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
             continue;
         }
         ++row.PlayerTurns;
-        std::string_view skill = ChoosePlayerSkill(battle, grants, perTurn);
+        std::string_view skill = ChoosePlayerSkill(battle, grants, data, hero, perTurn);
         i32 seat = ChooseSeat(battle, spec, state);
         if (skill == "heavy_blow") {
             const i32 winding = WindingSeat(battle);
