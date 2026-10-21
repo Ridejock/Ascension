@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -811,6 +812,45 @@ void TestGenericDrop()
     }
 }
 
+void TestVictoryHp()
+{
+    Database data = Sample();
+    if (!data.IsLoaded())
+        return;
+    std::string why;
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    Check(battle.Start("fighter", 1, "wolf", why), "the victory fight starts");
+    Check(battle.EnemyAct().Accepted, "the wolf bites before the win");
+    const i32 wounded = battle.Player().Hp;
+    Check(wounded > 0 && wounded < battle.Player().MaxHp, "the bite leaves a wound");
+    for (i32 step = 0; step < 12 && battle.Result() == BattleResult::Ongoing; ++step) {
+        if (battle.Actor() == CombatantSide::Player)
+            battle.UseSkill("strike");
+        else
+            battle.EnemyAct();
+    }
+    Check(battle.Result() == BattleResult::Victory && battle.Player().Hp > 0 &&
+              battle.Player().Hp < battle.Player().MaxHp,
+          "the win leaves the hero alive and still wounded");
+
+    Hero hero = StartHero(data);
+    RunState run = Capture(hero, StartBag(data));
+    RememberOutcome(run, battle.Result(), battle.Player().Hp, battle.Player().Focus);
+    TempDir dir("ascension-save-victory-hp");
+    RunSave saves(dir.Path);
+    Check(saves.Write(run, why), "the victory is written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.Run.Standing == RunStanding::Victory &&
+              !loaded.Run.ResourcesKnown && loaded.Run.Hp == 0 && !ResumeWound(loaded.Run),
+          "a victory save stores no wound");
+
+    Battle next(data, std::make_unique<AgilityRoundModel>());
+    Check(next.Start("fighter", 1, "bandit", why), "the next fight starts from that save");
+    if (ResumeWound(loaded.Run))
+        next.SetPlayerHp(loaded.Run.Hp);
+    Check(next.Player().Hp == next.Player().MaxHp, "the next fight refills HP");
+}
+
 void TestFoundOptional()
 {
     TempDir dir("ascension-save-found-absent");
@@ -841,6 +881,7 @@ int main()
     TestFangAnyClass();
     TestFangDrop();
     TestGenericDrop();
+    TestVictoryHp();
     TestFoundOptional();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();

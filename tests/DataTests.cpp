@@ -10,6 +10,7 @@
 #include "Ascension/Data/Database.h"
 #include "Check.h"
 #include "GearLine.h"
+#include "SourceTag.h"
 
 namespace {
 
@@ -1708,6 +1709,18 @@ void TestShippedDescriptions()
               fangRage->Op == EffectOp::ApplyStatus && fangRage->Status == "bloodlust",
           "fang_bloodlust costs 1 and applies the Bloodlust status");
     Check(fangDrop, "the dire wolf's drop line is the approved sentence");
+
+    const ClassDef* fighter = data.FindClass("fighter");
+    const std::vector<std::string> worn{"alphas_fang"};
+    const std::vector<HeroGrant> grants =
+        fighter != nullptr ? data.HeroGrants(*fighter, worn) : std::vector<HeroGrant>{};
+    const HeroGrant* fangGrant = FindGrant(grants, "fang_bloodlust");
+    const HeroGrant* strike = FindGrant(grants, "strike");
+    const std::string tag = fangGrant != nullptr ? SourceTag(data, *fangGrant) : std::string();
+    Check(tag == "  (Alpha's Fang)" && tag.find('[') == std::string::npos &&
+              tag.find(']') == std::string::npos,
+          "an item skill is tagged in parentheses");
+    Check(strike != nullptr && SourceTag(data, *strike).empty(), "a class skill has no source tag");
 }
 
 void TestDescriptionRejected(const fs::path& dir, const char* skill, const char* token,
