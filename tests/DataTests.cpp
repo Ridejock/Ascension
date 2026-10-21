@@ -1698,14 +1698,15 @@ void TestShippedDescriptions()
         dire->Drops[0].Message == "The Alpha falls. The fang slides free, still warm.";
     Check(mythicItems == 1 && fang != nullptr && fang->Id == "alphas_fang" &&
               fang->Slot == GearSlot::Accessory && fang->Icon == "ring" &&
-              data.FindIcon("ring") != nullptr && fang->Bonus.Strength == 2 && fang->Value == 80 &&
+              data.FindIcon("ring") != nullptr && fang->Bonus.Strength == 2 &&
+              fang->Bonus.Agility == 2 && fang->Value == 80 &&
               fang->Grants.size() == 1 && fang->Grants[0].Id == "fang_bloodlust" && !fangStocked,
           "Alpha's Fang is the only mythic, an accessory, and Pell does not sell it");
     Check(fangSkill != nullptr && fangSkill->Id != "bloodlust" &&
-              fangSkill->Id != "dire_bloodlust" && fangSkill->FocusCost == 2 &&
+              fangSkill->Id != "dire_bloodlust" && fangSkill->FocusCost == 1 &&
               fangSkill->Kind == SkillKind::Active && fangRage != nullptr &&
               fangRage->Op == EffectOp::ApplyStatus && fangRage->Status == "bloodlust",
-          "fang_bloodlust costs 2 and applies the Bloodlust status");
+          "fang_bloodlust costs 1 and applies the Bloodlust status");
     Check(fangDrop, "the dire wolf's drop line is the approved sentence");
 }
 

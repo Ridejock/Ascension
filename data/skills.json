@@ -175,7 +175,7 @@
       "description": "Call on the fang for {rage.status}: {rage.status.dealt} percent more damage for the rest of the fight.",
       "kind": "active",
       "target": "self",
-      "focusCost": 2,
+      "focusCost": 1,
       "effects": [
         { "id": "rage", "trigger": "onUse", "op": "applyStatus", "status": "bloodlust" }
       ]

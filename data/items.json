@@ -60,7 +60,7 @@
       "icon": "ring",
       "rarity": "mythic",
       "slot": "accessory",
-      "bonus": { "strength": 2 },
+      "bonus": { "strength": 2, "agility": 2 },
       "value": 80,
       "grants": ["fang_bloodlust"]
     },
