@@ -233,6 +233,7 @@ void TestRoundTrip()
     const std::string boss = BossId(data);
     run.Defeated.push_back("wolf");
     run.Defeated.push_back(boss);
+    run.Flags.push_back("met");
     run.Position = 4;
     run.DirectEnemy = "rubble_shard";
     run.Standing = RunStanding::Ongoing;
@@ -283,8 +284,9 @@ void TestRoundTrip()
               loaded.Run.Defeated[1] == boss && loaded.Run.Position == 4 &&
               loaded.Run.DirectEnemy == "rubble_shard" &&
               loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.ResourcesKnown &&
-              loaded.Run.Hp == 17 && loaded.Run.Focus == 1,
-          "defeated foes, position, and the wound come back");
+              loaded.Run.Hp == 17 && loaded.Run.Focus == 1 && loaded.Run.Flags.size() == 1 &&
+              loaded.Run.Flags[0] == "met",
+          "defeated foes, position, the wound, and a dialogue flag come back");
 
     Battle battle(data, std::make_unique<AgilityRoundModel>());
     battle.SetPickedSkills(again.PickedIds());

@@ -55,7 +55,9 @@ FetchContent_MakeAvailable(Emerald) # also brings SDL3, spdlog, stb, nlohmann/js
 # ---------------------------------------------------------------------------
 add_library(AscensionData STATIC
     src/Data/Database.cpp
+    src/Data/Talk.cpp
     include/Ascension/Data/Database.h
+    include/Ascension/Data/Talk.h
     include/Ascension/Data/Types.h
 )
 target_include_directories(AscensionData PUBLIC include)
@@ -194,6 +196,15 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     emerald_set_warnings(AscensionPlaytestTests)
     add_test(NAME Playtest COMMAND AscensionPlaytestTests)
+
+    add_executable(AscensionDialogueTests tests/DialogueTests.cpp tests/Check.h)
+    target_link_libraries(AscensionDialogueTests PRIVATE AscensionData)
+    target_compile_definitions(AscensionDialogueTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+        ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    emerald_set_warnings(AscensionDialogueTests)
+    add_test(NAME Dialogue COMMAND AscensionDialogueTests)
 endif()
 
 # ---------------------------------------------------------------------------

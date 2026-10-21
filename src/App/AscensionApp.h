@@ -6,11 +6,14 @@
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Data/Talk.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Emerald/Core/Application.h"
 #include "Playtest.h"
+
+#include <SDL3/SDL_gamepad.h>
 
 namespace Ascension {
 
@@ -25,6 +28,7 @@ namespace Ascension {
 class AscensionApp : public Emerald::Application {
 public:
     AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options);
+    ~AscensionApp() override;
 
 protected:
     void OnStart() override;
@@ -48,6 +52,17 @@ private:
     void ClampCamp();
     void HandleCamp(SDL_Scancode scancode);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    void OpenPads();
+    void OpenPad(SDL_JoystickID id);
+    void ClosePad(SDL_JoystickID id);
+    // Lists the run already keeps. "found" is claimed drops. "defeated" is felled foes.
+    // The talk matches those names from data. No item id is named here.
+    void FillTalkFacts(TalkList lists[2], TalkFacts& facts) const;
+    bool OpenTalk();
+    void HandleTalk(SDL_Scancode scancode);
+    void RunTalkAction(std::string_view action);
+    void NoteTalk(const DialogueNode& node);
+    void DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // A resumed victory or defeat, with no fight on screen. N and R still start one.
     void DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 height);
     [[nodiscard]] bool BetweenFights() const;
@@ -93,6 +108,15 @@ private:
     bool m_Camp = false;
     i32 m_CampColumn = 0;
     i32 m_CampRow = 0;
+    bool m_Talk = false;
+    i32 m_TalkRow = 0;
+    std::string m_TalkNode;
+    std::vector<std::string> m_TalkFlags;
+    struct HeldPad {
+        SDL_JoystickID Id = 0;
+        SDL_Gamepad* Pad = nullptr;
+    };
+    std::vector<HeldPad> m_Pads;
     std::vector<std::string> m_Defeated;
     // Unique drops already claimed. R starts the fight over and does not clear this.
     std::vector<std::string> m_Found;

@@ -1,0 +1,4 @@
+# Pell's rumor, from the repo root. Three Strikes fell the Wolf, then I talks.
+# Down, E takes "Heard any rumors?" and walks that chain to Leave.
+
+./build/debug/bin/Ascension --data data --keys-file playtest/dialogue/pell-rumor.keys --transcript pell-rumor.txt

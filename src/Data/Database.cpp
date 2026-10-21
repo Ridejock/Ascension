@@ -2,10 +2,13 @@
 
 #include "Ascension/Data/Database.h"
 
+#include <algorithm>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
 #include <utility>
+
+#include "Ascension/Data/Talk.h"
 
 #include <nlohmann/json.hpp>
 
@@ -310,6 +313,7 @@ struct Parsed {
     std::vector<RarityDef> Rarities;
     std::vector<IconDef> Icons;
     ShopDef Shop;
+    std::vector<DialogueDef> Dialogues;
     CombatRules Rules;
     ProgressRules Progress;
     std::vector<std::string> HigherFields;
@@ -2217,6 +2221,286 @@ bool LoadIconSheet(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool ParseFlagExpr(std::string_view text, FlagExpr& out, std::string& error)
+{
+    out = {};
+    std::string_view body = text;
+    if (!body.empty() && body.front() == '!') {
+        out.Negate = true;
+        body.remove_prefix(1);
+    }
+    if (body.empty()) {
+        error = "unknown flag syntax " + Quote(text);
+        return false;
+    }
+    usize dot = std::string_view::npos;
+    for (usize index = 0; index < body.size(); ++index) {
+        const char c = body[index];
+        if (c == '.') {
+            if (dot != std::string_view::npos || index == 0 || index + 1 >= body.size()) {
+                error = "unknown flag syntax " + Quote(text);
+                return false;
+            }
+            dot = index;
+            continue;
+        }
+        const bool idChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                            (c >= '0' && c <= '9') || c == '_';
+        if (!idChar) {
+            error = "unknown flag syntax " + Quote(text);
+            return false;
+        }
+    }
+    if (dot == std::string_view::npos) {
+        out.Head.assign(body);
+        if (!IsId(out.Head)) {
+            error = "unknown flag syntax " + Quote(text);
+            return false;
+        }
+        return true;
+    }
+    out.Head.assign(body.substr(0, dot));
+    out.Tail.assign(body.substr(dot + 1));
+    if (!IsId(out.Head) || !IsId(out.Tail)) {
+        error = "unknown flag syntax " + Quote(text);
+        return false;
+    }
+    return true;
+}
+
+// Missing key leaves `out` empty. A dotted expression or a negation is not a flag that
+// a node can set. Those are reads, and sets rejects them as unknown syntax.
+bool ReadFlagSets(const Json& object, const char* key, std::vector<std::string>& out,
+                  std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!it->is_array()) {
+        error = std::string("'") + key + "' must be a list";
+        return false;
+    }
+    out.clear();
+    for (const Json& entry : *it) {
+        if (!entry.is_string()) {
+            error = std::string("'") + key + "' entries must be strings";
+            return false;
+        }
+        const std::string text = entry.get<std::string>();
+        FlagExpr expr;
+        std::string why;
+        if (!ParseFlagExpr(text, expr, why) || expr.Negate || !expr.Tail.empty()) {
+            error = "unknown flag syntax " + Quote(text);
+            return false;
+        }
+        out.push_back(std::move(expr.Head));
+    }
+    return true;
+}
+
+bool ReadFlagExprs(const Json& object, const char* key, std::vector<FlagExpr>& out,
+                   std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!it->is_array()) {
+        error = std::string("'") + key + "' must be a list";
+        return false;
+    }
+    out.clear();
+    for (const Json& entry : *it) {
+        if (!entry.is_string()) {
+            error = std::string("'") + key + "' entries must be strings";
+            return false;
+        }
+        FlagExpr expr;
+        if (!ParseFlagExpr(entry.get<std::string>(), expr, error))
+            return false;
+        out.push_back(std::move(expr));
+    }
+    return true;
+}
+
+bool PlainTalkText(std::string_view text, std::string& error)
+{
+    if (text.find('{') != std::string_view::npos || text.find('}') != std::string_view::npos) {
+        error = "must not use a placeholder";
+        return false;
+    }
+    return true;
+}
+
+bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("dialogue");
+    if (body == root.end() || !body->is_object()) {
+        error = "'dialogue' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"id", "nodes"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    DialogueDef talk;
+    if (!RequireString(*body, "id", talk.Id, error))
+        return false;
+    if (!IsId(talk.Id)) {
+        error = "dialogue id must be letters, digits and _, starting with a letter";
+        return false;
+    }
+    if (talk.Id != stem) {
+        error = "id " + Quote(talk.Id) + " does not match the file name";
+        return false;
+    }
+    if (FindId(parsed.Dialogues, talk.Id) != nullptr) {
+        error = "there is another dialogue with this id";
+        return false;
+    }
+    const auto nodes = body->find("nodes");
+    if (nodes == body->end() || !nodes->is_array()) {
+        error = "'nodes' must be a list";
+        return false;
+    }
+    if (nodes->empty()) {
+        error = "'nodes' must list at least one node";
+        return false;
+    }
+    for (const Json& entry : *nodes) {
+        if (!entry.is_object()) {
+            error = "node entries must be objects";
+            return false;
+        }
+        DialogueNode node;
+        if (!RequireString(entry, "id", node.Id, error))
+            return false;
+        const std::string where = "node " + Quote(node.Id);
+        if (!IsId(node.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (talk.FindNode(node.Id) != nullptr) {
+            error = where + ": there is another node with this id";
+            return false;
+        }
+        if (!AllowKeys(entry, {"id", "line", "note", "requires", "sets", "choices"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        if (!RequireString(entry, "line", node.Line, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        std::string why;
+        if (!PlainTalkText(node.Line, why)) {
+            error = where + ": line " + why;
+            return false;
+        }
+        const auto note = entry.find("note");
+        if (note != entry.end()) {
+            if (!note->is_string()) {
+                error = where + ": 'note' must be a string";
+                return false;
+            }
+            node.Note = note->get<std::string>();
+            if (node.Note.empty()) {
+                error = where + ": 'note' must not be empty";
+                return false;
+            }
+        }
+        if (!ReadFlagExprs(entry, "requires", node.Requires, why) ||
+            !ReadFlagSets(entry, "sets", node.Sets, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        const auto choices = entry.find("choices");
+        if (choices == entry.end() || !choices->is_array()) {
+            error = where + ": 'choices' must be a list";
+            return false;
+        }
+        for (const Json& choiceEntry : *choices) {
+            if (!choiceEntry.is_object()) {
+                error = where + ": choice entries must be objects";
+                return false;
+            }
+            if (!AllowKeys(choiceEntry, {"text", "next", "end", "action", "requires", "sets"},
+                           unknown)) {
+                error = where + ": unknown field " + Quote(unknown);
+                return false;
+            }
+            DialogueChoice choice;
+            if (!RequireString(choiceEntry, "text", choice.Text, error)) {
+                error = where + ": " + error;
+                return false;
+            }
+            if (!PlainTalkText(choice.Text, why)) {
+                error = where + ": choice text " + why;
+                return false;
+            }
+            const bool hasNext = choiceEntry.contains("next");
+            const bool hasEnd = choiceEntry.contains("end");
+            const bool hasAction = choiceEntry.contains("action");
+            const int destinations = static_cast<int>(hasNext) + static_cast<int>(hasEnd) +
+                                     static_cast<int>(hasAction);
+            if (destinations != 1) {
+                error = where + ": choice " + Quote(choice.Text) +
+                        " needs one of next, end, or action";
+                return false;
+            }
+            if (hasNext) {
+                if (!choiceEntry["next"].is_string()) {
+                    error = where + ": 'next' must be a node id";
+                    return false;
+                }
+                choice.Kind = TalkChoiceKind::Next;
+                choice.Next = choiceEntry["next"].get<std::string>();
+                if (!IsId(choice.Next)) {
+                    error = where + ": 'next' must be a node id";
+                    return false;
+                }
+            } else if (hasEnd) {
+                if (!choiceEntry["end"].is_boolean() || !choiceEntry["end"].get<bool>()) {
+                    error = where + ": 'end' must be true";
+                    return false;
+                }
+                choice.Kind = TalkChoiceKind::End;
+            } else {
+                if (!choiceEntry["action"].is_string()) {
+                    error = where + ": 'action' must be an id";
+                    return false;
+                }
+                choice.Action = choiceEntry["action"].get<std::string>();
+                if (!IsId(choice.Action) || !KnownTalkAction(choice.Action)) {
+                    error = where + ": unknown action " + Quote(choice.Action);
+                    return false;
+                }
+                choice.Kind = TalkChoiceKind::Action;
+            }
+            if (!ReadFlagExprs(choiceEntry, "requires", choice.Requires, why) ||
+                !ReadFlagSets(choiceEntry, "sets", choice.Sets, why)) {
+                error = where + ": " + why;
+                return false;
+            }
+            node.Choices.push_back(std::move(choice));
+        }
+        talk.Nodes.push_back(std::move(node));
+    }
+    for (const DialogueNode& node : talk.Nodes) {
+        const std::string where = "node " + Quote(node.Id);
+        for (const DialogueChoice& choice : node.Choices) {
+            if (choice.Kind != TalkChoiceKind::Next)
+                continue;
+            if (talk.FindNode(choice.Next) == nullptr) {
+                error = where + ": next " + Quote(choice.Next) + " does not exist";
+                return false;
+            }
+        }
+    }
+    parsed.Dialogues.push_back(std::move(talk));
+    return true;
+}
+
 bool LoadShop(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto body = root.find("shop");
@@ -2226,7 +2510,7 @@ bool LoadShop(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"id", "name", "keeper", "bagSlots", "stackSize", "sellNumerator",
+                   {"id", "name", "keeper", "dialogue", "bagSlots", "stackSize", "sellNumerator",
                     "sellDenominator", "stock"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
@@ -2240,7 +2524,8 @@ bool LoadShop(const Json& root, Parsed& parsed, std::string& error)
         return false;
     }
     if (!RequireString(*body, "name", shop.Name, error) ||
-        !RequireString(*body, "keeper", shop.Keeper, error))
+        !RequireString(*body, "keeper", shop.Keeper, error) ||
+        !OptionalId(*body, "dialogue", shop.Dialogue, error))
         return false;
     if (!RequireInt(*body, "bagSlots", 1, 24, shop.BagSlots, error) ||
         !RequireInt(*body, "stackSize", 1, 99, shop.StackSize, error) ||
@@ -2985,6 +3270,11 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
             return false;
         }
     }
+    if (!parsed.Shop.Dialogue.empty() &&
+        FindId(parsed.Dialogues, parsed.Shop.Dialogue) == nullptr) {
+        error = "shop dialogue " + Quote(parsed.Shop.Dialogue) + " does not exist";
+        return false;
+    }
     if (!DescriptionsResolve(parsed, error))
         return false;
     return true;
@@ -2999,7 +3289,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     for (usize i = 0; i < files.size(); ++i)
         times[i] = ReadStamp(files[i]);
 
-    if (files.size() != std::size(kFileNames) + 1) {
+    if (files.size() < std::size(kFileNames) + 1) {
         error = "internal: data file list";
         return false;
     }
@@ -3055,6 +3345,30 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
     }
+    for (usize fileIndex = std::size(kFileNames) + 1; fileIndex < files.size(); ++fileIndex) {
+        const std::filesystem::path& path = files[fileIndex];
+        const std::string fileName = "dialogue/" + path.filename().string();
+        std::string text;
+        std::string why;
+        if (!ReadText(path, text, why)) {
+            error = Err(fileName, {}, why);
+            return false;
+        }
+        Json root;
+        if (!ParseRoot(text, root, why)) {
+            error = Err(fileName, {}, why);
+            return false;
+        }
+        std::string top;
+        if (!AllowKeys(root, {"dialogue"}, top)) {
+            error = Err(fileName, {}, "unknown field " + Quote(top));
+            return false;
+        }
+        if (!LoadDialogueFile(root, path.stem().string(), parsed, why)) {
+            error = Err(fileName, {}, why);
+            return false;
+        }
+    }
     std::string why;
     if (!CrossCheck(parsed, why)) {
         const char* file = "classes.json";
@@ -3078,6 +3392,28 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     return true;
 }
 
+// data/dialogue/*.json, sorted so a reload sees a stable order. A missing folder is
+// no talks, which is how a data set with no NPCs still loads.
+std::vector<std::filesystem::path> DialoguePaths(const std::filesystem::path& directory)
+{
+    std::vector<std::filesystem::path> paths;
+    const std::filesystem::path folder = directory / "dialogue";
+    std::error_code error;
+    if (!std::filesystem::is_directory(folder, error))
+        return paths;
+    const std::filesystem::directory_iterator end;
+    for (std::filesystem::directory_iterator it(folder, error); !error && it != end; it.increment(error)) {
+        std::error_code fileError;
+        if (!it->is_regular_file(fileError) || fileError)
+            continue;
+        if (it->path().extension() != ".json")
+            continue;
+        paths.push_back(it->path());
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
 } // namespace
 
 Database::Database(std::filesystem::path directory) : m_Directory(std::move(directory))
@@ -3095,6 +3431,51 @@ Database::Database(std::filesystem::path directory) : m_Directory(std::move(dire
     FileWatch icons;
     icons.Path = m_IconSheet;
     m_Watches.push_back(std::move(icons));
+    for (const std::filesystem::path& path : DialoguePaths(m_Directory)) {
+        FileWatch watch;
+        watch.Path = path;
+        m_Watches.push_back(std::move(watch));
+    }
+}
+
+bool Database::RefreshDialogueWatches()
+{
+    const std::vector<std::filesystem::path> paths = DialoguePaths(m_Directory);
+    const usize fixed = std::size(kFileNames) + 1;
+    bool changed = m_Watches.size() != fixed + paths.size();
+    if (!changed) {
+        for (usize index = 0; index < paths.size(); ++index) {
+            if (m_Watches[fixed + index].Path != paths[index])
+                changed = true;
+        }
+    }
+    if (!changed)
+        return false;
+
+    std::vector<FileWatch> next;
+    next.reserve(fixed + paths.size());
+    for (usize index = 0; index < fixed && index < m_Watches.size(); ++index)
+        next.push_back(std::move(m_Watches[index]));
+    for (const std::filesystem::path& path : paths) {
+        FileWatch watch;
+        watch.Path = path;
+        bool known = false;
+        for (const FileWatch& old : m_Watches) {
+            if (old.Path == path) {
+                watch = old;
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            watch.Path = path;
+            watch.Waiting = true;
+            watch.Seen = std::nullopt;
+        }
+        next.push_back(std::move(watch));
+    }
+    m_Watches = std::move(next);
+    return true;
 }
 
 void Database::NoteFailure(const DataError& error, DataError* out)
@@ -3154,6 +3535,7 @@ bool Database::Load(DataError* error)
     m_Rarities = std::move(parsed.Rarities);
     m_Icons = std::move(parsed.Icons);
     m_Shop = std::move(parsed.Shop);
+    m_Dialogues = std::move(parsed.Dialogues);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
     m_HigherFields = std::move(parsed.HigherFields);
@@ -3166,8 +3548,16 @@ bool Database::Load(DataError* error)
 
 u32 Database::CheckForChanges(DataError* error)
 {
+    const bool listingChanged = RefreshDialogueWatches();
+    if (listingChanged)
+        m_ListingArmed = true;
     bool pending = false;
     bool stable = true;
+    if (m_ListingArmed) {
+        pending = true;
+        if (listingChanged)
+            stable = false;
+    }
     for (FileWatch& watch : m_Watches) {
         const FileTime now = ReadStamp(watch.Path);
         if (!watch.Waiting) {
@@ -3187,6 +3577,7 @@ u32 Database::CheckForChanges(DataError* error)
     }
     if (!pending || !stable)
         return 0;
+    m_ListingArmed = false;
     const u32 before = m_Revision;
     Load(error);
     return m_Revision != before ? 1u : 0u;
@@ -3235,6 +3626,11 @@ const RarityDef* Database::FindRarity(std::string_view id) const
 const IconDef* Database::FindIcon(std::string_view id) const
 {
     return FindId(m_Icons, id);
+}
+
+const DialogueDef* Database::FindDialogue(std::string_view id) const
+{
+    return FindId(m_Dialogues, id);
 }
 
 std::vector<const ClassDef*> Database::EvolutionsOf(std::string_view baseId) const
