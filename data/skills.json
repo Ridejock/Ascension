@@ -126,6 +126,50 @@
       ]
     },
     {
+      "id": "howl",
+      "name": "Howl",
+      "description": "A long howl. It deals no damage.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "cry", "trigger": "onUse", "op": "grantFocus", "amount": 0 }
+      ]
+    },
+    {
+      "id": "stalk",
+      "name": "Stalk",
+      "description": "A low circle through the grass. It deals no damage.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "step", "trigger": "onUse", "op": "grantFocus", "amount": 0 }
+      ]
+    },
+    {
+      "id": "circle",
+      "name": "Circle",
+      "description": "The wolf paces the fight and does not bite.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "pace", "trigger": "onUse", "op": "grantFocus", "amount": 0 }
+      ]
+    },
+    {
+      "id": "dire_bloodlust",
+      "name": "Bloodlust",
+      "description": "The dire wolf gives in to {rage.status}: {rage.status.dealt} percent more damage for the rest of the fight.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "rage", "trigger": "onUse", "op": "applyStatus", "status": "bloodlust" }
+      ]
+    },
+    {
       "id": "bite",
       "name": "Bite",
       "description": "A quick snap.",

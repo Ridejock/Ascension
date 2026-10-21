@@ -635,7 +635,7 @@ void TestNextFightAndScriptedKeys()
 }
 
 // The eight Outer Barrow replays. commands.txt is what the PR body pastes. Each
-// --keys-file is the list Linux ran. Brace + Second Wind is 109 words; a 113-word
+// --keys-file is the list Linux ran. Brace + Second Wind is 107 words; a longer
 // paste is a different list.
 void TestOuterBarrowReplayKeys()
 {
@@ -645,14 +645,14 @@ void TestOuterBarrowReplayKeys()
         i32 Words;
     };
     const ReplayKeys rows[] = {
-        {"guardian-riposte-rally.keys", "guardian-riposte-rally.txt", 61},
-        {"guardian-riposte-rage.keys", "guardian-riposte-rage.txt", 61},
-        {"guardian-shield-wall-rally.keys", "guardian-shield-wall-rally.txt", 72},
-        {"guardian-shield-wall-rage.keys", "guardian-shield-wall-rage.txt", 73},
-        {"berserker-rend-rally.keys", "berserker-rend-rally.txt", 56},
-        {"berserker-rend-second-wind.keys", "berserker-rend-second-wind.txt", 56},
-        {"berserker-brace-rally.keys", "berserker-brace-rally.txt", 68},
-        {"berserker-brace-second-wind.keys", "berserker-brace-second-wind.txt", 109},
+        {"guardian-riposte-rally.keys", "guardian-riposte-rally.txt", 64},
+        {"guardian-riposte-rage.keys", "guardian-riposte-rage.txt", 65},
+        {"guardian-shield-wall-rally.keys", "guardian-shield-wall-rally.txt", 71},
+        {"guardian-shield-wall-rage.keys", "guardian-shield-wall-rage.txt", 72},
+        {"berserker-rend-rally.keys", "berserker-rend-rally.txt", 53},
+        {"berserker-rend-second-wind.keys", "berserker-rend-second-wind.txt", 53},
+        {"berserker-brace-rally.keys", "berserker-brace-rally.txt", 65},
+        {"berserker-brace-second-wind.keys", "berserker-brace-second-wind.txt", 107},
     };
 
     const fs::path root = ASCENSION_SOURCE_DIR;
@@ -703,9 +703,9 @@ void TestOuterBarrowReplayKeys()
                brace[index] != '\n' && brace[index] != '\r')
             ++index;
     }
-    if (braceWords != 109)
+    if (braceWords != 107)
         std::printf("    Brace + Second Wind has %d words\n", braceWords);
-    Check(braceWords == 109, "Brace + Second Wind is 109 words");
+    Check(braceWords == 107, "Brace + Second Wind is 107 words");
 }
 
 // Save, quit, and load. Separate from the eight fight replays so their word counts stay put.

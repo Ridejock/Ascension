@@ -43,6 +43,14 @@
       "maxStacks": 1
     },
     {
+      "id": "bloodlust",
+      "name": "Bloodlust",
+      "description": "Deals {dealt} percent more damage for the rest of the fight.",
+      "damageDealtPercent": 25,
+      "turns": 99,
+      "maxStacks": 1
+    },
+    {
       "id": "steadfast",
       "name": "Steadfast",
       "description": "Cannot be stunned or Exposed for a short while.",
