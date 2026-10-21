@@ -13,6 +13,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Check.h"
+#include "FightSim.h"
 #include "Playtest.h"
 #include "TalkInput.h"
 
@@ -789,6 +790,54 @@ void TestPellRumorKeys()
           "the other face buttons are not the menu");
 }
 
+void TestGoblinSim()
+{
+    std::string error;
+    PlaytestOptions sim;
+    Check(Parse({"--sim", "--enemy", "goblin_pack"}, sim, error), "--sim with the pack parses");
+    Check(sim.Sim && sim.Fight.Id == "goblin_pack" && sim.FocusId.empty(),
+          "--sim records the goblin pack and leaves the focus open");
+
+    PlaytestOptions focus;
+    Check(!Parse({"--focus", "goblin_shaman"}, focus, error), "--focus without --sim fails");
+    Check(error.find("--focus") != std::string::npos, "the message names --focus");
+
+    PlaytestOptions bare;
+    Check(!Parse({"--sim"}, bare, error), "--sim without --enemy fails");
+    Check(error.find("--enemy") != std::string::npos, "the message says --sim needs --enemy");
+
+    PlaytestOptions both;
+    Check(!Parse({"--sim", "--enemy", "goblin_pack", "--keys", "1"}, both, error),
+          "--sim and --keys together fail");
+    Check(error.find("--sim") != std::string::npos && error.find("--keys") != std::string::npos,
+          "the message names both flags");
+
+    const fs::path commandsPath =
+        fs::path(ASCENSION_SOURCE_DIR) / "playtest/goblin-pack/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && commands.find("--sim --enemy goblin_pack") != std::string::npos,
+          "the goblin command file names the headless sim");
+
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the goblin sim");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    const std::vector<GoblinSimRow> rows = SimulateGoblinPack(data);
+    std::fputs(FormatGoblinSim(rows).c_str(), stdout);
+    Check(rows.size() == 20, "five builds, two focuses, and the fang on or off");
+    for (const GoblinSimRow& row : rows) {
+        Check(row.Ok && !row.TimedOut, "every goblin sim finishes");
+        if (!row.Ok || row.TimedOut)
+            std::printf("    %s %s fang %s: %s\n", row.Build.c_str(), row.FocusId.c_str(),
+                        row.Fang ? "yes" : "no", row.Error.c_str());
+    }
+}
+
 } // namespace
 
 int main()
@@ -804,6 +853,7 @@ int main()
     TestOuterBarrowReplayKeys();
     TestSaveQuitLoadKeys();
     TestPellRumorKeys();
+    TestGoblinSim();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

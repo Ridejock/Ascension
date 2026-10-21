@@ -1946,6 +1946,301 @@ void TestStatusNameOnce()
         std::printf("    dire: %s\n", rage.Text.c_str());
 }
 
+std::vector<TurnSeat> ThreeLooks()
+{
+    std::vector<TurnSeat> turns;
+    turns.push_back(EnemySeat(0));
+    turns.push_back(TurnSeat{});
+    turns.push_back(EnemySeat(0));
+    turns.push_back(TurnSeat{});
+    turns.push_back(EnemySeat(0));
+    return turns;
+}
+
+void DropSeat(Battle& battle, i32 index)
+{
+    Check(battle.SetTarget(index), "the ally can be marked");
+    battle.SetEnemyHp(0);
+}
+
+void TestAllyCount()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "enemies.json",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    }",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    },\n    {\n      \"id\": \"counter\",\n      \"name\": "
+                  "\"Counter\",\n      \"description\": \"A made-up foe that counts its "
+                  "allies.\",\n      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"bite\", "
+                  "\"thrust\"],\n      \"pattern\": [\"harden\"],\n      \"ai\": [\n"
+                  "        { \"if\": { \"allyCountAtMost\": 0 }, \"do\": \"skill\", "
+                  "\"skill\": \"thrust\" },\n"
+                  "        { \"if\": { \"allyCountAtMost\": 1 }, \"do\": \"skill\", "
+                  "\"skill\": \"bite\" }\n"
+                  "      ],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n"
+                  "      \"id\": \"floor\",\n      \"name\": \"Floor\",\n"
+                  "      \"description\": \"A made-up foe that wants a full pack.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"bite\"],\n"
+                  "      \"pattern\": [\"harden\"],\n      \"ai\": [\n"
+                  "        { \"if\": { \"allyCountAtLeast\": 2 }, \"do\": \"skill\", "
+                  "\"skill\": \"bite\" }\n"
+                  "      ],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n"
+                  "      \"id\": \"mate\",\n      \"name\": \"Mate\",\n"
+                  "      \"description\": \"A made-up ally.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 10,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
+                  "    }");
+    ReplaceInFile(copy.Path / "encounters.json",
+                  "      \"enemies\": [\"oathkeeper_varn\"]\n    }",
+                  "      \"enemies\": [\"oathkeeper_varn\"]\n    },\n    {\n"
+                  "      \"id\": \"count_pack\",\n      \"name\": \"Count Pack\",\n"
+                  "      \"enemies\": [\"counter\", \"mate\", \"mate\"]\n    },\n    {\n"
+                  "      \"id\": \"floor_pack\",\n      \"name\": \"Floor Pack\",\n"
+                  "      \"enemies\": [\"floor\", \"mate\", \"mate\"]\n    }");
+    Database data(copy.Path);
+    DataError loadError;
+    Check(data.Load(&loadError), "the counter and the floor load");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    Battle counted(data, std::make_unique<ScriptedTurns>(ThreeLooks()));
+    Check(counted.Start("fighter", 1, "count_pack", error), "the count fight starts");
+    const ActionResult two = counted.EnemyAct();
+    Check(two.SkillId == "harden", "two living allies miss both at-most rules");
+    if (two.SkillId != "harden")
+        std::printf("    two: %s\n", two.Text.c_str());
+    DropSeat(counted, 1);
+    Check(counted.Wait().Accepted, "the fighter yields after one mate falls");
+    const ActionResult one = counted.EnemyAct();
+    Check(one.SkillId == "bite", "one living ally matches allyCountAtMost 1");
+    if (one.SkillId != "bite")
+        std::printf("    one: %s\n", one.Text.c_str());
+    DropSeat(counted, 2);
+    Check(counted.Result() == BattleResult::Ongoing && counted.Wait().Accepted,
+          "the counter still stands after both mates fall");
+    const ActionResult none = counted.EnemyAct();
+    Check(none.SkillId == "thrust", "no living ally matches allyCountAtMost 0");
+    if (none.SkillId != "thrust")
+        std::printf("    none: %s\n", none.Text.c_str());
+
+    Battle floored(data, std::make_unique<ScriptedTurns>(ThreeLooks()));
+    Check(floored.Start("fighter", 1, "floor_pack", error), "the floor fight starts");
+    const ActionResult full = floored.EnemyAct();
+    Check(full.SkillId == "bite", "two living allies match allyCountAtLeast 2");
+    if (full.SkillId != "bite")
+        std::printf("    full: %s\n", full.Text.c_str());
+    DropSeat(floored, 1);
+    Check(floored.Wait().Accepted, "the fighter yields with one mate left");
+    const ActionResult thin = floored.EnemyAct();
+    Check(thin.SkillId == "harden", "one living ally misses allyCountAtLeast 2");
+    if (thin.SkillId != "harden")
+        std::printf("    thin: %s\n", thin.Text.c_str());
+    DropSeat(floored, 2);
+    Check(floored.Wait().Accepted, "the fighter yields once the floor is alone");
+    const ActionResult solo = floored.EnemyAct();
+    Check(solo.SkillId == "harden", "a lone foe does not count itself");
+    if (solo.SkillId != "harden")
+        std::printf("    solo: %s\n", solo.Text.c_str());
+}
+
+void TestLowestHpHeal()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "skills.json",
+                  "\"name\": \"Second Wind\",\n      \"description\": \"Catch your breath and "
+                  "knit a wound.\",\n      \"kind\": \"active\",\n      \"target\": \"self\",\n"
+                  "      \"focusCost\": 2,\n      \"effects\": [\n        { \"id\": \"mend\", "
+                  "\"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }\n      ]",
+                  "\"name\": \"Second Wind\",\n      \"description\": \"Catch your breath and "
+                  "knit a wound.\",\n      \"kind\": \"active\",\n      \"target\": \"self\",\n"
+                  "      \"focusCost\": 0,\n      \"effects\": [\n        { \"id\": \"mend\", "
+                  "\"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, \"target\": "
+                  "\"lowestHpEnemy\" }\n      ]");
+    ReplaceInFile(copy.Path / "enemies.json",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    }",
+                  "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
+                  "\"gold\": 0\n    },\n    {\n      \"id\": \"big\",\n      \"name\": \"Big\",\n"
+                  "      \"description\": \"A made-up foe with a large pool.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 25,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
+                  "    },\n    {\n      \"id\": \"small\",\n      \"name\": \"Small\",\n"
+                  "      \"description\": \"A made-up foe with a small pool.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 10,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
+                  "    },\n    {\n      \"id\": \"mender\",\n      \"name\": \"Mender\",\n"
+                  "      \"description\": \"A made-up foe that mends someone else.\",\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 20,\n"
+                  "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
+                  "        \"focus\": 0\n      },\n      \"skills\": [\"second_wind\"],\n"
+                  "      \"pattern\": [\"second_wind\"],\n      \"experience\": 0,\n"
+                  "      \"gold\": 0\n    },\n    {\n      \"id\": \"mate\",\n      \"name\": "
+                  "\"Mate\",\n      \"description\": \"A made-up ally.\",\n      \"level\": 1,\n"
+                  "      \"stats\": {\n        \"vitality\": 10,\n        \"strength\": 0,\n"
+                  "        \"defense\": 0,\n        \"agility\": 1,\n        \"focus\": 0\n"
+                  "      },\n      \"skills\": [\"harden\"],\n      \"pattern\": [\"harden\"],\n"
+                  "      \"experience\": 0,\n      \"gold\": 0\n    }");
+    ReplaceInFile(copy.Path / "encounters.json",
+                  "      \"enemies\": [\"oathkeeper_varn\"]\n    }",
+                  "      \"enemies\": [\"oathkeeper_varn\"]\n    },\n    {\n"
+                  "      \"id\": \"wound_pack\",\n      \"name\": \"Wound Pack\",\n"
+                  "      \"enemies\": [\"big\", \"small\"]\n    },\n    {\n"
+                  "      \"id\": \"mend_pack\",\n      \"name\": \"Mend Pack\",\n"
+                  "      \"enemies\": [\"mender\", \"mate\"]\n    }");
+    Database data(copy.Path);
+    DataError loadError;
+    Check(data.Load(&loadError), "the aimed heal loads");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    Battle wounds(data, Sides({CombatantSide::Player}));
+    Check(wounds.Start("fighter", 1, "wound_pack", error), "the wound fight starts");
+    Check(wounds.SetTarget(0) && wounds.Enemies()[0].MaxHp == 100, "Big has 100 health");
+    wounds.SetEnemyHp(20);
+    Check(wounds.SetTarget(1) && wounds.Enemies()[1].MaxHp == 40, "Small has 40 health");
+    wounds.SetEnemyHp(16);
+    const i32 heroHp = wounds.Player().Hp;
+    const ActionResult percent = wounds.UseSkill("second_wind");
+    Check(percent.Text == "Fighter uses Second Wind. Heals Big 8." &&
+              wounds.Enemies()[0].Hp == 28 && wounds.Enemies()[1].Hp == 16 &&
+              wounds.Player().Hp == heroHp,
+          "20 of 100 is healed ahead of 16 of 40");
+    if (percent.Text != "Fighter uses Second Wind. Heals Big 8.")
+        std::printf("    percent: %s\n", percent.Text.c_str());
+
+    Battle tied(data, Sides({CombatantSide::Player}));
+    Check(tied.Start("fighter", 1, "wound_pack", error), "the tie fight starts");
+    Check(tied.SetTarget(0), "Big can be marked");
+    tied.SetEnemyHp(50);
+    Check(tied.SetTarget(1), "Small can be marked");
+    tied.SetEnemyHp(20);
+    const ActionResult same = tied.UseSkill("second_wind");
+    Check(same.Text == "Fighter uses Second Wind. Heals Big 8." && tied.Enemies()[0].Hp == 58 &&
+              tied.Enemies()[1].Hp == 20,
+          "a percent tie keeps the earlier seat");
+    if (same.Text != "Fighter uses Second Wind. Heals Big 8.")
+        std::printf("    tie: %s\n", same.Text.c_str());
+
+    Battle aimed(data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{EnemySeat(0)}));
+    Check(aimed.Start("fighter", 1, "mend_pack", error), "the mender fight starts");
+    Check(aimed.SetTarget(1), "the mate can be marked");
+    aimed.SetEnemyHp(10);
+    const i32 menderHp = aimed.Enemies()[0].Hp;
+    const ActionResult helped = aimed.EnemyAct();
+    Check(helped.Text == "Mender uses Second Wind. Heals Mate 8." && aimed.Enemies()[1].Hp == 18 &&
+              aimed.Enemies()[0].Hp == menderHp,
+          "an aimed heal restores the wounded ally and not the user");
+    if (helped.Text != "Mender uses Second Wind. Heals Mate 8.")
+        std::printf("    aimed: %s\n", helped.Text.c_str());
+
+    Battle full(data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{EnemySeat(0)}));
+    Check(full.Start("fighter", 1, "mend_pack", error), "the full pack starts");
+    const ActionResult spare = full.EnemyAct();
+    Check(spare.Text == "Mender uses Second Wind. No one needs it." &&
+              full.Result() == BattleResult::Ongoing &&
+              full.Enemies()[0].Hp == full.Enemies()[0].MaxHp &&
+              full.Enemies()[1].Hp == full.Enemies()[1].MaxHp,
+          "a full pack is told that no one needs the heal");
+    if (spare.Text != "Mender uses Second Wind. No one needs it.")
+        std::printf("    spare: %s\n", spare.Text.c_str());
+
+    Battle gone(data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{EnemySeat(0)}));
+    Check(gone.Start("fighter", 1, "mend_pack", error), "the fallen mate fight starts");
+    Check(gone.SetTarget(1), "the mate can be dropped");
+    gone.SetEnemyHp(0);
+    const ActionResult alone = gone.EnemyAct();
+    Check(alone.Text == "Mender uses Second Wind. No one needs it." &&
+              gone.Result() == BattleResult::Ongoing && gone.Enemies()[0].Alive(),
+          "a dead ally is not a heal target, and the mender still stands");
+    if (alone.Text != "Mender uses Second Wind. No one needs it.")
+        std::printf("    alone: %s\n", alone.Text.c_str());
+}
+
+void TestGoblinRoles()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the goblin roles");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+
+    Battle mend(data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{EnemySeat(1)}));
+    Check(mend.Start("fighter", 1, "goblin_pack", error), "the shaman can be driven first");
+    Check(mend.Enemies().size() == 3 && mend.Enemies()[0].Id == "goblin_chief" &&
+              mend.Enemies()[1].Id == "goblin_shaman" && mend.Enemies()[2].Id == "goblin",
+          "the pack is chief, shaman, grunt");
+    if (mend.Enemies().size() != 3)
+        return;
+    Check(mend.Enemies()[0].MaxHp > mend.Enemies()[2].MaxHp, "the chief's pool is the larger one");
+    Check(mend.SetTarget(0), "the chief can be marked");
+    mend.SetEnemyHp(1);
+    Check(mend.SetTarget(2), "the grunt can be marked");
+    mend.SetEnemyHp(1);
+    const ActionResult mended = mend.EnemyAct();
+    Check(mended.SkillId == "goblin_mend" && mend.Enemies()[0].Hp > 1 && mend.Enemies()[2].Hp == 1,
+          "with both at 1, mend picks the chief's lower percent");
+    if (mended.SkillId != "goblin_mend")
+        std::printf("    mend: %s\n", mended.Text.c_str());
+
+    Battle rally(data, std::make_unique<ScriptedTurns>(std::vector<TurnSeat>{EnemySeat(0)}));
+    Check(rally.Start("fighter", 1, "goblin_pack", error), "the chief can be driven first");
+    Check(rally.SetTarget(2), "the grunt can be dropped");
+    rally.SetEnemyHp(0);
+    Check(rally.Result() == BattleResult::Ongoing && rally.Enemies()[0].Alive() &&
+              rally.Enemies()[1].Alive(),
+          "the chief and the shaman still stand");
+    const ActionResult rallied = rally.EnemyAct();
+    Check(rallied.SkillId == "goblin_rally" && Holds(rally.Enemies()[0], "bloodlust") &&
+              Holds(rally.Enemies()[1], "bloodlust"),
+          "one ally left makes the chief rally itself and that ally");
+    if (rallied.SkillId != "goblin_rally")
+        std::printf("    rally: %s\n", rallied.Text.c_str());
+
+    std::vector<TurnSeat> frenzyTurns;
+    frenzyTurns.push_back(EnemySeat(0));
+    frenzyTurns.push_back(TurnSeat{});
+    frenzyTurns.push_back(EnemySeat(0));
+    Battle frenzy(data, std::make_unique<ScriptedTurns>(std::move(frenzyTurns)));
+    Check(frenzy.Start("fighter", 1, "goblin_pack", error), "the lone chief can be driven");
+    Check(frenzy.SetTarget(1), "the shaman can be dropped");
+    frenzy.SetEnemyHp(0);
+    Check(frenzy.SetTarget(2), "the grunt can be dropped");
+    frenzy.SetEnemyHp(0);
+    Check(frenzy.Result() == BattleResult::Ongoing && frenzy.Enemies()[0].Alive(),
+          "the chief still stands");
+    const ActionResult frenzied = frenzy.EnemyAct();
+    Check(frenzied.SkillId == "goblin_frenzy" && Holds(frenzy.Enemies()[0], "enraged"),
+          "no living ally makes the chief frenzy");
+    if (frenzied.SkillId != "goblin_frenzy")
+        std::printf("    frenzy: %s\n", frenzied.Text.c_str());
+    Check(frenzy.Wait().Accepted, "the fighter yields to the enraged chief");
+    const ActionResult smashed = frenzy.EnemyAct();
+    Check(smashed.SkillId == "goblin_smash" && Holds(frenzy.Enemies()[0], "enraged"),
+          "while enraged the chief smashes");
+    if (smashed.SkillId != "goblin_smash")
+        std::printf("    smash: %s\n", smashed.Text.c_str());
+}
+
 } // namespace
 
 int main()
@@ -1982,6 +2277,9 @@ int main()
     TestLoggedHeal();
     TestFoeRules();
     TestAllyHp();
+    TestAllyCount();
+    TestLowestHpHeal();
+    TestGoblinRoles();
     TestStatusNameOnce();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;

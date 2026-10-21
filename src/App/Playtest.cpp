@@ -376,7 +376,7 @@ bool PlaytestOptions::UsesData() const
 {
     return !DataDir.empty() || Level.has_value() || !ClassId.empty() || !Fight.Id.empty() ||
            Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty() ||
-           !PickIds.empty();
+           !PickIds.empty() || Sim;
 }
 
 bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOptions& options,
@@ -521,6 +521,15 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.PickIds.emplace_back(value);
+        } else if (flag == "--focus") {
+            if (AlreadySet(!options.FocusId.empty(), flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            if (value.empty()) {
+                error = "--focus needs an enemy id";
+                return false;
+            }
+            options.FocusId = std::string(value);
         } else if (flag == "--save-dir") {
             if (AlreadySet(!options.SaveDir.empty(), flag, error) ||
                 !TakeValue(args, index, attached, flag, value, error))
@@ -536,10 +545,32 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.Trace = true;
+        } else if (flag == "--sim") {
+            if (attached.has_value()) {
+                error = "--sim does not take a value";
+                return false;
+            }
+            if (options.Sim) {
+                error = "--sim was already set";
+                return false;
+            }
+            options.Sim = true;
         } else {
             error = "unknown flag '" + std::string(flag) + "'";
             return false;
         }
+    }
+    if (options.Sim && options.Fight.Id.empty()) {
+        error = "--sim needs --enemy";
+        return false;
+    }
+    if (options.Sim && !options.Keys.empty()) {
+        error = "pass --sim or --keys, not both";
+        return false;
+    }
+    if (!options.FocusId.empty() && !options.Sim) {
+        error = "--focus is only used with --sim";
+        return false;
     }
     error.clear();
     return true;

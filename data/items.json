@@ -83,6 +83,16 @@
       "slot": "consumable",
       "focus": 4,
       "value": 15
+    },
+    {
+      "id": "goblin_tooth",
+      "name": "Goblin Tooth",
+      "description": "A yellowed tooth from the chief of a pack. It sits sharp against the skin.",
+      "icon": "ring",
+      "rarity": "uncommon",
+      "slot": "accessory",
+      "bonus": { "strength": 1 },
+      "value": 22
     }
   ]
 }

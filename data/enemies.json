@@ -97,6 +97,84 @@
       ]
     },
     {
+      "id": "goblin",
+      "name": "Goblin",
+      "description": "A small raider with a chipped knife. It stays with the pack.",
+      "level": 5,
+      "stats": {
+        "vitality": 16,
+        "strength": 7,
+        "defense": 2,
+        "agility": 8,
+        "focus": 0
+      },
+      "skills": ["goblin_stab"],
+      "pattern": ["goblin_stab"],
+      "experience": 6,
+      "gold": 4,
+      "color": "#3A8A3E"
+    },
+    {
+      "id": "goblin_shaman",
+      "name": "Goblin Shaman",
+      "description": "It mends the wounded and sours a blade. The pack lasts longer while it stands.",
+      "level": 6,
+      "stats": {
+        "vitality": 16,
+        "strength": 4,
+        "defense": 2,
+        "agility": 4,
+        "focus": 0
+      },
+      "skills": ["goblin_stab", "goblin_hex", "goblin_mend"],
+      "pattern": ["goblin_stab"],
+      "ai": [
+        { "if": { "allyHpAtMost": 75 }, "do": "skill", "skill": "goblin_mend" },
+        { "if": { "targetStatusAbsent": "exposed" }, "do": "skill", "skill": "goblin_hex" }
+      ],
+      "experience": 6,
+      "gold": 5,
+      "unique": true,
+      "color": "#2E6A70",
+      "drops": [
+        {
+          "item": "minor_potion",
+          "message": "The shaman's pouch holds a bitter draught."
+        }
+      ]
+    },
+    {
+      "id": "goblin_chief",
+      "name": "Goblin Chief",
+      "description": "It keeps the pack moving. As the others fall, it fights harder.",
+      "level": 6,
+      "stats": {
+        "vitality": 22,
+        "strength": 11,
+        "defense": 3,
+        "agility": 6,
+        "focus": 0
+      },
+      "skills": ["goblin_jab", "goblin_bark", "goblin_smash", "goblin_rally", "goblin_frenzy"],
+      "pattern": ["goblin_jab", "goblin_jab", "goblin_bark"],
+      "ai": [
+        { "if": { "allyCountAtMost": 0, "selfStatusAbsent": "enraged" }, "do": "skill", "skill": "goblin_frenzy" },
+        { "if": { "selfStatus": "enraged" }, "do": "skill", "skill": "goblin_smash" },
+        { "if": { "allyCountAtMost": 1, "selfStatusAbsent": "bloodlust" }, "do": "skill", "skill": "goblin_rally" },
+        { "if": { "allyHpAtMost": 70, "selfStatusAbsent": "bloodlust" }, "do": "skill", "skill": "goblin_rally" }
+      ],
+      "experience": 6,
+      "gold": 7,
+      "unique": true,
+      "color": "#1E4A3A",
+      "drops": [
+        {
+          "item": "goblin_tooth",
+          "message": "The chief falls. A yellowed tooth comes loose."
+        }
+      ]
+    },
+    {
       "id": "barrow_sentry",
       "name": "Barrow Sentry",
       "description": "Stone set to watch the Stillbarrow door. It hardens when the barrow is pressed.",

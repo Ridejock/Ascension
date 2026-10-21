@@ -55,8 +55,14 @@ struct PlaytestOptions {
     std::string ChooseId;
     // --pick, in the order they were passed. Applied one open pick at a time.
     std::vector<std::string> PickIds;
+    // --focus, with --sim. The enemy id the policy kills first. Empty runs both orders
+    // when --enemy is the goblin pack and no class was set.
+    std::string FocusId;
     // --trace writes one state line per action to stderr. The transcript stays the combat log.
     bool Trace = false;
+    // --sim plays the fight without a window. With no class, the goblin pack prints a
+    // win table for every class build.
+    bool Sim = false;
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
@@ -65,7 +71,7 @@ struct PlaytestOptions {
     [[nodiscard]] bool DefinesRun() const
     {
         return Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || Gold.has_value() ||
-               !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty();
+               !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty() || Sim;
     }
 };
 

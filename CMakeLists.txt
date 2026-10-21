@@ -100,6 +100,8 @@ add_executable(Ascension
     src/App/Main.cpp
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
+    src/App/FightSim.cpp
+    src/App/FightSim.h
     src/App/GearLine.h
     src/App/Playtest.cpp
     src/App/Playtest.h
@@ -188,9 +190,11 @@ if(ASCENSION_BUILD_TESTS)
         tests/Check.h
         src/App/Playtest.cpp
         src/App/Playtest.h
+        src/App/FightSim.cpp
+        src/App/FightSim.h
     )
     target_include_directories(AscensionPlaytestTests PRIVATE src/App)
-    target_link_libraries(AscensionPlaytestTests PRIVATE AscensionProgress)
+    target_link_libraries(AscensionPlaytestTests PRIVATE AscensionProgress AscensionCombat)
     target_compile_definitions(AscensionPlaytestTests PRIVATE
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
         ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
