@@ -13,6 +13,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include "Check.h"
+#include "FightSim.h"
 #include "Playtest.h"
 #include "TalkInput.h"
 
@@ -789,6 +790,182 @@ void TestPellRumorKeys()
           "the other face buttons are not the menu");
 }
 
+void TestGoblinSim()
+{
+    std::string error;
+    PlaytestOptions sim;
+    Check(Parse({"--sim", "--enemy", "goblin_pack"}, sim, error), "--sim with the pack parses");
+    Check(sim.Sim && sim.Fight.Id == "goblin_pack" && sim.FocusId.empty(),
+          "--sim records the goblin pack and leaves the focus open");
+    Check(sim.Runs == 1000 && sim.Seed == 1 && sim.Slip == 0,
+          "--sim defaults to 1000 runs, seed 1, and no slip");
+
+    PlaytestOptions focus;
+    Check(!Parse({"--focus", "goblin_shaman"}, focus, error), "--focus without --sim fails");
+    Check(error.find("--focus") != std::string::npos, "the message names --focus");
+
+    PlaytestOptions bare;
+    Check(!Parse({"--sim"}, bare, error), "--sim without --enemy fails");
+    Check(error.find("--enemy") != std::string::npos, "the message says --sim needs --enemy");
+
+    PlaytestOptions both;
+    Check(!Parse({"--sim", "--enemy", "goblin_pack", "--keys", "1"}, both, error),
+          "--sim and --keys together fail");
+    Check(error.find("--sim") != std::string::npos && error.find("--keys") != std::string::npos,
+          "the message names both flags");
+
+    const fs::path commandsPath =
+        fs::path(ASCENSION_SOURCE_DIR) / "playtest/goblin-pack/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && commands.find("--sim --enemy goblin_pack") != std::string::npos,
+          "the goblin command file names the headless sim");
+
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the goblin sim");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    const std::vector<GoblinSimRow> rows = SimulateGoblinPack(data);
+    std::fputs(FormatGoblinSim(rows).c_str(), stdout);
+    Check(rows.size() == 20, "five builds, two focuses, and the fang on or off");
+    for (const GoblinSimRow& row : rows) {
+        Check(row.Ok && !row.TimedOut, "every goblin sim finishes");
+        if (!row.Ok || row.TimedOut)
+            std::printf("    %s %s fang %s: %s\n", row.Build.c_str(), row.FocusId.c_str(),
+                        row.Fang ? "yes" : "no", row.Error.c_str());
+    }
+}
+
+const SimRateRow* FindRate(const std::vector<SimRateRow>& rows, std::string_view build,
+                           std::string_view focus, bool fang)
+{
+    for (const SimRateRow& row : rows) {
+        if (row.Build == build && row.Focus == focus && row.Fang == fang)
+            return &row;
+    }
+    return nullptr;
+}
+
+const GoblinSimRow* FindSingle(const std::vector<GoblinSimRow>& rows, std::string_view build,
+                               std::string_view focus, bool fang)
+{
+    for (const GoblinSimRow& row : rows) {
+        if (row.Build == build && row.FocusId == focus && row.Fang == fang)
+            return &row;
+    }
+    return nullptr;
+}
+
+void CheckRateShape(const std::vector<SimRateRow>& rows, i32 expectRows, const char* what)
+{
+    Check(static_cast<i32>(rows.size()) == expectRows, what);
+    for (const SimRateRow& row : rows) {
+        Check(row.Ok && row.Runs > 0 && row.Wins <= row.Runs && row.Timeouts <= row.Runs,
+              "a rate row finishes inside its run count");
+        Check(row.P10Hp >= 0 && row.SumHp >= 0 && row.SumTurns > 0,
+              "a rate row records HP and turns");
+    }
+}
+
+void TestSimRates()
+{
+    std::string error;
+    PlaytestOptions rates;
+    Check(Parse({"--sim", "--enemy", "wolf_pack", "--runs", "4", "--seed", "7", "--slip", "15"},
+                rates, error),
+          "--runs, --seed, and --slip parse with --sim");
+    Check(rates.Runs == 4 && rates.Seed == 7 && rates.Slip == 15,
+          "the rate flags keep their values");
+
+    PlaytestOptions bareRuns;
+    Check(!Parse({"--runs", "4"}, bareRuns, error), "--runs without --sim fails");
+    Check(error.find("--runs") != std::string::npos, "the message names --runs");
+
+    PlaytestOptions badSlip;
+    Check(!Parse({"--sim", "--enemy", "goblin_pack", "--slip", "101"}, badSlip, error),
+          "--slip above 100 fails");
+    Check(error.find("--slip") != std::string::npos, "the message names --slip");
+
+    PlaytestOptions zeroRuns;
+    Check(!Parse({"--sim", "--enemy", "goblin_pack", "--runs", "0"}, zeroRuns, error),
+          "--runs of 0 fails");
+
+    PlaytestOptions seedZero;
+    Check(Parse({"--sim", "--enemy", "goblin_pack", "--seed", "0"}, seedZero, error),
+          "--seed 0 parses");
+    Check(seedZero.Seed == 1, "--seed 0 is stored as 1");
+
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the rate sim");
+    if (!data.IsLoaded())
+        return;
+
+    SimRateQuery query;
+    query.EncounterId = "goblin_pack";
+    query.Runs = 3;
+    query.Seed = 1;
+    query.Slip = 0;
+    const std::vector<SimRateRow> goblins = SimulateEncounterRates(data, query, error);
+    Check(error.empty(), "the goblin rate table builds");
+    CheckRateShape(goblins, 40, "five builds, four focuses, fang on or off");
+    const SimRateRow* shaman = FindRate(goblins, "Fighter", "shaman", false);
+    const SimRateRow* open = FindRate(goblins, "Fighter", "default", false);
+    Check(shaman != nullptr && shaman->Runs == 1, "a named focus with slip 0 is one fight");
+    Check(open != nullptr && open->Runs == 3, "default targeting plays every requested seed");
+
+    const std::vector<GoblinSimRow> singles = SimulateGoblinPack(data);
+    const GoblinSimRow* single = FindSingle(singles, "Fighter", "goblin_shaman", false);
+    const bool sameWin = shaman != nullptr && single != nullptr && single->Ok &&
+                         shaman->Wins == (single->Victory ? 1 : 0);
+    Check(sameWin, "the shaman rate matches the single focus-fire fight");
+    const bool sameHp = shaman != nullptr && single != nullptr &&
+                        shaman->P10Hp == (single->Victory ? single->Hp : 0);
+    Check(sameHp, "one deterministic fight is its own 10th percentile");
+
+    query.Slip = 100;
+    query.Runs = 2;
+    const std::vector<SimRateRow> slipped = SimulateEncounterRates(data, query, error);
+    Check(error.empty(), "slip 100 still builds");
+    CheckRateShape(slipped, 40, "slip keeps the goblin row count");
+    const SimRateRow* slippedShaman = FindRate(slipped, "Berserker rend", "shaman", true);
+    Check(slippedShaman != nullptr && slippedShaman->Runs == 2,
+          "slip makes a named focus play every seed");
+
+    query.EncounterId = "wolf_pack";
+    query.Slip = 0;
+    query.Runs = 2;
+    const std::vector<SimRateRow> wolves = SimulateEncounterRates(data, query, error);
+    Check(error.empty(), "the wolf rate table builds");
+    CheckRateShape(wolves, 30, "five builds, three wolf focuses, fang on or off");
+    const SimRateRow* dire = FindRate(wolves, "Guardian riposte", "dire wolf", false);
+    const SimRateRow* wolfOpen = FindRate(wolves, "Guardian riposte", "default", true);
+    Check(dire != nullptr && dire->Runs == 1, "dire-wolf focus is one fight");
+    Check(wolfOpen != nullptr && wolfOpen->Runs == 2, "wolf default targeting uses the seeds");
+
+    query.EncounterId = "barrow_sentry";
+    query.Runs = 5;
+    query.Slip = 100;
+    const std::vector<SimRateRow> sentry = SimulateEncounterRates(data, query, error);
+    Check(error.empty(), "the sentry rate table builds");
+    CheckRateShape(sentry, 10, "five builds and the fang, one sentry row each");
+    for (const SimRateRow& row : sentry)
+        Check(row.Runs == 1, "one foe does not change with the seed");
+
+    query.EncounterId = "not_a_fight";
+    const std::vector<SimRateRow> missing = SimulateEncounterRates(data, query, error);
+    Check(missing.empty() && error.find("not_a_fight") != std::string::npos,
+          "an unknown encounter is named in the error");
+
+    const std::string table = FormatSimRates(goblins, query);
+    Check(table.find("Win%") != std::string::npos && table.find("default") != std::string::npos,
+          "the rate table names the win rate and default targeting");
+}
+
 } // namespace
 
 int main()
@@ -804,6 +981,8 @@ int main()
     TestOuterBarrowReplayKeys();
     TestSaveQuitLoadKeys();
     TestPellRumorKeys();
+    TestGoblinSim();
+    TestSimRates();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

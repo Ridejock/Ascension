@@ -7,6 +7,22 @@ namespace Ascension {
 
 namespace {
 
+// The earlier seat wins a tie, which is the order `pool` is already in.
+i32 LowestHpIn(const std::vector<CombatantState>& foes, const std::vector<i32>& pool)
+{
+    i32 best = pool.front();
+    for (usize index = 1; index < pool.size(); ++index) {
+        const i32 candidate = pool[index];
+        const CombatantState& held = foes[static_cast<usize>(best)];
+        const CombatantState& next = foes[static_cast<usize>(candidate)];
+        const i32 heldMax = held.MaxHp < 1 ? 1 : held.MaxHp;
+        const i32 nextMax = next.MaxHp < 1 ? 1 : next.MaxHp;
+        if (static_cast<i64>(next.Hp) * heldMax < static_cast<i64>(held.Hp) * nextMax)
+            best = candidate;
+    }
+    return best;
+}
+
 i32 ClampPool(i64 value)
 {
     if (value < 0)
@@ -64,7 +80,7 @@ bool HpAtLeast(i32 hp, i32 maxHp, i32 percent)
 }
 
 bool AiHolds(const CombatantState& self, const CombatantState& target, const SkillDef* next,
-             const AiCondition& condition, i32 allyHp, i32 allyMaxHp)
+             const AiCondition& condition, i32 allyHp, i32 allyMaxHp, i32 allyCount)
 {
     if (condition.SelfHpAtMost.has_value() &&
         !HpAtMost(self.Hp, self.MaxHp, *condition.SelfHpAtMost))
@@ -84,6 +100,10 @@ bool AiHolds(const CombatantState& self, const CombatantState& target, const Ski
         if (allyMaxHp < 1 || !HpAtMost(allyHp, allyMaxHp, *condition.AllyHpAtMost))
             return false;
     }
+    if (condition.AllyCountAtMost.has_value() && allyCount > *condition.AllyCountAtMost)
+        return false;
+    if (condition.AllyCountAtLeast.has_value() && allyCount < *condition.AllyCountAtLeast)
+        return false;
     if (!condition.SelfStatus.empty() && !HoldsStatus(self, condition.SelfStatus))
         return false;
     if (!condition.SelfStatusAbsent.empty() && HoldsStatus(self, condition.SelfStatusAbsent))
@@ -1516,6 +1536,12 @@ void Battle::CollectAims(const CombatantState& user, EffectAim aim, std::vector<
         out.push_back(foe);
         return;
     }
+    if (aim == EffectAim::LowestHpEnemy) {
+        AimRef foe;
+        foe.Index = LowestHpIn(m_Enemies, pool);
+        out.push_back(foe);
+        return;
+    }
     for (const i32 foeIndex : pool) {
         AimRef foe;
         foe.Index = foeIndex;
@@ -1598,6 +1624,7 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
     bool sawReflect = false;
     i32 reflectPercent = 0;
     bool sawHeal = false;
+    bool sawAimedHeal = false;
     bool sawEmpower = false;
     bool sawHarden = false;
     i32 hardenAmount = 0;
@@ -1699,11 +1726,32 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
             i32 scaling = 0;
             if (effect.Scaling.has_value())
                 scaling = user.Stats.Get(*effect.Scaling);
-            const i32 gained = RestoreHp(user, HealAmount(power, scaling, m_Rules));
-            result.Healing += gained;
-            sawHeal = true;
-            if (gained > 0)
-                NoteHeal(extra, gained);
+            const i32 amount = HealAmount(power, scaling, m_Rules);
+            // No target keeps the old heal: the user, and one "Heals N." with no name.
+            // A target heals those aims and names each one that actually gained health.
+            if (!effect.Aim.has_value()) {
+                const i32 gained = RestoreHp(user, amount);
+                result.Healing += gained;
+                sawHeal = true;
+                if (gained > 0)
+                    NoteHeal(extra, gained);
+            } else {
+                sawAimedHeal = true;
+                std::vector<AimRef> aims;
+                CollectAims(user, *effect.Aim, aims);
+                for (const AimRef& aim : aims) {
+                    CombatantState& who = Aimed(aim);
+                    const i32 gained = RestoreHp(who, amount);
+                    result.Healing += gained;
+                    if (gained <= 0)
+                        continue;
+                    extra += " Heals ";
+                    extra += who.Name;
+                    extra += " ";
+                    extra += std::to_string(gained);
+                    extra += ".";
+                }
+            }
         } else if (effect.Op == EffectOp::Empower) {
             user.EmpowerPercent = effect.Amount.value_or(0);
             sawEmpower = true;
@@ -1848,6 +1896,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                       std::to_string(guardAmount) + " percent.";
     } else if (sawHeal && result.Healing == 0) {
         result.Text = user.Name + " uses " + skill.Name + " but is already at full health.";
+    } else if (sawAimedHeal && result.Healing == 0) {
+        result.Text = user.Name + " uses " + skill.Name + ". No one needs it.";
     } else if (sawEmpower) {
         result.Text = user.Name + " uses " + skill.Name + ". The next blow hits harder.";
     } else if (sawHarden) {
@@ -1982,14 +2032,16 @@ const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
     const PatternHead head = PeekPattern(who, *enemy);
     i32 allyHp = 0;
     i32 allyMaxHp = 0;
+    i32 allyCount = 0;
     for (const CombatantState& foe : m_Enemies) {
         if (&foe == &who || !foe.Alive())
             continue;
         allyHp += foe.Hp;
         allyMaxHp += foe.MaxHp;
+        ++allyCount;
     }
     for (const AiRule& rule : enemy->Ai) {
-        if (!AiHolds(who, m_Player, head.Skill, rule.If, allyHp, allyMaxHp))
+        if (!AiHolds(who, m_Player, head.Skill, rule.If, allyHp, allyMaxHp, allyCount))
             continue;
         if (rule.Action == AiAction::Pattern)
             break;

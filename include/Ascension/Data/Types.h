@@ -54,9 +54,11 @@ enum class SkillKind : u8 { Active, Passive };
 enum class SkillTarget : u8 { Self, Enemy, AllEnemies };
 
 // Who one effect lands on. `target` is the foe the skill is pointed at: the player's
-// selected enemy, or the player when an enemy acts. `allEnemies` is every living enemy.
-// `randomEnemy` is one living enemy. `self` is the unit using the skill.
-enum class EffectAim : u8 { Self, Target, AllEnemies, RandomEnemy };
+// selected enemy, or the player when an enemy acts. `allEnemies` is every living enemy
+// other than the user. `randomEnemy` is one of those, walking the pack in order.
+// `lowestHpEnemy` is the one of those with the lowest health percent; a tie keeps the
+// earlier seat. `self` is the unit using the skill.
+enum class EffectAim : u8 { Self, Target, AllEnemies, RandomEnemy, LowestHpEnemy };
 
 // When an effect runs. Battle dispatches these. It does not look at a skill id.
 // always is folded into the unit (a flat stat, or a missing-health bonus on a blow).
@@ -285,12 +287,17 @@ enum class AiAction : u8 { Pattern, Skill };
 // maxHp * percent. AllyHpAtMost uses that comparison on the other living foes together:
 // their current health over their combined maximum. Dead foes are left out of both
 // totals. The acting foe, with no other living ally, does not satisfy it.
+// AllyCountAtMost and AllyCountAtLeast count those same other living foes. The acting
+// foe is not one of them, and a dead foe is not either. 0 is a foe whose allies have
+// all fallen.
 struct AiCondition {
     std::optional<i32> SelfHpAtMost;
     std::optional<i32> SelfHpAtLeast;
     std::optional<i32> TargetHpAtMost;
     std::optional<i32> TargetHpAtLeast;
     std::optional<i32> AllyHpAtMost;
+    std::optional<i32> AllyCountAtMost;
+    std::optional<i32> AllyCountAtLeast;
     std::string SelfStatus;
     std::string SelfStatusAbsent;
     std::string TargetStatus;
@@ -582,6 +589,8 @@ inline const char* ToString(EffectAim aim)
         return "allEnemies";
     if (aim == EffectAim::RandomEnemy)
         return "randomEnemy";
+    if (aim == EffectAim::LowestHpEnemy)
+        return "lowestHpEnemy";
     return "target";
 }
 

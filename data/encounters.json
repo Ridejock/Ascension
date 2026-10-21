@@ -26,6 +26,11 @@
       "enemies": ["dire_wolf", "wolf", "wolf"]
     },
     {
+      "id": "goblin_pack",
+      "name": "Goblin Pack",
+      "enemies": ["goblin_chief", "goblin_shaman", "goblin"]
+    },
+    {
       "id": "barrow_sentry",
       "name": "Barrow Sentry",
       "enemies": ["barrow_sentry"]

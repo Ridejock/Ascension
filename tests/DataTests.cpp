@@ -1287,6 +1287,31 @@ void TestConditionalFields()
     }
     {
         TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, "
+            "\"target\": \"lowestHpEnemy\" }");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "an onUse heal may name who it restores");
+        const SkillDef* wind = data.FindSkill("second_wind");
+        const EffectDef* mend = wind != nullptr ? wind->FindEffect("mend") : nullptr;
+        Check(mend != nullptr && mend->Aim == EffectAim::LowestHpEnemy,
+              "lowestHpEnemy is stored on the heal");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json",
+            "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
+            "{ \"id\": \"mend\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", \"power\": 8, "
+            "\"target\": \"lowestHpEnemy\" }");
+        ExpectUnused(copy.Path, "skills.json", "second_wind", "mend", "target",
+                     "onTurnStart heal does not use target");
+    }
+    {
+        TempCopy copy;
         ReplaceInFile(copy.Path / "skills.json",
                       "{ \"id\": \"ward\", \"trigger\": \"onUse\", \"op\": \"guard\", \"amount\": "
                       "50 }",
@@ -1648,13 +1673,20 @@ void TestShippedDescriptions()
 
     const EnemyDef* wolf = data.FindEnemy("wolf");
     const EnemyDef* dire = data.FindEnemy("dire_wolf");
-    bool onlyDire = dire != nullptr && !dire->Ai.empty();
+    const EnemyDef* shaman = data.FindEnemy("goblin_shaman");
+    const EnemyDef* chief = data.FindEnemy("goblin_chief");
+    const EnemyDef* grunt = data.FindEnemy("goblin");
+    bool onlyPacks = dire != nullptr && !dire->Ai.empty() && shaman != nullptr &&
+                     !shaman->Ai.empty() && chief != nullptr && !chief->Ai.empty() &&
+                     grunt != nullptr && grunt->Ai.empty();
     for (const EnemyDef& enemy : data.GetEnemies()) {
-        if (enemy.Id != "dire_wolf" && !enemy.Ai.empty())
-            onlyDire = false;
+        if (enemy.Ai.empty())
+            continue;
+        if (enemy.Id != "dire_wolf" && enemy.Id != "goblin_shaman" && enemy.Id != "goblin_chief")
+            onlyPacks = false;
     }
-    Check(onlyDire && !data.GetEnemies().empty(),
-          "the dire wolf is the only shipped foe with ai rules");
+    Check(onlyPacks && !data.GetEnemies().empty(),
+          "the dire wolf, the shaman, and the chief are the foes with ai rules");
     const bool direPattern = dire != nullptr && dire->Pattern.size() == 5 &&
                              dire->Pattern[0] == "bite" && dire->Pattern[1] == "howl" &&
                              dire->Pattern[2] == "stalk" && dire->Pattern[3] == "circle" &&
@@ -2215,6 +2247,44 @@ void TestAiValidation()
             !sentry->Ai[0].If.TargetGuardAtLeast.has_value();
         Check(loaded, "the loaded rule keeps the skill, Exposed, and the pattern head");
     }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyCountAtMost\": 10 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "allyCountAtMost",
+                     "an ally count above 9 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyCountAtLeast\": -1 }, "
+                      "\"do\": \"pattern\" } ],");
+        TestRejected(copy.Path, "enemies.json", "allyCountAtLeast",
+                     "an ally count below 0 is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "enemies.json",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],",
+                      "\"pattern\": [\"harden\", \"thrust\", \"thrust\"],\n"
+                      "      \"ai\": [ { \"if\": { \"allyCountAtMost\": 0 }, "
+                      "\"do\": \"skill\", \"skill\": \"harden\" } ],");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "an ally count rule loads");
+        const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
+        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
+                            sentry->Ai[0].Action == AiAction::Skill &&
+                            sentry->Ai[0].Skill == "harden" &&
+                            sentry->Ai[0].If.AllyCountAtMost == 0 &&
+                            !sentry->Ai[0].If.AllyCountAtLeast.has_value();
+        Check(loaded, "allyCountAtMost 0 is stored, and it means the foe is alone");
+    }
 }
 
 struct MissingGlyph {
@@ -2268,6 +2338,7 @@ const char* kUiLabels[] = {
     "The next hit loses ",
     "The next hit is reduced by ",
     "but is already at full health.",
+    "No one needs it.",
     "The next blow hits harder.",
     "Defense +",
     " joins the fight.",
@@ -2416,6 +2487,96 @@ void TestFontGlyphs()
     }
 }
 
+void TestShippedGoblins()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the goblin pack");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    i32 wolfPack = -1;
+    i32 goblinPack = -1;
+    i32 sentry = -1;
+    const auto encounters = data.GetEncounters();
+    for (i32 index = 0; index < static_cast<i32>(encounters.size()); ++index) {
+        const std::string& id = encounters[static_cast<usize>(index)].Id;
+        if (id == "wolf_pack")
+            wolfPack = index;
+        else if (id == "goblin_pack")
+            goblinPack = index;
+        else if (id == "barrow_sentry")
+            sentry = index;
+    }
+    const EncounterDef* pack = data.FindEncounter("goblin_pack");
+    const bool members = pack != nullptr && pack->Name == "Goblin Pack" && pack->Zone.empty() &&
+                         pack->Enemies.size() == 3 && pack->Enemies[0] == "goblin_chief" &&
+                         pack->Enemies[1] == "goblin_shaman" && pack->Enemies[2] == "goblin";
+    Check(members && goblinPack == wolfPack + 1 && sentry == goblinPack + 1,
+          "the goblin pack sits after the wolf pack and before the sentry");
+
+    const EnemyDef* grunt = data.FindEnemy("goblin");
+    const EnemyDef* shaman = data.FindEnemy("goblin_shaman");
+    const EnemyDef* chief = data.FindEnemy("goblin_chief");
+    const bool gruntShape =
+        grunt != nullptr && !grunt->Unique && grunt->Ai.empty() && grunt->Experience == 6 &&
+        grunt->Gold == 4 && grunt->HasColor && grunt->Red == 0x3A && grunt->Green == 0x8A &&
+        grunt->Blue == 0x3E && grunt->Pattern.size() == 1 && grunt->Pattern[0] == "goblin_stab" &&
+        grunt->Drops.empty();
+    Check(gruntShape, "the grunt is a green square with a stab and no rules");
+
+    const bool shamanRules =
+        shaman != nullptr && shaman->Unique && shaman->Experience == 6 && shaman->Gold == 5 &&
+        shaman->HasColor && shaman->Red == 0x2E && shaman->Green == 0x6A && shaman->Blue == 0x70 &&
+        shaman->Pattern.size() == 1 && shaman->Pattern[0] == "goblin_stab" &&
+        shaman->Ai.size() == 2 && shaman->Ai[0].Action == AiAction::Skill &&
+        shaman->Ai[0].Skill == "goblin_mend" && shaman->Ai[0].If.AllyHpAtMost == 75 &&
+        shaman->Ai[1].Skill == "goblin_hex" && shaman->Ai[1].If.TargetStatusAbsent == "exposed" &&
+        shaman->Drops.size() == 1 && shaman->Drops[0].Item == "minor_potion";
+    Check(shamanRules, "the shaman mends a wounded pack, then hexes a foe who is not Exposed");
+
+    const bool chiefRules =
+        chief != nullptr && chief->Unique && chief->Experience == 6 && chief->Gold == 7 &&
+        chief->HasColor && chief->Red == 0x1E && chief->Green == 0x4A && chief->Blue == 0x3A &&
+        grunt != nullptr && chief->Stats.Vitality > grunt->Stats.Vitality &&
+        chief->Pattern.size() == 3 &&
+        chief->Pattern[0] == "goblin_jab" && chief->Pattern[1] == "goblin_jab" &&
+        chief->Pattern[2] == "goblin_bark" && chief->Ai.size() == 4 &&
+        chief->Ai[0].Skill == "goblin_frenzy" && chief->Ai[0].If.AllyCountAtMost == 0 &&
+        chief->Ai[0].If.SelfStatusAbsent == "enraged" && chief->Ai[1].Skill == "goblin_smash" &&
+        chief->Ai[1].If.SelfStatus == "enraged" && chief->Ai[2].Skill == "goblin_rally" &&
+        chief->Ai[2].If.AllyCountAtMost == 1 &&
+        chief->Ai[2].If.SelfStatusAbsent == "bloodlust" && chief->Ai[3].Skill == "goblin_rally" &&
+        chief->Ai[3].If.AllyHpAtMost == 70 && chief->Ai[3].If.SelfStatusAbsent == "bloodlust" &&
+        chief->Drops.size() == 1 && chief->Drops[0].Item == "goblin_tooth";
+    Check(chiefRules, "the chief frenzies alone, smashes while enraged, and rallies the pack once");
+    if (grunt != nullptr && chief != nullptr && shaman != nullptr) {
+        const i32 xp = grunt->Experience + shaman->Experience + chief->Experience;
+        const i32 gold = grunt->Gold + shaman->Gold + chief->Gold;
+        Check(xp == 18 && gold == 16, "the pack pays 18 XP and 16 gold");
+    }
+
+    const SkillDef* mend = data.FindSkill("goblin_mend");
+    const EffectDef* mendHit = mend != nullptr ? mend->FindEffect("mend") : nullptr;
+    Check(mend != nullptr && mend->Target == SkillTarget::Self && mendHit != nullptr &&
+              mendHit->Op == EffectOp::Heal && mendHit->Aim == EffectAim::LowestHpEnemy,
+          "mend is a heal aimed at the most wounded ally");
+
+    const ItemDef* tooth = data.FindItem("goblin_tooth");
+    bool stocked = false;
+    for (const std::string& id : data.GetShop().Stock) {
+        if (id == "goblin_tooth")
+            stocked = true;
+    }
+    const RarityDef* uncommon = tooth != nullptr ? data.FindRarity(tooth->Rarity) : nullptr;
+    Check(tooth != nullptr && tooth->Rarity == "uncommon" && tooth->Slot == GearSlot::Accessory &&
+              tooth->Icon == "ring" && tooth->Bonus.Strength == 1 && tooth->Value == 22 &&
+              !stocked && uncommon != nullptr && !uncommon->UniquePerType,
+          "Goblin Tooth is an uncommon ring Pell does not sell");
+}
+
 int main()
 {
     TestSample();
@@ -2431,6 +2592,7 @@ int main()
     TestSkillPicks();
     TestDescriptionsResolve();
     TestShippedDescriptions();
+    TestShippedGoblins();
     TestFontGlyphs();
     TestIcons();
     TestMythicUnique();

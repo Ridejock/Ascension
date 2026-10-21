@@ -411,6 +411,95 @@
         { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
         { "id": "mend", "trigger": "onUse", "op": "heal", "power": 12 }
       ]
+    },
+    {
+      "id": "goblin_stab",
+      "name": "Stab",
+      "description": "A short knife.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "goblin_jab",
+      "name": "Jab",
+      "description": "A mean jab with the chief's knife.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "goblin_smash",
+      "name": "Smash",
+      "description": "A wild swing. It lands harder once the pack is gone.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" }
+      ]
+    },
+    {
+      "id": "goblin_bark",
+      "name": "Bark",
+      "description": "A sharp bark. It deals no damage.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "cry", "trigger": "onUse", "op": "grantFocus", "amount": 0 }
+      ]
+    },
+    {
+      "id": "goblin_hex",
+      "name": "Hex",
+      "description": "A sour word. The foe is left {curse.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "curse", "trigger": "onUse", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
+      "id": "goblin_mend",
+      "name": "Mend",
+      "description": "Close the worst wound in the pack.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 16, "target": "lowestHpEnemy" }
+      ]
+    },
+    {
+      "id": "goblin_rally",
+      "name": "Bloodlust",
+      "description": "The chief puts {pack.status} on itself and on the rest of the pack.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "self", "trigger": "onUse", "op": "applyStatus", "status": "bloodlust" },
+        { "id": "pack", "trigger": "onUse", "op": "applyStatus", "status": "bloodlust", "target": "allEnemies" }
+      ]
+    },
+    {
+      "id": "goblin_frenzy",
+      "name": "Frenzy",
+      "description": "Alone, the chief gives in to {rage.status} and hits harder.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 0,
+      "effects": [
+        { "id": "rage", "trigger": "onUse", "op": "applyStatus", "status": "enraged" }
+      ]
     }
   ]
 }

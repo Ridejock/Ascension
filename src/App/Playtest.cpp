@@ -376,7 +376,7 @@ bool PlaytestOptions::UsesData() const
 {
     return !DataDir.empty() || Level.has_value() || !ClassId.empty() || !Fight.Id.empty() ||
            Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty() ||
-           !PickIds.empty();
+           !PickIds.empty() || Sim;
 }
 
 bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOptions& options,
@@ -384,6 +384,9 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
 {
     bool sawKeys = false;
     bool sawKeysFile = false;
+    bool sawRuns = false;
+    bool sawSeed = false;
+    bool sawSlip = false;
     for (usize index = 1; index < args.size(); ++index) {
         std::string_view token = args[index];
         if (token.empty())
@@ -521,6 +524,15 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.PickIds.emplace_back(value);
+        } else if (flag == "--focus") {
+            if (AlreadySet(!options.FocusId.empty(), flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            if (value.empty()) {
+                error = "--focus needs an enemy id";
+                return false;
+            }
+            options.FocusId = std::string(value);
         } else if (flag == "--save-dir") {
             if (AlreadySet(!options.SaveDir.empty(), flag, error) ||
                 !TakeValue(args, index, attached, flag, value, error))
@@ -536,10 +548,77 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.Trace = true;
+        } else if (flag == "--sim") {
+            if (attached.has_value()) {
+                error = "--sim does not take a value";
+                return false;
+            }
+            if (options.Sim) {
+                error = "--sim was already set";
+                return false;
+            }
+            options.Sim = true;
+        } else if (flag == "--runs") {
+            if (AlreadySet(sawRuns, flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            i32 runs = 0;
+            if (!ParseInt(value, runs) || runs < 1 || runs > 100000) {
+                error = "--runs needs a count from 1 to 100000";
+                return false;
+            }
+            sawRuns = true;
+            options.Runs = runs;
+        } else if (flag == "--seed") {
+            if (AlreadySet(sawSeed, flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            i32 seed = 0;
+            if (!ParseInt(value, seed) || seed < 0) {
+                error = "--seed needs a non-negative integer";
+                return false;
+            }
+            sawSeed = true;
+            options.Seed = seed == 0 ? 1 : seed;
+        } else if (flag == "--slip") {
+            if (AlreadySet(sawSlip, flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            i32 slip = 0;
+            if (!ParseInt(value, slip) || slip < 0 || slip > 100) {
+                error = "--slip needs a percent from 0 to 100";
+                return false;
+            }
+            sawSlip = true;
+            options.Slip = slip;
         } else {
             error = "unknown flag '" + std::string(flag) + "'";
             return false;
         }
+    }
+    if (options.Sim && options.Fight.Id.empty()) {
+        error = "--sim needs --enemy";
+        return false;
+    }
+    if (options.Sim && !options.Keys.empty()) {
+        error = "pass --sim or --keys, not both";
+        return false;
+    }
+    if (!options.FocusId.empty() && !options.Sim) {
+        error = "--focus is only used with --sim";
+        return false;
+    }
+    if (sawRuns && !options.Sim) {
+        error = "--runs is only used with --sim";
+        return false;
+    }
+    if (sawSeed && !options.Sim) {
+        error = "--seed is only used with --sim";
+        return false;
+    }
+    if (sawSlip && !options.Sim) {
+        error = "--slip is only used with --sim";
+        return false;
     }
     error.clear();
     return true;
