@@ -7,6 +7,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Talk.h"
+#include "Ascension/Map/Walk.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/RunSave.h"
@@ -84,6 +85,13 @@ private:
     // does not need focus. The run ends after the last key unless --frames is longer.
     // Window key-downs are ignored until the script ends.
     void PlayScriptedKey();
+    // MoveNorth/East/South/West on the arrows, WASD, the d-pad, and the left stick.
+    // The fight screen does not read these actions.
+    void BindMapActions();
+    void StepMap(f32 dt);
+    void AdoptMap();
+    [[nodiscard]] WalkDir DirectionOfKey(SDL_Scancode scancode);
+    [[nodiscard]] WalkInput ReadMapInput();
 
     // Declared before m_Data: the database is opened on this command's folder.
     PlaytestOptions m_Play;
@@ -130,6 +138,12 @@ private:
     i32 m_PickRow = 0;
     Emerald::AssetHandle<Emerald::TextureAtlas> m_Icons;
     Emerald::AssetHandle<Emerald::Texture> m_Accents;
+    // Set only for --map. The fight screen stays the path when this is false.
+    bool m_OnMap = false;
+    Walker m_Walker;
+    // A scripted key does not reach Emerald's keyboard, so the map records it here
+    // for the step taken later in the same frame.
+    WalkDir m_ScriptDir = WalkDir::None;
 };
 
 } // namespace Ascension

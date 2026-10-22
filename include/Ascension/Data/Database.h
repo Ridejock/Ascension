@@ -38,7 +38,7 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
-// encounters, items, rarities, shop, combat, progress, tiles), every data/dialogue/*.json
+// encounters, items, rarities, shop, combat, progress, tiles, walk), every data/dialogue/*.json
 // file, every data/maps/*.json file, plus the icon sheet under assets/icons, checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file
 // that changed, and then stayed unchanged for one more check, is read again. A new or
@@ -88,6 +88,7 @@ public:
     [[nodiscard]] const std::filesystem::path& GetIconSheet() const { return m_IconSheet; }
     [[nodiscard]] const CombatRules& GetRules() const { return m_Rules; }
     [[nodiscard]] const ProgressRules& GetProgress() const { return m_Progress; }
+    [[nodiscard]] const WalkRules& GetWalk() const { return m_Walk; }
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
@@ -177,6 +178,7 @@ private:
     std::vector<MapDef> m_Maps;
     CombatRules m_Rules;
     ProgressRules m_Progress;
+    WalkRules m_Walk;
     // Field names from effects.json "better". The merge reads these; it does not decide
     // higher or lower from the field's name.
     std::vector<std::string> m_HigherFields;

@@ -48,6 +48,8 @@ struct PlaytestOptions {
     std::optional<i32> Level;
     std::string ClassId;
     FightRequest Fight;
+    // --map. Empty stays on the fight screen. A set id opens that map and starts no fight.
+    std::string MapId;
     std::optional<i32> Gold;
     std::vector<PlaytestItem> Give;
     std::vector<std::string> Equip;
@@ -79,8 +81,9 @@ struct PlaytestOptions {
     // True when the command builds a hero of its own. That run does not load a save.
     [[nodiscard]] bool DefinesRun() const
     {
-        return Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || Gold.has_value() ||
-               !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty() || Sim;
+        return Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || !MapId.empty() ||
+               Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty() ||
+               !PickIds.empty() || Sim;
     }
 };
 

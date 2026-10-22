@@ -164,6 +164,26 @@ void TestParseExampleAndEngineFlags()
               keys.Keys[13] == SDL_SCANCODE_ESCAPE,
           "letters, space, arrows, and escape map to scancodes");
 
+    PlaytestOptions wasd;
+    Check(Parse({"--keys", "w a s d"}, wasd, why), "map step keys parse");
+    Check(wasd.Keys.size() == 4 && wasd.Keys[0] == SDL_SCANCODE_W &&
+              wasd.Keys[1] == SDL_SCANCODE_A && wasd.Keys[2] == SDL_SCANCODE_S &&
+              wasd.Keys[3] == SDL_SCANCODE_D,
+          "w a s d are the map step keys");
+
+    PlaytestOptions map;
+    Check(Parse({"--map", "fixture_a", "--keys", "right right right down"}, map, why),
+          "--map parses with a key script");
+    Check(map.MapId == "fixture_a" && map.Keys.size() == 4 && map.DefinesRun() && map.UsesData(),
+          "--map names the map and builds its own run");
+    Check(!Parse({"--map"}, map, why), "--map needs an id");
+    Check(!Parse({"--map", "fixture_a", "--map", "fixture_b"}, map, why), "a repeated --map fails");
+    Check(!Parse({"--map", "fixture_a", "--enemy", "wolf"}, map, why),
+          "--map and --enemy together fail");
+    CheckHas(why, "--map", "the message names --map");
+    Check(!Parse({"--map", "fixture_a", "--sim", "--enemy", "wolf"}, map, why),
+          "--map and --sim together fail");
+
     PlaytestOptions badKey;
     Check(!Parse({"--keys", "1 jump"}, badKey, why), "an unknown key fails");
     CheckHas(why, "jump", "the unknown key is named");
@@ -225,6 +245,15 @@ void TestBadIds()
     Inventory bag;
     PlaytestSetup setup;
     std::string why;
+
+    PlaytestOptions missingMap;
+    missingMap.MapId = "no_such_map";
+    Check(!ApplyPlaytest(hero, bag, data, missingMap, setup, why), "an unknown map fails");
+    CheckHas(why, "no_such_map", "the unknown map id is named");
+
+    PlaytestOptions knownMap;
+    knownMap.MapId = "fixture_a";
+    Check(ApplyPlaytest(hero, bag, data, knownMap, setup, why), "fixture_a is a map id");
 
     PlaytestOptions foe;
     foe.Fight.Id = "no_such_foe";

@@ -25,7 +25,7 @@ constexpr const char* kFileNames[] = {
     "stats.json",   "effects.json", "skills.json",     "statuses.json",
     "classes.json", "enemies.json", "encounters.json", "items.json",
     "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-    "tiles.json",
+    "tiles.json",   "walk.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -333,6 +333,7 @@ struct Parsed {
     std::vector<MapDef> Maps;
     CombatRules Rules;
     ProgressRules Progress;
+    WalkRules Walk;
     std::vector<std::string> HigherFields;
     std::vector<std::string> LowerFields;
 };
@@ -2596,6 +2597,43 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("walk");
+    if (body == root.end() || !body->is_object()) {
+        error = "'walk' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body,
+                   {"stepMilliseconds", "tilePixels", "heroInsetPercent", "heroColor", "linkColor"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    WalkRules rules;
+    if (!RequireInt(*body, "stepMilliseconds", 1, 2000, rules.StepMilliseconds, error) ||
+        !RequireInt(*body, "tilePixels", 8, 256, rules.TilePixels, error) ||
+        !RequireInt(*body, "heroInsetPercent", 0, 45, rules.HeroInsetPercent, error))
+        return false;
+    std::string heroColor;
+    std::string linkColor;
+    if (!RequireString(*body, "heroColor", heroColor, error) ||
+        !RequireString(*body, "linkColor", linkColor, error))
+        return false;
+    std::string why;
+    if (!ParseColor(heroColor, rules.HeroRed, rules.HeroGreen, rules.HeroBlue, why)) {
+        error = "heroColor " + why;
+        return false;
+    }
+    if (!ParseColor(linkColor, rules.LinkRed, rules.LinkGreen, rules.LinkBlue, why)) {
+        error = "linkColor " + why;
+        return false;
+    }
+    parsed.Walk = rules;
+    return true;
+}
+
 bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto body = root.find("progress");
@@ -3895,12 +3933,12 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
                               LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
                               LoadShop,    LoadCombat,  LoadProgress,   LoadRarities,
-                              LoadTiles};
+                              LoadTiles,   LoadWalk};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
                            "classes.json", "enemies.json", "encounters.json", "items.json",
                            "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-                           "tiles.json"};
+                           "tiles.json",   "walk.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -3919,7 +3957,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
                                     "classes", "enemies", "encounters", "items",
                                     "shop",    "combat",  "progress",   "rarities",
-                                    "tiles"};
+                                    "tiles",   "walk"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -4171,6 +4209,7 @@ bool Database::Load(DataError* error)
     m_Maps = std::move(parsed.Maps);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
+    m_Walk = parsed.Walk;
     m_HigherFields = std::move(parsed.HigherFields);
     m_LowerFields = std::move(parsed.LowerFields);
     ApplyTimes(times);

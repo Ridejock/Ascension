@@ -6,6 +6,7 @@
 
 #include "FoeAlert.h"
 #include "GearLine.h"
+#include "MapView.h"
 #include "SourceTag.h"
 #include "TalkInput.h"
 
@@ -29,6 +30,28 @@ constexpr SDL_Scancode kItemKey = SDL_SCANCODE_C;
 // at most a handful of foes; the cap is several rounds so a leftover foe turn cannot eat
 // the next key, and it still happens on that key's frame.
 constexpr i32 kScriptPumpPasses = 4;
+
+// One row is one direction. BindMapActions and the readers below share it, so a
+// new key cannot be bound without also being read.
+struct MoveBinding {
+    const char* Action;
+    WalkDir Direction;
+    Emerald::Key KeyA;
+    Emerald::Key KeyB;
+    Emerald::GamepadButton Pad;
+    Emerald::GamepadButton Stick;
+};
+
+const MoveBinding kMoves[] = {
+    {"MoveNorth", WalkDir::North, Emerald::Key::W, Emerald::Key::Up, Emerald::GamepadButton::DPadUp,
+     Emerald::GamepadButton::LeftStickUp},
+    {"MoveEast", WalkDir::East, Emerald::Key::D, Emerald::Key::Right,
+     Emerald::GamepadButton::DPadRight, Emerald::GamepadButton::LeftStickRight},
+    {"MoveSouth", WalkDir::South, Emerald::Key::S, Emerald::Key::Down,
+     Emerald::GamepadButton::DPadDown, Emerald::GamepadButton::LeftStickDown},
+    {"MoveWest", WalkDir::West, Emerald::Key::A, Emerald::Key::Left,
+     Emerald::GamepadButton::DPadLeft, Emerald::GamepadButton::LeftStickLeft},
+};
 
 FightStanding FightStandingOf(const Battle* battle)
 {
@@ -800,6 +823,19 @@ void AscensionApp::OnStart()
         return;
     OpenPads();
     EnsureIcons();
+    BindMapActions();
+    if (!m_Play.MapId.empty()) {
+        if (!m_Walker.Enter(m_Data, m_Play.MapId)) {
+            m_StartError = "map '" + m_Play.MapId + "' does not exist";
+            std::fprintf(stderr, "%s\n", m_StartError.c_str());
+            Note(m_StartError);
+            Quit();
+            return;
+        }
+        m_OnMap = true;
+        Note("Map " + m_Walker.Place().MapId + ".");
+        return;
+    }
     if (resumed && (m_Standing == RunStanding::Victory || m_Standing == RunStanding::Defeat)) {
         Note(m_Standing == RunStanding::Victory ? "Victory." : "Defeat.");
         Note("Resumed.");
@@ -860,6 +896,13 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     if (event.key.scancode == SDL_SCANCODE_F5) {
         if (WriteSave())
             Note("Saved.");
+        return;
+    }
+    if (m_OnMap) {
+        // A real key already reached Emerald's keyboard. Only a scripted press,
+        // which is injected here and nowhere else, has to be recorded.
+        if (m_ApplyingScript)
+            m_ScriptDir = DirectionOfKey(event.key.scancode);
         return;
     }
     if (m_Talk) {
@@ -1096,6 +1139,80 @@ bool AscensionApp::TakeAutoPath()
     return true;
 }
 
+void AscensionApp::BindMapActions()
+{
+    Emerald::Input& input = GetInput();
+    for (const MoveBinding& move : kMoves) {
+        input.BindAction(move.Action, {move.KeyA, move.KeyB});
+        input.BindAction(move.Action, {move.Pad, move.Stick});
+    }
+}
+
+WalkDir AscensionApp::DirectionOfKey(SDL_Scancode scancode)
+{
+    const auto key = static_cast<Emerald::Key>(static_cast<u16>(scancode));
+    const std::vector<std::string_view> actions = GetInput().FindActionsUsing(key);
+    for (const std::string_view action : actions) {
+        for (const MoveBinding& move : kMoves) {
+            if (action == move.Action)
+                return move.Direction;
+        }
+    }
+    return WalkDir::None;
+}
+
+WalkInput AscensionApp::ReadMapInput()
+{
+    Emerald::Input& input = GetInput();
+    WalkInput held;
+    for (const MoveBinding& move : kMoves) {
+        if (input.WasActionPressed(move.Action)) {
+            WalkInput fresh;
+            fresh.Direction = move.Direction;
+            fresh.Fresh = true;
+            return fresh;
+        }
+        if (held.Direction == WalkDir::None && input.IsActionDown(move.Action))
+            held.Direction = move.Direction;
+    }
+    return held;
+}
+
+void AscensionApp::StepMap(f32 dt)
+{
+    if (!m_Walker.Placed())
+        return;
+    WalkInput input;
+    const bool scripting = m_KeyCursor < m_Play.Keys.size() || m_ScriptDir != WalkDir::None;
+    if (m_ScriptDir != WalkDir::None) {
+        input.Direction = m_ScriptDir;
+        input.Fresh = true;
+        m_ScriptDir = WalkDir::None;
+    } else if (!scripting) {
+        input = ReadMapInput();
+    }
+    const WalkStep step = m_Walker.Advance(m_Data, m_Data.GetWalk(), input, dt);
+    if (step.Kind == WalkStepKind::Exited)
+        Note("Exit to " + m_Walker.Place().MapId + ".");
+    else if (step.Kind == WalkStepKind::Blocked && input.Fresh)
+        Note("Blocked.");
+}
+
+void AscensionApp::AdoptMap()
+{
+    const WalkPlace before = m_Walker.Place();
+    if (!m_Walker.Adopt(m_Data, m_Play.MapId)) {
+        Note("No map to stand on.");
+        return;
+    }
+    const WalkPlace& after = m_Walker.Place();
+    if (before.MapId != after.MapId || before.Tile.X != after.Tile.X ||
+        before.Tile.Y != after.Tile.Y)
+        Note("Back to the start.");
+    else
+        Note("Data reloaded.");
+}
+
 void AscensionApp::PlayScriptedKey()
 {
     if (m_KeyCursor >= m_Play.Keys.size() || !m_StartError.empty() || !m_Data.IsLoaded())
@@ -1147,6 +1264,8 @@ void AscensionApp::OnUpdate(f32 dt)
     if (!TakeAutoPath())
         return;
     PlayScriptedKey();
+    if (m_OnMap)
+        StepMap(dt);
     // Frame time is a float, and Windows file stamps are not stable the way this poll
     // expects. A reload between scripted keys rebuilds the fight on a different frame
     // than a Linux replay. The script is the input; data is whatever it started with.
@@ -1161,6 +1280,10 @@ void AscensionApp::OnUpdate(f32 dt)
     m_Data.CheckForChanges(&error);
     if (m_Data.GetRevision() == revision)
         return;
+    if (m_OnMap) {
+        AdoptMap();
+        return;
+    }
     if (!m_Hero.IsReady() || !m_Inventory.IsReady()) {
         std::string why;
         if (!m_Hero.IsReady() && !m_Hero.Start(m_Data, why)) {
@@ -1387,6 +1510,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const f32 width = static_cast<f32>(pixels.x);
     const f32 height = static_cast<f32>(pixels.y);
     renderer.Begin(Emerald::Mat4::OrthoPixelSpace(width, height));
+
+    if (m_OnMap && m_Data.IsLoaded() && m_StartError.empty()) {
+        DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height);
+        renderer.End();
+        return;
+    }
 
     const Emerald::Vec2 left{28.0f, 24.0f};
     const Emerald::Vec2 leftSize{600.0f, height - 188.0f};

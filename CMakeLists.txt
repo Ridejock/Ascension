@@ -69,6 +69,14 @@ target_compile_definitions(AscensionData PRIVATE
     ASCENSION_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 emerald_set_warnings(AscensionData)
 
+# Tile steps, walls, and exits. Drawing stays in the app.
+add_library(AscensionMap STATIC
+    src/Map/Walk.cpp
+    include/Ascension/Map/Walk.h
+)
+target_link_libraries(AscensionMap PUBLIC AscensionData)
+emerald_set_warnings(AscensionMap)
+
 # ---------------------------------------------------------------------------
 # Combat. The turn model is swappable; the sandbox uses one agility round.
 # ---------------------------------------------------------------------------
@@ -101,13 +109,15 @@ add_executable(Ascension
     src/App/Main.cpp
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
+    src/App/MapView.cpp
+    src/App/MapView.h
     src/App/FightSim.cpp
     src/App/FightSim.h
     src/App/GearLine.h
     src/App/Playtest.cpp
     src/App/Playtest.h
 )
-target_link_libraries(Ascension PRIVATE AscensionCombat AscensionProgress)
+target_link_libraries(Ascension PRIVATE AscensionCombat AscensionProgress AscensionMap)
 # A dev build watches the source data/ so saving a JSON file updates the running
 # game. The directory is missing in a packaged build, and the app then reads the
 # data/ copied next to the executable.
@@ -153,6 +163,14 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionDataTests)
     add_test(NAME Data COMMAND AscensionDataTests)
+
+    add_executable(AscensionWalkTests tests/WalkTests.cpp tests/Check.h)
+    target_link_libraries(AscensionWalkTests PRIVATE AscensionMap)
+    target_compile_definitions(AscensionWalkTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionWalkTests)
+    add_test(NAME Walk COMMAND AscensionWalkTests)
 
     add_executable(AscensionCombatTests tests/CombatTests.cpp tests/Check.h)
     target_link_libraries(AscensionCombatTests PRIVATE AscensionCombat)
