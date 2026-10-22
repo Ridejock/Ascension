@@ -7,6 +7,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Talk.h"
+#include "Ascension/Map/Handoff.h"
 #include "Ascension/Map/Walk.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
@@ -43,6 +44,13 @@ private:
     // Starts the battle at the hero's carried HP and focus. A lone Start() fills both;
     // this path is the one the encounter list uses.
     bool OpenBattle(std::string_view fightId, std::string& error);
+    // True while a spawn's fight is on screen, including a win that is still choosing
+    // a path. The map does not walk during that.
+    [[nodiscard]] bool SpawnFightOpen() const;
+    void TouchSpawn(const ContactQuery& query);
+    void BeginSpawnFight();
+    // Puts a finished spawn fight back on the map. A list fight never has one open.
+    void MaybeSettle();
     // A loss fills both pools and marks a hub return. Gold is not touched.
     void RememberDefeat();
     // Standing on a rest point fills both pools, once per arrival.
@@ -152,6 +160,20 @@ private:
     // A scripted key does not reach Emerald's keyboard, so the map records it here
     // for the step taken later in the same frame.
     WalkDir m_ScriptDir = WalkDir::None;
+    // The spawn fight on screen. Active is false on the encounter list, and on the
+    // map whenever the hero is walking. Cleared ids live in m_MapMemory, not the save.
+    struct MapEngagement {
+        bool Active = false;
+        std::string SpawnId;
+        std::string EncounterId;
+        std::string MapId;
+        MapTile SpawnTile;
+        MapTile ReturnTile;
+        bool Once = true;
+        bool AllowFlee = false;
+    };
+    MapEngagement m_MapFight;
+    MapMemory m_MapMemory;
     // HP and focus between fights. A new hero is full. A win writes the leftover
     // back. A loss fills both and sets ReturnToHub. The save still uses version 3,
     // which does not store this.

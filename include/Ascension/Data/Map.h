@@ -35,8 +35,8 @@ struct SpawnMover {
 
 // A foe standing on one tile. Id is unique across every map, so a save can
 // record cleared spawns without using a list index. Once means a win clears
-// it. NoFlee is the flag a later handoff reads for the boss. Encounter is an
-// id from encounters.json.
+// it. NoFlee is the boss-fight flag: that spawn cannot be fled. A foe with
+// boss set cannot be fled either. Encounter is an id from encounters.json.
 struct MapSpawn {
     std::string Id;
     MapTile Tile;
@@ -91,9 +91,9 @@ struct MapSpawnRef {
 // How a hero steps, from walk.json. The first press of a direction steps at once.
 // StepMilliseconds is the pause before another step while that direction stays held.
 // TilePixels is the drawn size of one cell. HeroInsetPercent is the empty margin on
-// each side of the hero square, so 0 fills the cell. The two colors are palette
-// rectangles: the hero, and the inner square on an exit. The numbers here match
-// data/walk.json; the file is what a load uses.
+// each side of the hero square, so 0 fills the cell. The three colors are palette
+// rectangles: the hero, the inner square on an exit, and the inner square on a
+// spawn. The numbers here match data/walk.json; the file is what a load uses.
 struct WalkRules {
     i32 StepMilliseconds = 180;
     i32 TilePixels = 64;
@@ -104,6 +104,9 @@ struct WalkRules {
     u8 LinkRed = 208;
     u8 LinkGreen = 154;
     u8 LinkBlue = 42;
+    u8 SpawnRed = 138;
+    u8 SpawnGreen = 166;
+    u8 SpawnBlue = 190;
 };
 
 [[nodiscard]] const char* ToString(MapPointKind kind);

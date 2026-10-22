@@ -654,6 +654,7 @@ bool Battle::StartFight(std::string_view classId, i32 level, std::string_view en
     m_BaseCount = 0;
     m_Started = false;
     m_Result = BattleResult::Ongoing;
+    m_FleeAllowed = false;
     m_UpkeepDone = false;
     m_TurnCount = 0;
     m_Opening.clear();
@@ -2140,6 +2141,33 @@ ActionResult Battle::Wait()
     PrefixOpening(result);
     result.Result = m_Result;
     AdvanceTurn();
+    return result;
+}
+
+void Battle::SetFleeAllowed(bool allowed)
+{
+    m_FleeAllowed = allowed;
+}
+
+ActionResult Battle::Flee()
+{
+    if (!m_Started)
+        return Reject("There is no fight.");
+    if (m_Result != BattleResult::Ongoing)
+        return Reject("The fight is over.");
+    if (Actor() != CombatantSide::Player)
+        return Reject("It is not your turn.");
+    if (!m_FleeAllowed)
+        return Reject("You cannot flee.");
+    const TurnOpen open = PrepareTurn(m_Player);
+    if (!open.Continue)
+        return open.Result;
+    m_Result = BattleResult::Fled;
+    ActionResult result;
+    result.Accepted = true;
+    result.Text = m_Player.Name + " flees.";
+    PrefixOpening(result);
+    result.Result = m_Result;
     return result;
 }
 

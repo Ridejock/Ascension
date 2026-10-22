@@ -2606,7 +2606,8 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"stepMilliseconds", "tilePixels", "heroInsetPercent", "heroColor", "linkColor"},
+                   {"stepMilliseconds", "tilePixels", "heroInsetPercent", "heroColor", "linkColor",
+                    "spawnColor"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2618,8 +2619,10 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
         return false;
     std::string heroColor;
     std::string linkColor;
+    std::string spawnColor;
     if (!RequireString(*body, "heroColor", heroColor, error) ||
-        !RequireString(*body, "linkColor", linkColor, error))
+        !RequireString(*body, "linkColor", linkColor, error) ||
+        !RequireString(*body, "spawnColor", spawnColor, error))
         return false;
     std::string why;
     if (!ParseColor(heroColor, rules.HeroRed, rules.HeroGreen, rules.HeroBlue, why)) {
@@ -2628,6 +2631,10 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
     }
     if (!ParseColor(linkColor, rules.LinkRed, rules.LinkGreen, rules.LinkBlue, why)) {
         error = "linkColor " + why;
+        return false;
+    }
+    if (!ParseColor(spawnColor, rules.SpawnRed, rules.SpawnGreen, rules.SpawnBlue, why)) {
+        error = "spawnColor " + why;
         return false;
     }
     parsed.Walk = rules;

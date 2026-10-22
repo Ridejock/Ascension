@@ -12,7 +12,9 @@ namespace Ascension {
 
 enum class CombatantSide : u8 { Player, Enemy };
 
-enum class BattleResult : u8 { Ongoing, Victory, Defeat };
+// Fled is a map fight the hero left. The foe is not dead and the hero is not.
+// A list fight never produces it: flee stays off unless the map hands it on.
+enum class BattleResult : u8 { Ongoing, Victory, Defeat, Fled };
 
 // One applied status. TurnsLeft counts down at the start of this unit's turn, after the
 // per-turn damage and after a skip is noticed.
@@ -295,6 +297,14 @@ public:
 
     ActionResult UseSkill(std::string_view skillId);
     ActionResult Wait();
+
+    // Ends the fight as Fled on the player's turn, when the map allowed it.
+    // A boss fight (noFlee, or a foe with boss set) leaves the fight untouched.
+    // Call SetFleeAllowed after Start. Start clears it, so a list fight cannot flee.
+    void SetFleeAllowed(bool allowed);
+    [[nodiscard]] bool FleeAllowed() const { return m_FleeAllowed; }
+    ActionResult Flee();
+
     ActionResult EnemyAct();
 
 private:
@@ -404,6 +414,7 @@ private:
     StatBlock m_BaseStats;
     bool m_HasBaseStats = false;
     BattleResult m_Result = BattleResult::Ongoing;
+    bool m_FleeAllowed = false;
     bool m_Started = false;
     bool m_UpkeepDone = false;
     i32 m_TurnCount = 0;

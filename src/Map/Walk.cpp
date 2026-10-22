@@ -60,6 +60,18 @@ bool Walker::Enter(const Database& data, std::string_view mapId)
     return PlaceOnStart(m_Place, m_Held, m_Wait, data, mapId);
 }
 
+bool Walker::Place(const Database& data, std::string_view mapId, MapTile tile)
+{
+    const MapDef* map = data.FindMap(mapId);
+    if (map == nullptr || !TileWalkable(data, *map, tile))
+        return false;
+    m_Place.MapId = map->Id;
+    m_Place.Tile = tile;
+    m_Held = WalkDir::None;
+    m_Wait = 0.0f;
+    return true;
+}
+
 bool Walker::Adopt(const Database& data, std::string_view fallbackMapId)
 {
     const MapDef* map = data.FindMap(m_Place.MapId);

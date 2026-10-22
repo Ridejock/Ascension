@@ -69,10 +69,13 @@ target_compile_definitions(AscensionData PRIVATE
     ASCENSION_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 emerald_set_warnings(AscensionData)
 
-# Tile steps, walls, and exits. Drawing stays in the app.
+# Tile steps, walls, exits, and the spawn handoff. Drawing stays in the app.
+# The handoff calls Battle's public HP setters. It does not run damage.
 add_library(AscensionMap STATIC
     src/Map/Walk.cpp
+    src/Map/Handoff.cpp
     include/Ascension/Map/Walk.h
+    include/Ascension/Map/Handoff.h
 )
 target_link_libraries(AscensionMap PUBLIC AscensionData)
 emerald_set_warnings(AscensionMap)
@@ -86,6 +89,8 @@ add_library(AscensionCombat STATIC
 )
 target_link_libraries(AscensionCombat PUBLIC AscensionData)
 emerald_set_warnings(AscensionCombat)
+# Handoff.cpp calls Battle. Combat does not call the map, so this is not a cycle.
+target_link_libraries(AscensionMap PRIVATE AscensionCombat)
 
 # ---------------------------------------------------------------------------
 # Career: XP, skill ranks, and the evolution choice. Combat does not include this.
@@ -165,6 +170,14 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionDataTests)
     add_test(NAME Data COMMAND AscensionDataTests)
+
+    add_executable(AscensionHandoffTests tests/HandoffTests.cpp tests/Check.h)
+    target_link_libraries(AscensionHandoffTests PRIVATE AscensionMap AscensionCombat AscensionProgress)
+    target_compile_definitions(AscensionHandoffTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionHandoffTests)
+    add_test(NAME Handoff COMMAND AscensionHandoffTests)
 
     add_executable(AscensionWalkTests tests/WalkTests.cpp tests/Check.h)
     target_link_libraries(AscensionWalkTests PRIVATE AscensionMap)

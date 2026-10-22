@@ -48,7 +48,8 @@ struct PlaytestOptions {
     std::optional<i32> Level;
     std::string ClassId;
     FightRequest Fight;
-    // --map. Empty stays on the fight screen. A set id opens that map and starts no fight.
+    // --map. Empty stays on the fight screen. A set id opens that map. A spawn
+    // starts its fight; until then no fight is up.
     std::string MapId;
     std::optional<i32> Gold;
     std::vector<PlaytestItem> Give;
@@ -162,7 +163,8 @@ enum class FightStanding { None, Ongoing, Victory, Defeat };
 [[nodiscard]] inline bool KeyNeedsPlayerTurn(SDL_Scancode scancode)
 {
     if (scancode == SDL_SCANCODE_SPACE || scancode == SDL_SCANCODE_LEFT ||
-        scancode == SDL_SCANCODE_RIGHT || scancode == SDL_SCANCODE_C)
+        scancode == SDL_SCANCODE_RIGHT || scancode == SDL_SCANCODE_C ||
+        scancode == SDL_SCANCODE_F)
         return true;
     const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
     return digit >= 0 && digit < 8;
