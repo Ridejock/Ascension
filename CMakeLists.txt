@@ -57,6 +57,7 @@ add_library(AscensionData STATIC
     src/Data/Database.cpp
     src/Data/Talk.cpp
     include/Ascension/Data/Database.h
+    include/Ascension/Data/Map.h
     include/Ascension/Data/Talk.h
     include/Ascension/Data/Types.h
 )

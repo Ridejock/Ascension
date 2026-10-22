@@ -1,0 +1,34 @@
+{
+  "map": {
+    "id": "fixture_b",
+    "hub": false,
+    "rows": [
+      "####",
+      "#..#",
+      "#.##",
+      "####"
+    ],
+    "legend": {
+      "#": "wall",
+      ".": "floor"
+    },
+    "start": { "x": 1, "y": 2 },
+    "spawns": [
+      {
+        "id": "fixture_hold",
+        "tile": { "x": 1, "y": 1 },
+        "encounter": "wolf",
+        "once": false,
+        "noFlee": true,
+        "mover": {}
+      }
+    ],
+    "links": [
+      {
+        "tile": { "x": 2, "y": 1 },
+        "map": "fixture_a",
+        "arrival": { "x": 4, "y": 2 }
+      }
+    ]
+  }
+}

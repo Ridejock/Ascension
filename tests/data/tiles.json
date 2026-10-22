@@ -1,0 +1,15 @@
+{
+  "tiles": [
+    {
+      "id": "floor",
+      "solid": false,
+      "color": "#996838",
+      "sheet": "placeholder"
+    },
+    {
+      "id": "wall",
+      "solid": true,
+      "color": "#2A2438"
+    }
+  ]
+}
