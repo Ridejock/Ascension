@@ -1,0 +1,9 @@
+{
+  "walk": {
+    "stepMilliseconds": 180,
+    "tilePixels": 64,
+    "heroInsetPercent": 22,
+    "heroColor": "#DFD5BC",
+    "linkColor": "#D09A2A"
+  }
+}

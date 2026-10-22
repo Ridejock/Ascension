@@ -95,6 +95,14 @@ bool LookupKey(std::string_view name, SDL_Scancode& scancode, std::string& error
         scancode = SDL_SCANCODE_LEFT;
     else if (key == "right")
         scancode = SDL_SCANCODE_RIGHT;
+    else if (key == "w")
+        scancode = SDL_SCANCODE_W;
+    else if (key == "a")
+        scancode = SDL_SCANCODE_A;
+    else if (key == "s")
+        scancode = SDL_SCANCODE_S;
+    else if (key == "d")
+        scancode = SDL_SCANCODE_D;
     else if (key == "escape")
         scancode = SDL_SCANCODE_ESCAPE;
     else if (key == "f5")
@@ -375,8 +383,8 @@ bool CheckPickIds(const Hero& hero, const Database& data, std::span<const std::s
 bool PlaytestOptions::UsesData() const
 {
     return !DataDir.empty() || Level.has_value() || !ClassId.empty() || !Fight.Id.empty() ||
-           Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty() ||
-           !PickIds.empty() || Sim;
+           !MapId.empty() || Gold.has_value() || !Give.empty() || !Equip.empty() ||
+           !ChooseId.empty() || !PickIds.empty() || Sim;
 }
 
 bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOptions& options,
@@ -459,6 +467,15 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.Fight.Id = std::string(value);
+        } else if (flag == "--map") {
+            if (AlreadySet(!options.MapId.empty(), flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            if (value.empty()) {
+                error = "--map needs an id";
+                return false;
+            }
+            options.MapId = std::string(value);
         } else if (flag == "--gold") {
             if (AlreadySet(options.Gold.has_value(), flag, error) ||
                 !TakeValue(args, index, attached, flag, value, error))
@@ -600,6 +617,14 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
         error = "--sim needs --enemy";
         return false;
     }
+    if (!options.MapId.empty() && options.Sim) {
+        error = "pass --map or --sim, not both";
+        return false;
+    }
+    if (!options.MapId.empty() && !options.Fight.Id.empty()) {
+        error = "pass --map or --enemy, not both";
+        return false;
+    }
     if (options.Sim && !options.Keys.empty()) {
         error = "pass --sim or --keys, not both";
         return false;
@@ -715,6 +740,10 @@ bool ApplyPlaytest(Hero& hero, Inventory& inventory, const Database& data,
         return false;
     if (!CheckPickIds(hero, data, options.PickIds, error))
         return false;
+    if (!options.MapId.empty() && data.FindMap(options.MapId) == nullptr) {
+        error = "map '" + options.MapId + "' does not exist";
+        return false;
+    }
     error.clear();
     return true;
 }

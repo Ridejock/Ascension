@@ -88,6 +88,24 @@ struct MapSpawnRef {
     const MapSpawn* Spawn = nullptr;
 };
 
+// How a hero steps, from walk.json. The first press of a direction steps at once.
+// StepMilliseconds is the pause before another step while that direction stays held.
+// TilePixels is the drawn size of one cell. HeroInsetPercent is the empty margin on
+// each side of the hero square, so 0 fills the cell. The two colors are palette
+// rectangles: the hero, and the inner square on an exit. The numbers here match
+// data/walk.json; the file is what a load uses.
+struct WalkRules {
+    i32 StepMilliseconds = 180;
+    i32 TilePixels = 64;
+    i32 HeroInsetPercent = 22;
+    u8 HeroRed = 223;
+    u8 HeroGreen = 213;
+    u8 HeroBlue = 188;
+    u8 LinkRed = 208;
+    u8 LinkGreen = 154;
+    u8 LinkBlue = 42;
+};
+
 [[nodiscard]] const char* ToString(MapPointKind kind);
 
 inline bool MapDef::InBounds(i32 x, i32 y) const
