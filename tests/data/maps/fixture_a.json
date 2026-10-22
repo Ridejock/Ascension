@@ -1,0 +1,37 @@
+{
+  "map": {
+    "id": "fixture_a",
+    "hub": false,
+    "rows": [
+      "######",
+      "#....#",
+      "#.#..#",
+      "#..#.#",
+      "######"
+    ],
+    "legend": {
+      "#": "wall",
+      ".": "floor"
+    },
+    "start": { "x": 1, "y": 1 },
+    "spawns": [
+      {
+        "id": "fixture_spawn",
+        "tile": { "x": 4, "y": 1 },
+        "encounter": "wolf"
+      }
+    ],
+    "links": [
+      {
+        "tile": { "x": 4, "y": 2 },
+        "map": "fixture_b",
+        "arrival": { "x": 1, "y": 2 }
+      }
+    ],
+    "points": [
+      { "kind": "rest", "tile": { "x": 1, "y": 1 } },
+      { "kind": "talk", "tile": { "x": 2, "y": 1 }, "dialogue": "pell" },
+      { "kind": "shop", "tile": { "x": 3, "y": 1 } }
+    ]
+  }
+}

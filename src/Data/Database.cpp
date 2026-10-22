@@ -25,6 +25,7 @@ constexpr const char* kFileNames[] = {
     "stats.json",   "effects.json", "skills.json",     "statuses.json",
     "classes.json", "enemies.json", "encounters.json", "items.json",
     "shop.json",    "combat.json",  "progress.json",   "rarities.json",
+    "tiles.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -224,6 +225,20 @@ bool OptionalId(const Json& object, const char* key, std::string& out, std::stri
     return true;
 }
 
+// Missing key leaves `out` unchanged. A present value must be true or false.
+bool OptionalBool(const Json& object, const char* key, bool& out, std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!it->is_boolean()) {
+        error = std::string("'") + key + "' must be true or false";
+        return false;
+    }
+    out = it->get<bool>();
+    return true;
+}
+
 bool Absent(const Json& object, const char* key, const std::string& where, std::string& error)
 {
     if (!object.contains(key))
@@ -314,6 +329,8 @@ struct Parsed {
     std::vector<IconDef> Icons;
     ShopDef Shop;
     std::vector<DialogueDef> Dialogues;
+    std::vector<TileDef> Tiles;
+    std::vector<MapDef> Maps;
     CombatRules Rules;
     ProgressRules Progress;
     std::vector<std::string> HigherFields;
@@ -3286,6 +3303,580 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
     return true;
 }
 
+// A map is at most this many tiles on a side. Coordinates in the file use the same cap.
+constexpr i32 kMaxMapSpan = 256;
+
+bool LoadTiles(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("tiles");
+    if (list == root.end() || !list->is_array()) {
+        error = "'tiles' must be a list";
+        return false;
+    }
+    if (list->empty()) {
+        error = "'tiles' must list at least one tile";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "tile entries must be objects";
+            return false;
+        }
+        TileDef tile;
+        if (!RequireString(entry, "id", tile.Id, error))
+            return false;
+        const std::string where = "tile " + Quote(tile.Id);
+        if (!IsId(tile.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (FindId(parsed.Tiles, tile.Id) != nullptr) {
+            error = where + ": there is another tile with this id";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "solid", "color", "sheet"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        const auto solid = entry.find("solid");
+        if (solid == entry.end()) {
+            error = where + ": 'solid' is required";
+            return false;
+        }
+        if (!solid->is_boolean()) {
+            error = where + ": 'solid' must be true or false";
+            return false;
+        }
+        tile.Solid = solid->get<bool>();
+        std::string color;
+        if (!RequireString(entry, "color", color, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        std::string why;
+        if (!ParseColor(color, tile.Red, tile.Green, tile.Blue, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!OptionalId(entry, "sheet", tile.Sheet, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        parsed.Tiles.push_back(std::move(tile));
+    }
+    return true;
+}
+
+std::string Coord(MapTile tile)
+{
+    return std::to_string(tile.X) + "," + std::to_string(tile.Y);
+}
+
+bool SameTile(MapTile left, MapTile right)
+{
+    return left.X == right.X && left.Y == right.Y;
+}
+
+bool ReadCoord(const Json& object, MapTile& out, std::string& error)
+{
+    if (!object.is_object()) {
+        error = "must be an object with x and y";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(object, {"x", "y"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireInt(object, "x", 0, kMaxMapSpan - 1, out.X, error) ||
+        !RequireInt(object, "y", 0, kMaxMapSpan - 1, out.Y, error))
+        return false;
+    return true;
+}
+
+bool RequireTile(const Json& object, const char* key, MapTile& out, std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end()) {
+        error = std::string("'") + key + "' is required";
+        return false;
+    }
+    if (!ReadCoord(*it, out, error)) {
+        error = std::string("'") + key + "' " + error;
+        return false;
+    }
+    return true;
+}
+
+bool OptionalList(const Json& object, const char* key, const Json*& out, std::string& error)
+{
+    out = nullptr;
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!it->is_array()) {
+        error = std::string("'") + key + "' must be a list";
+        return false;
+    }
+    out = &(*it);
+    return true;
+}
+
+// True when the object has no keys. The first key is reported when it does.
+bool NoKeys(const Json& object, std::string& unknown)
+{
+    const auto it = object.begin();
+    if (it == object.end())
+        return true;
+    unknown = it.key();
+    return false;
+}
+
+struct LegendGlyph {
+    char Glyph = 0;
+    std::string Tile;
+};
+
+bool LoadLegend(const Json& body, const Parsed& parsed, std::vector<LegendGlyph>& legend,
+                std::string& error)
+{
+    const auto legendJson = body.find("legend");
+    if (legendJson == body.end() || !legendJson->is_object()) {
+        error = "'legend' must be an object";
+        return false;
+    }
+    if (legendJson->empty()) {
+        error = "'legend' must name at least one character";
+        return false;
+    }
+    for (auto it = legendJson->begin(); it != legendJson->end(); ++it) {
+        const std::string key = it.key();
+        if (key.size() != 1) {
+            error = "legend key " + Quote(key) + " must be one character";
+            return false;
+        }
+        const unsigned char glyph = static_cast<unsigned char>(key[0]);
+        if (glyph < 32 || glyph > 126) {
+            error = "legend key must be one printable character";
+            return false;
+        }
+        if (!it->is_string()) {
+            error = "legend " + Quote(key) + " must be a tile id";
+            return false;
+        }
+        const std::string tileId = it->get<std::string>();
+        if (FindId(parsed.Tiles, tileId) == nullptr) {
+            error = "legend " + Quote(key) + ": tile " + Quote(tileId) + " does not exist";
+            return false;
+        }
+        LegendGlyph entry;
+        entry.Glyph = static_cast<char>(glyph);
+        entry.Tile = tileId;
+        legend.push_back(std::move(entry));
+    }
+    return true;
+}
+
+const LegendGlyph* FindGlyph(const std::vector<LegendGlyph>& legend, char glyph)
+{
+    for (const LegendGlyph& entry : legend) {
+        if (entry.Glyph == glyph)
+            return &entry;
+    }
+    return nullptr;
+}
+
+bool LoadRows(const Json& body, const std::vector<LegendGlyph>& legend, MapDef& map,
+              std::string& error)
+{
+    const auto rows = body.find("rows");
+    if (rows == body.end() || !rows->is_array()) {
+        error = "'rows' must be a list";
+        return false;
+    }
+    if (rows->empty()) {
+        error = "'rows' must list at least one row";
+        return false;
+    }
+    if (rows->size() > static_cast<usize>(kMaxMapSpan)) {
+        error = "'rows' is taller than " + std::to_string(kMaxMapSpan);
+        return false;
+    }
+    std::vector<std::string> lines;
+    lines.reserve(rows->size());
+    for (usize index = 0; index < rows->size(); ++index) {
+        const Json& row = (*rows)[index];
+        if (!row.is_string()) {
+            error = "rows[" + std::to_string(index) + "] must be a string";
+            return false;
+        }
+        lines.push_back(row.get<std::string>());
+    }
+    if (lines[0].empty()) {
+        error = "rows[0] must not be empty";
+        return false;
+    }
+    if (lines[0].size() > static_cast<usize>(kMaxMapSpan)) {
+        error = "rows[0] is wider than " + std::to_string(kMaxMapSpan);
+        return false;
+    }
+    const usize width = lines[0].size();
+    for (usize index = 1; index < lines.size(); ++index) {
+        if (lines[index].size() != width) {
+            error = "rows[" + std::to_string(index) + "]: width " +
+                    std::to_string(lines[index].size()) + " does not match width " +
+                    std::to_string(width);
+            return false;
+        }
+    }
+    map.Width = static_cast<i32>(width);
+    map.Height = static_cast<i32>(lines.size());
+    map.Cells.reserve(width * lines.size());
+    for (usize y = 0; y < lines.size(); ++y) {
+        for (usize x = 0; x < width; ++x) {
+            const char glyph = lines[y][x];
+            const LegendGlyph* found = FindGlyph(legend, glyph);
+            if (found == nullptr) {
+                const std::string shown(1, glyph);
+                error = "rows[" + std::to_string(y) + "] column " + std::to_string(x) + ": " +
+                        Quote(shown) + " is not in the legend";
+                return false;
+            }
+            map.Cells.push_back(found->Tile);
+        }
+    }
+    return true;
+}
+
+// `why` is a sentence fragment: "2,1 is outside the map" or "0,0 is solid tile 'wall'".
+bool Walkable(const Parsed& parsed, const MapDef& map, MapTile tile, std::string& why)
+{
+    if (!map.InBounds(tile.X, tile.Y)) {
+        why = Coord(tile) + " is outside the map";
+        return false;
+    }
+    const std::string* cell = map.Cell(tile.X, tile.Y);
+    if (cell == nullptr) {
+        why = Coord(tile) + " is outside the map";
+        return false;
+    }
+    const TileDef* def = FindId(parsed.Tiles, *cell);
+    if (def == nullptr) {
+        why = "tile " + Quote(*cell) + " does not exist";
+        return false;
+    }
+    if (def->Solid) {
+        why = Coord(tile) + " is solid tile " + Quote(def->Id);
+        return false;
+    }
+    return true;
+}
+
+// A rest point may share the start. Every other marker needs a tile of its own.
+bool MarkerFree(const MapDef& map, MapTile tile, bool restOnStart, std::string& why)
+{
+    if (!restOnStart && SameTile(map.Start, tile)) {
+        why = "tile " + Coord(tile) + " is the start";
+        return false;
+    }
+    for (const MapSpawn& spawn : map.Spawns) {
+        if (SameTile(spawn.Tile, tile)) {
+            why = "tile " + Coord(tile) + " already has spawn " + Quote(spawn.Id);
+            return false;
+        }
+    }
+    for (const MapLink& link : map.Links) {
+        if (SameTile(link.Tile, tile)) {
+            why = "tile " + Coord(tile) + " already has a link";
+            return false;
+        }
+    }
+    for (const MapPoint& point : map.Points) {
+        if (SameTile(point.Tile, tile)) {
+            why = "tile " + Coord(tile) + " already has a " + std::string(ToString(point.Kind));
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SpawnIdFree(const Parsed& parsed, const MapDef& map, std::string_view id)
+{
+    if (map.FindSpawn(id) != nullptr)
+        return false;
+    for (const MapDef& other : parsed.Maps) {
+        if (other.FindSpawn(id) != nullptr)
+            return false;
+    }
+    return true;
+}
+
+bool ParsePointKind(std::string_view text, MapPointKind& out)
+{
+    if (text == "talk")
+        out = MapPointKind::Talk;
+    else if (text == "shop")
+        out = MapPointKind::Shop;
+    else if (text == "rest")
+        out = MapPointKind::Rest;
+    else
+        return false;
+    return true;
+}
+
+bool LoadSpawns(const Json& body, const Parsed& parsed, MapDef& map, std::string& error)
+{
+    const Json* spawns = nullptr;
+    if (!OptionalList(body, "spawns", spawns, error))
+        return false;
+    if (spawns == nullptr)
+        return true;
+    for (const Json& entry : *spawns) {
+        if (!entry.is_object()) {
+            error = "spawn entries must be objects";
+            return false;
+        }
+        MapSpawn spawn;
+        if (!RequireString(entry, "id", spawn.Id, error))
+            return false;
+        const std::string where = "spawn " + Quote(spawn.Id);
+        if (!IsId(spawn.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (!SpawnIdFree(parsed, map, spawn.Id)) {
+            error = where + ": there is another spawn with this id";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "tile", "encounter", "once", "noFlee", "mover"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        std::string why;
+        if (!RequireTile(entry, "tile", spawn.Tile, why) ||
+            !Walkable(parsed, map, spawn.Tile, why) || !MarkerFree(map, spawn.Tile, false, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!RequireString(entry, "encounter", spawn.Encounter, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!IsId(spawn.Encounter)) {
+            error = where + ": 'encounter' must be an id";
+            return false;
+        }
+        if (FindId(parsed.Encounters, spawn.Encounter) == nullptr) {
+            error = where + ": encounter " + Quote(spawn.Encounter) + " does not exist";
+            return false;
+        }
+        if (!OptionalBool(entry, "once", spawn.Once, why) ||
+            !OptionalBool(entry, "noFlee", spawn.NoFlee, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (entry.contains("mover")) {
+            const Json& mover = entry["mover"];
+            if (!mover.is_object()) {
+                error = where + ": 'mover' must be an object";
+                return false;
+            }
+            std::string moverUnknown;
+            if (!NoKeys(mover, moverUnknown)) {
+                error = where + ": 'mover' unknown field " + Quote(moverUnknown);
+                return false;
+            }
+            spawn.Mover.Listed = true;
+        }
+        map.Spawns.push_back(std::move(spawn));
+    }
+    return true;
+}
+
+bool LoadLinks(const Json& body, const Parsed& parsed, MapDef& map, std::string& error)
+{
+    const Json* links = nullptr;
+    if (!OptionalList(body, "links", links, error))
+        return false;
+    if (links == nullptr)
+        return true;
+    for (const Json& entry : *links) {
+        if (!entry.is_object()) {
+            error = "link entries must be objects";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"tile", "map", "arrival"}, unknown)) {
+            error = "link: unknown field " + Quote(unknown);
+            return false;
+        }
+        MapLink link;
+        std::string why;
+        if (!RequireTile(entry, "tile", link.Tile, why)) {
+            error = "link: " + why;
+            return false;
+        }
+        const std::string where = "link at " + Coord(link.Tile);
+        if (!Walkable(parsed, map, link.Tile, why) || !MarkerFree(map, link.Tile, false, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!RequireString(entry, "map", link.Map, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!IsId(link.Map)) {
+            error = where + ": 'map' must be an id";
+            return false;
+        }
+        // The target may be a file that has not been read yet. CheckMapLinks resolves it.
+        if (!RequireTile(entry, "arrival", link.Arrival, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        map.Links.push_back(std::move(link));
+    }
+    return true;
+}
+
+bool LoadPoints(const Json& body, const Parsed& parsed, MapDef& map, std::string& error)
+{
+    const Json* points = nullptr;
+    if (!OptionalList(body, "points", points, error))
+        return false;
+    if (points == nullptr)
+        return true;
+    for (const Json& entry : *points) {
+        if (!entry.is_object()) {
+            error = "point entries must be objects";
+            return false;
+        }
+        std::string kindText;
+        if (!RequireString(entry, "kind", kindText, error))
+            return false;
+        MapPoint point;
+        if (!ParsePointKind(kindText, point.Kind)) {
+            error = "unknown point kind " + Quote(kindText);
+            return false;
+        }
+        std::string unknown;
+        const bool talk = point.Kind == MapPointKind::Talk;
+        const bool keysOk = talk ? AllowKeys(entry, {"kind", "tile", "dialogue"}, unknown)
+                                 : AllowKeys(entry, {"kind", "tile"}, unknown);
+        if (!keysOk) {
+            error = std::string(ToString(point.Kind)) + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        std::string why;
+        if (!RequireTile(entry, "tile", point.Tile, why)) {
+            error = std::string(ToString(point.Kind)) + ": " + why;
+            return false;
+        }
+        const std::string where = std::string(ToString(point.Kind)) + " at " + Coord(point.Tile);
+        const bool rest = point.Kind == MapPointKind::Rest;
+        if (!Walkable(parsed, map, point.Tile, why) ||
+            !MarkerFree(map, point.Tile, rest, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (talk) {
+            if (!RequireString(entry, "dialogue", point.Dialogue, why)) {
+                error = where + ": " + why;
+                return false;
+            }
+            if (!IsId(point.Dialogue)) {
+                error = where + ": 'dialogue' must be an id";
+                return false;
+            }
+            if (FindId(parsed.Dialogues, point.Dialogue) == nullptr) {
+                error = where + ": dialogue " + Quote(point.Dialogue) + " does not exist";
+                return false;
+            }
+        }
+        map.Points.push_back(std::move(point));
+    }
+    return true;
+}
+
+bool LoadMapFile(const Json& root, const std::string& stem, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("map");
+    if (body == root.end() || !body->is_object()) {
+        error = "'map' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"id", "hub", "rows", "legend", "start", "spawns", "links", "points"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    MapDef map;
+    if (!RequireString(*body, "id", map.Id, error))
+        return false;
+    if (!IsId(map.Id)) {
+        error = "map id must be letters, digits and _, starting with a letter";
+        return false;
+    }
+    if (map.Id != stem) {
+        error = "id " + Quote(map.Id) + " does not match the file name";
+        return false;
+    }
+    if (FindId(parsed.Maps, map.Id) != nullptr) {
+        error = "there is another map with this id";
+        return false;
+    }
+    if (!OptionalBool(*body, "hub", map.Hub, error))
+        return false;
+    if (map.Hub) {
+        for (const MapDef& other : parsed.Maps) {
+            if (other.Hub) {
+                error = "hub is already set on " + Quote(other.Id);
+                return false;
+            }
+        }
+    }
+    std::vector<LegendGlyph> legend;
+    if (!LoadLegend(*body, parsed, legend, error) || !LoadRows(*body, legend, map, error))
+        return false;
+    std::string why;
+    if (!RequireTile(*body, "start", map.Start, error))
+        return false;
+    if (!Walkable(parsed, map, map.Start, why)) {
+        error = "start: " + why;
+        return false;
+    }
+    if (!LoadSpawns(*body, parsed, map, error) || !LoadLinks(*body, parsed, map, error) ||
+        !LoadPoints(*body, parsed, map, error))
+        return false;
+    parsed.Maps.push_back(std::move(map));
+    return true;
+}
+
+// Link targets are resolved here so a map may name another file that sorts later.
+bool CheckMapLinks(const Parsed& parsed, std::string& error)
+{
+    for (const MapDef& map : parsed.Maps) {
+        const std::string file = "maps/" + map.Id + ".json";
+        for (const MapLink& link : map.Links) {
+            const std::string where = "link at " + Coord(link.Tile);
+            const MapDef* target = FindId(parsed.Maps, link.Map);
+            if (target == nullptr) {
+                error = Err(file, where, "map " + Quote(link.Map) + " does not exist");
+                return false;
+            }
+            std::string why;
+            if (!Walkable(parsed, *target, link.Arrival, why)) {
+                error = Err(file, where, "arrival " + why);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
              std::vector<FileTime>& times, std::string& error)
 {
@@ -3303,11 +3894,14 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
                               LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
-                              LoadShop,    LoadCombat,  LoadProgress,   LoadRarities};
+                              LoadShop,    LoadCombat,  LoadProgress,   LoadRarities,
+                              LoadTiles};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
                            "classes.json", "enemies.json", "encounters.json", "items.json",
-                           "shop.json",    "combat.json",  "progress.json",   "rarities.json"};
+                           "shop.json",    "combat.json",  "progress.json",   "rarities.json",
+                           "tiles.json"};
+    static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
         std::string text;
@@ -3324,7 +3918,9 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         std::string unknown;
         const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
                                     "classes", "enemies", "encounters", "items",
-                                    "shop",    "combat",  "progress",   "rarities"};
+                                    "shop",    "combat",  "progress",   "rarities",
+                                    "tiles"};
+        static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
                                 : AllowKeys(root, {allowedTop[i]}, unknown);
@@ -3351,9 +3947,17 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
     }
+    // Dialogue files come before maps, so a talk point can name a dialogue id.
     for (usize fileIndex = std::size(kFileNames) + 1; fileIndex < files.size(); ++fileIndex) {
         const std::filesystem::path& path = files[fileIndex];
-        const std::string fileName = "dialogue/" + path.filename().string();
+        const std::string folder = path.parent_path().filename().string();
+        const bool dialogue = folder == "dialogue";
+        const bool map = folder == "maps";
+        if (!dialogue && !map) {
+            error = Err(path.filename().string(), {}, "internal: unexpected data file");
+            return false;
+        }
+        const std::string fileName = folder + "/" + path.filename().string();
         std::string text;
         std::string why;
         if (!ReadText(path, text, why)) {
@@ -3366,14 +3970,22 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string top;
-        if (!AllowKeys(root, {"dialogue"}, top)) {
+        const char* topKey = dialogue ? "dialogue" : "map";
+        if (!AllowKeys(root, {topKey}, top)) {
             error = Err(fileName, {}, "unknown field " + Quote(top));
             return false;
         }
-        if (!LoadDialogueFile(root, path.stem().string(), parsed, why)) {
+        const bool loaded = dialogue ? LoadDialogueFile(root, path.stem().string(), parsed, why)
+                                     : LoadMapFile(root, path.stem().string(), parsed, why);
+        if (!loaded) {
             error = Err(fileName, {}, why);
             return false;
         }
+    }
+    std::string linkError;
+    if (!CheckMapLinks(parsed, linkError)) {
+        error = std::move(linkError);
+        return false;
     }
     std::string why;
     if (!CrossCheck(parsed, why)) {
@@ -3398,17 +4010,19 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     return true;
 }
 
-// data/dialogue/*.json, sorted so a reload sees a stable order. A missing folder is
-// no talks, which is how a data set with no NPCs still loads.
-std::vector<std::filesystem::path> DialoguePaths(const std::filesystem::path& directory)
+// JSON files directly inside `directory/folderName`, sorted so a reload sees a stable
+// order. A missing folder is an empty list: no talks, or no maps, still loads.
+std::vector<std::filesystem::path> JsonInFolder(const std::filesystem::path& directory,
+                                                const char* folderName)
 {
     std::vector<std::filesystem::path> paths;
-    const std::filesystem::path folder = directory / "dialogue";
+    const std::filesystem::path folder = directory / folderName;
     std::error_code error;
     if (!std::filesystem::is_directory(folder, error))
         return paths;
     const std::filesystem::directory_iterator end;
-    for (std::filesystem::directory_iterator it(folder, error); !error && it != end; it.increment(error)) {
+    for (std::filesystem::directory_iterator it(folder, error); !error && it != end;
+         it.increment(error)) {
         std::error_code fileError;
         if (!it->is_regular_file(fileError) || fileError)
             continue;
@@ -3437,16 +4051,27 @@ Database::Database(std::filesystem::path directory) : m_Directory(std::move(dire
     FileWatch icons;
     icons.Path = m_IconSheet;
     m_Watches.push_back(std::move(icons));
-    for (const std::filesystem::path& path : DialoguePaths(m_Directory)) {
-        FileWatch watch;
-        watch.Path = path;
-        m_Watches.push_back(std::move(watch));
+    // Dialogue first, then maps, matching the order ReadAll parses.
+    const char* folders[] = {"dialogue", "maps"};
+    for (const char* folder : folders) {
+        for (const std::filesystem::path& path : JsonInFolder(m_Directory, folder)) {
+            FileWatch watch;
+            watch.Path = path;
+            m_Watches.push_back(std::move(watch));
+        }
     }
 }
 
-bool Database::RefreshDialogueWatches()
+bool Database::RefreshFolderWatches()
 {
-    const std::vector<std::filesystem::path> paths = DialoguePaths(m_Directory);
+    const std::vector<std::filesystem::path> dialogue = JsonInFolder(m_Directory, "dialogue");
+    const std::vector<std::filesystem::path> maps = JsonInFolder(m_Directory, "maps");
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(dialogue.size() + maps.size());
+    for (const std::filesystem::path& path : dialogue)
+        paths.push_back(path);
+    for (const std::filesystem::path& path : maps)
+        paths.push_back(path);
     const usize fixed = std::size(kFileNames) + 1;
     bool changed = m_Watches.size() != fixed + paths.size();
     if (!changed) {
@@ -3542,6 +4167,8 @@ bool Database::Load(DataError* error)
     m_Icons = std::move(parsed.Icons);
     m_Shop = std::move(parsed.Shop);
     m_Dialogues = std::move(parsed.Dialogues);
+    m_Tiles = std::move(parsed.Tiles);
+    m_Maps = std::move(parsed.Maps);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
     m_HigherFields = std::move(parsed.HigherFields);
@@ -3554,7 +4181,7 @@ bool Database::Load(DataError* error)
 
 u32 Database::CheckForChanges(DataError* error)
 {
-    const bool listingChanged = RefreshDialogueWatches();
+    const bool listingChanged = RefreshFolderWatches();
     if (listingChanged)
         m_ListingArmed = true;
     bool pending = false;
@@ -3637,6 +4264,30 @@ const IconDef* Database::FindIcon(std::string_view id) const
 const DialogueDef* Database::FindDialogue(std::string_view id) const
 {
     return FindId(m_Dialogues, id);
+}
+
+const TileDef* Database::FindTile(std::string_view id) const
+{
+    return FindId(m_Tiles, id);
+}
+
+const MapDef* Database::FindMap(std::string_view id) const
+{
+    return FindId(m_Maps, id);
+}
+
+MapSpawnRef Database::FindSpawn(std::string_view id) const
+{
+    MapSpawnRef ref;
+    for (const MapDef& map : m_Maps) {
+        const MapSpawn* spawn = map.FindSpawn(id);
+        if (spawn == nullptr)
+            continue;
+        ref.Map = &map;
+        ref.Spawn = spawn;
+        return ref;
+    }
+    return ref;
 }
 
 std::vector<const ClassDef*> Database::EvolutionsOf(std::string_view baseId) const

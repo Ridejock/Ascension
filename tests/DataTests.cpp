@@ -2508,9 +2508,324 @@ void TestFontGlyphs()
     }
 }
 
+const MapPoint* FindPoint(const MapDef& map, MapPointKind kind)
+{
+    for (const MapPoint& point : map.Points) {
+        if (point.Kind == kind)
+            return &point;
+    }
+    return nullptr;
+}
+
+void CheckFixtureMaps(const char* dir, const char* what)
+{
+    Database data(dir);
+    DataError error;
+    Check(data.Load(&error), what);
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    Check(data.GetTiles().size() == 2, "two terrain kinds");
+    const TileDef* floor = data.FindTile("floor");
+    const TileDef* wall = data.FindTile("wall");
+    Check(floor != nullptr && !floor->Solid && floor->Red == 153 && floor->Green == 104 &&
+              floor->Blue == 56 && floor->Sheet == "placeholder",
+          "floor is a dirt-colored rectangle and names a sheet for later");
+    Check(wall != nullptr && wall->Solid && wall->Red == 42 && wall->Green == 36 &&
+              wall->Blue == 56 && wall->Sheet.empty(),
+          "wall is a solid stone-colored rectangle");
+    Check(data.FindTile("mud") == nullptr, "an unknown tile id is absent");
+
+    Check(data.GetMaps().size() == 2, "two fixture maps, in file-name order");
+    const MapDef* first = data.FindMap("fixture_a");
+    const MapDef* second = data.FindMap("fixture_b");
+    Check(first != nullptr && second != nullptr && &data.GetMaps()[0] == first &&
+              &data.GetMaps()[1] == second,
+          "fixture_a then fixture_b");
+    if (first == nullptr || second == nullptr)
+        return;
+
+    Check(first->Width == 6 && first->Height == 5 && !first->Hub, "fixture_a is 6 by 5");
+    const std::string* corner = first->Cell(0, 0);
+    const std::string* ground = first->Cell(1, 1);
+    const std::string* door = first->Cell(4, 2);
+    Check(corner != nullptr && *corner == "wall" && ground != nullptr && *ground == "floor" &&
+              door != nullptr && *door == "floor",
+          "the grid resolves legend characters to tile ids");
+    Check(first->Cell(2, 2) != nullptr && *first->Cell(2, 2) == "wall",
+          "a wall character inside the room stays solid terrain");
+    Check(first->Cell(-1, 0) == nullptr && first->Cell(6, 0) == nullptr &&
+              first->Cell(0, 5) == nullptr,
+          "a cell outside the grid is absent");
+    Check(first->Start.X == 1 && first->Start.Y == 1, "fixture_a starts at 1,1");
+    Check(first->Spawns.size() == 1 && first->Spawns[0].Id == "fixture_spawn" &&
+              first->Spawns[0].Encounter == "wolf" && first->Spawns[0].Once &&
+              !first->Spawns[0].NoFlee && !first->Spawns[0].Mover.Listed &&
+              first->Spawns[0].Tile.X == 4 && first->Spawns[0].Tile.Y == 1,
+          "an omitted once stays cleared, and flee stays allowed");
+    Check(first->Links.size() == 1 && first->Links[0].Map == "fixture_b" &&
+              first->Links[0].Tile.X == 4 && first->Links[0].Tile.Y == 2 &&
+              first->Links[0].Arrival.X == 1 && first->Links[0].Arrival.Y == 2,
+          "fixture_a links to fixture_b");
+    const MapPoint* rest = FindPoint(*first, MapPointKind::Rest);
+    const MapPoint* talk = FindPoint(*first, MapPointKind::Talk);
+    const MapPoint* shop = FindPoint(*first, MapPointKind::Shop);
+    Check(rest != nullptr && rest->Tile.X == first->Start.X && rest->Tile.Y == first->Start.Y &&
+              rest->Dialogue.empty(),
+          "a rest point may share the start tile");
+    Check(talk != nullptr && talk->Dialogue == "pell" && talk->Tile.X == 2 && talk->Tile.Y == 1,
+          "a talk point names a dialogue id");
+    Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 3 && shop->Tile.Y == 1,
+          "a shop point names no dialogue");
+
+    Check(second->Width == 4 && second->Height == 4 && !second->Hub && second->Points.empty(),
+          "fixture_b is 4 by 4 with no points");
+    Check(second->Spawns.size() == 1 && second->Spawns[0].Id == "fixture_hold" &&
+              !second->Spawns[0].Once && second->Spawns[0].NoFlee &&
+              second->Spawns[0].Mover.Listed && second->Spawns[0].Encounter == "wolf",
+          "once, noFlee, and an empty mover are stored");
+    Check(second->Links.size() == 1 && second->Links[0].Map == "fixture_a" &&
+              second->Links[0].Arrival.X == 4 && second->Links[0].Arrival.Y == 2,
+          "fixture_b links back");
+
+    const MapSpawnRef spawn = data.FindSpawn("fixture_spawn");
+    Check(spawn.Map == first && spawn.Spawn != nullptr && spawn.Spawn->Id == "fixture_spawn",
+          "a spawn id is found on its map");
+    const MapSpawnRef missing = data.FindSpawn("no_such_spawn");
+    Check(missing.Map == nullptr && missing.Spawn == nullptr, "an unknown spawn id is absent");
+    Check(data.FindClass("fighter") != nullptr && data.FindEncounter("wolf") != nullptr,
+          "map loading leaves the fight data in place");
+}
+
+void TestMapReload()
+{
+    TempCopy copy;
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "map reload starts from the fixture");
+    if (!data.IsLoaded())
+        return;
+
+    ReplaceInFile(copy.Path / "tiles.json", "#996838", "#996839");
+    Check(data.CheckForChanges(&error) == 0, "a tile edit waits a check");
+    Check(data.GetRevision() == 1, "the waiting check keeps the revision");
+    const TileDef* floor = data.FindTile("floor");
+    Check(floor != nullptr && floor->Blue == 56, "the old color stays until the write settles");
+    Check(data.CheckForChanges(&error) == 1, "a settled tile edit reloads");
+    floor = data.FindTile("floor");
+    Check(data.GetRevision() == 2 && floor != nullptr && floor->Blue == 57,
+          "hot reload updates the floor color");
+
+    ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"once\": false", "\"once\": true");
+    Check(data.CheckForChanges(&error) == 0, "a map edit waits a check");
+    Check(data.CheckForChanges(&error) == 1, "a settled map edit reloads");
+    const MapDef* second = data.FindMap("fixture_b");
+    Check(data.GetRevision() == 3 && second != nullptr && second->Spawns.size() == 1 &&
+              second->Spawns[0].Once,
+          "hot reload updates the spawn flag");
+
+    WriteFile(copy.Path / "maps" / "fixture_c.json",
+              "{\n"
+              "  \"map\": {\n"
+              "    \"id\": \"fixture_c\",\n"
+              "    \"rows\": [\"...\", \"...\", \"...\"],\n"
+              "    \"legend\": { \".\": \"floor\" },\n"
+              "    \"start\": { \"x\": 1, \"y\": 1 }\n"
+              "  }\n"
+              "}\n");
+    BumpTime(copy.Path / "maps" / "fixture_c.json");
+    Check(data.CheckForChanges(&error) == 0, "a new map file waits a check");
+    Check(data.CheckForChanges(&error) == 1, "a settled new map file reloads");
+    const MapDef* third = data.FindMap("fixture_c");
+    Check(data.GetRevision() == 4 && data.GetMaps().size() == 3 && third != nullptr &&
+              third->Width == 3 && third->Height == 3 && third->Cell(1, 1) != nullptr &&
+              *third->Cell(1, 1) == "floor",
+          "a map added under maps/ is picked up");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+
+    fs::remove(copy.Path / "maps" / "fixture_c.json");
+    Check(data.CheckForChanges(&error) == 0, "removing a map waits a check");
+    Check(data.CheckForChanges(&error) == 1, "a settled removal reloads");
+    Check(data.GetRevision() == 5 && data.FindMap("fixture_c") == nullptr &&
+              data.GetMaps().size() == 2,
+          "a removed map file drops that map");
+
+    ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
+                  "\"encounter\": \"no_such_fight\"");
+    Check(data.CheckForChanges(&error) == 0, "a broken map waits a check");
+    Check(data.CheckForChanges(&error) == 0, "a broken map does not replace the data");
+    CheckHas(data.GetLastError(), "maps/fixture_a.json", "the reload error names the map file");
+    CheckHas(data.GetLastError(), "no_such_fight", "the reload error names the bad encounter");
+    second = data.FindMap("fixture_b");
+    floor = data.FindTile("floor");
+    const MapDef* first = data.FindMap("fixture_a");
+    Check(data.GetRevision() == 5 && first != nullptr && first->Spawns.size() == 1 &&
+              first->Spawns[0].Encounter == "wolf" && second != nullptr &&
+              second->Spawns.size() == 1 && second->Spawns[0].Once && floor != nullptr &&
+              floor->Blue == 57,
+          "a failed map reload keeps the last good maps and tiles");
+}
+
+void TestMapValidation()
+{
+    {
+        TempCopy copy;
+        fs::remove(copy.Path / "tiles.json");
+        TestRejected(copy.Path, "tiles.json", "could not be read", "a missing tiles file is an error");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "tiles.json", "#996838", "red");
+        TestRejected(copy.Path, "tiles.json", "#RRGGBB", "a tile color is #RRGGBB");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "tiles.json", "\"solid\": false", "\"solid\": \"no\"");
+        TestRejected(copy.Path, "tiles.json", "true or false", "solid must be true or false");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "tiles.json", "\"sheet\": \"placeholder\"",
+                      "\"sheet\": \"placeholder\", \"block\": true");
+        TestRejected(copy.Path, "tiles.json", "block", "a tile rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        fs::remove_all(copy.Path / "maps");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a data set with no maps folder still loads");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        Check(data.GetMaps().empty() && data.FindTile("floor") != nullptr,
+              "no maps folder means no maps, and tiles still load");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"#.#..#\"", "\"#.#.?#\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "legend", "a character missing from the legend fails");
+        TestRejected(copy.Path, "maps/fixture_a.json", "?", "the broken legend names the character");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"floor\"", "\"mud\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "mud", "a legend tile id must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\".\": \"floor\"", "\"..\": \"floor\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "one character",
+                     "a legend key must be one character");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"#.#..#\"", "\"#.#.\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "width", "rows must be the same width");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
+                      "\"encounter\": \"no_such_fight\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "no_such_fight",
+                     "a spawn encounter must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"dialogue\": \"pell\"",
+                      "\"dialogue\": \"no_such_talk\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "no_such_talk",
+                     "a talk point's dialogue must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                      "{ \"kind\": \"talk\", \"tile\": { \"x\": 2, \"y\": 1 }, \"dialogue\": \"pell\" }",
+                      "{ \"kind\": \"talk\", \"tile\": { \"x\": 2, \"y\": 1 } }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "dialogue", "a talk point needs a dialogue id");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"kind\": \"shop\"", "\"kind\": \"inn\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "inn", "an unknown point kind is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"map\": \"fixture_b\"",
+                      "\"map\": \"no_such_map\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "no_such_map", "a missing exit map is named");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"arrival\": { \"x\": 1, \"y\": 2 }",
+                      "\"arrival\": { \"x\": 9, \"y\": 9 }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "outside", "an exit arrival outside the map fails");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"arrival\": { \"x\": 4, \"y\": 2 }",
+                      "\"arrival\": { \"x\": 0, \"y\": 0 }");
+        TestRejected(copy.Path, "maps/fixture_b.json", "solid", "an exit arrival on a solid tile fails");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"start\": { \"x\": 1, \"y\": 1 }",
+                      "\"start\": { \"x\": 0, \"y\": 0 }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "solid", "the start tile must be walkable");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"x\": 4, \"y\": 1",
+                      "\"x\": 1, \"y\": 1");
+        TestRejected(copy.Path, "maps/fixture_a.json", "start", "a spawn cannot stand on the start");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "fixture_hold", "fixture_spawn");
+        TestRejected(copy.Path, "maps/fixture_b.json", "another spawn",
+                     "spawn ids are unique across maps");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"id\": \"fixture_a\"",
+                      "\"id\": \"fixture_z\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "file name",
+                     "a map id has to match its file name");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"mover\": {}",
+                      "\"mover\": { \"kind\": \"idle\" }");
+        TestRejected(copy.Path, "maps/fixture_b.json", "kind", "a mover must be an empty object");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"hub\": false", "\"hub\": true");
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"hub\": false", "\"hub\": true");
+        TestRejected(copy.Path, "maps/fixture_b.json", "hub", "only one map may be the hub");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"hub\": false",
+                      "\"hub\": false, \"note\": \"x\"");
+        TestRejected(copy.Path, "maps/fixture_a.json", "note", "a map rejects an unknown field");
+    }
+}
+
+void TestMaps()
+{
+    CheckFixtureMaps(ASCENSION_DATA_DIR, "sample maps load");
+    CheckFixtureMaps(ASCENSION_SHIPPED_DATA_DIR, "shipped maps load");
+    TestMapReload();
+    TestMapValidation();
+}
+
 int main()
 {
     TestSample();
+    TestMaps();
     TestEveryRequiredFoe();
     TestHotReload();
     TestValidation();

@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "Ascension/Data/Map.h"
 #include "Ascension/Data/Types.h"
 
 namespace Ascension {
@@ -37,11 +38,12 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
-// encounters, items, rarities, shop, combat, progress), every data/dialogue/*.json file,
-// plus the icon sheet under assets/icons, checked against each other. Load once, then
-// call CheckForChanges from
-// the frame loop: a file that changed, and then stayed unchanged for one more check, is read
-// again. A failed read keeps the previous definitions and sets GetLastError().
+// encounters, items, rarities, shop, combat, progress, tiles), every data/dialogue/*.json
+// file, every data/maps/*.json file, plus the icon sheet under assets/icons, checked
+// against each other. Load once, then call CheckForChanges from the frame loop: a file
+// that changed, and then stayed unchanged for one more check, is read again. A new or
+// removed file under dialogue/ or maps/ is the same kind of change. A failed read keeps
+// the previous definitions and sets GetLastError().
 //
 // Pointers returned by Find* and by ActiveSkills / Passives point into this database. Look them
 // up again after a reload; do not keep them across a frame.
@@ -78,6 +80,9 @@ public:
     [[nodiscard]] std::span<const IconDef> GetIcons() const { return m_Icons; }
     [[nodiscard]] const ShopDef& GetShop() const { return m_Shop; }
     [[nodiscard]] std::span<const DialogueDef> GetDialogues() const { return m_Dialogues; }
+    // Tile kinds in file order, and maps in file-name order.
+    [[nodiscard]] std::span<const TileDef> GetTiles() const { return m_Tiles; }
+    [[nodiscard]] std::span<const MapDef> GetMaps() const { return m_Maps; }
     // icons_sheet.json. The accent sheet is icons_accent_sheet.png beside it. Dev builds use the
     // source assets/ when that file is present, and a packaged build uses assets/ next to data/.
     [[nodiscard]] const std::filesystem::path& GetIconSheet() const { return m_IconSheet; }
@@ -94,6 +99,10 @@ public:
     [[nodiscard]] const RarityDef* FindRarity(std::string_view id) const;
     [[nodiscard]] const IconDef* FindIcon(std::string_view id) const;
     [[nodiscard]] const DialogueDef* FindDialogue(std::string_view id) const;
+    [[nodiscard]] const TileDef* FindTile(std::string_view id) const;
+    [[nodiscard]] const MapDef* FindMap(std::string_view id) const;
+    // The map is the one that holds the spawn. Both pointers are null when the id is absent.
+    [[nodiscard]] MapSpawnRef FindSpawn(std::string_view id) const;
 
     // Evolutions whose EvolvesFrom is `baseId`, in file order.
     [[nodiscard]] std::vector<const ClassDef*> EvolutionsOf(std::string_view baseId) const;
@@ -146,8 +155,8 @@ private:
     void NoteFailure(const DataError& error, DataError* out);
     void NoteSuccess(DataError* out);
     void ApplyTimes(const std::vector<std::optional<std::filesystem::file_time_type>>& times);
-    // True when data/dialogue gained or lost a file. The next stable check reloads.
-    [[nodiscard]] bool RefreshDialogueWatches();
+    // True when data/dialogue or data/maps gained or lost a file. The next stable check reloads.
+    [[nodiscard]] bool RefreshFolderWatches();
 
     std::filesystem::path m_Directory;
     std::vector<FileWatch> m_Watches;
@@ -164,6 +173,8 @@ private:
     std::filesystem::path m_IconSheet;
     ShopDef m_Shop;
     std::vector<DialogueDef> m_Dialogues;
+    std::vector<TileDef> m_Tiles;
+    std::vector<MapDef> m_Maps;
     CombatRules m_Rules;
     ProgressRules m_Progress;
     // Field names from effects.json "better". The merge reads these; it does not decide
