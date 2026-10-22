@@ -8,8 +8,8 @@ namespace Ascension {
 // HP and focus between fights. Max is not stored: it is read from the hero, the worn
 // gear, and the combat rules whenever a fight, a rest, or a level-up needs it. Known
 // is false until the first fill, which is full health. ReturnToHub is set by a loss.
-// The walk back to the hub rest is a later step. Gold is not a field here, so a loss
-// cannot spend it.
+// The map handoff clears it once the hero is standing on the return tile. Gold is not
+// a field here, so a loss cannot spend it.
 struct Vitals {
     bool Known = false;
     i32 Hp = 0;

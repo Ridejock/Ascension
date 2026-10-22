@@ -113,6 +113,8 @@ void CheckRules(const Database& data, const char* what)
           "the hero square uses palette wstone2");
     Check(rules.LinkRed == 208 && rules.LinkGreen == 154 && rules.LinkBlue == 42,
           "the exit square uses palette gold1");
+    Check(rules.SpawnRed == 138 && rules.SpawnGreen == 166 && rules.SpawnBlue == 190,
+          "the spawn square uses palette bg2");
 }
 
 void TestRules()
@@ -121,6 +123,33 @@ void TestRules()
                "sample walk.json sets the step, the tile, and the inset");
     CheckRules(Loaded(ASCENSION_SHIPPED_DATA_DIR, "shipped walk rules load"),
                "shipped walk.json sets the step, the tile, and the inset");
+}
+
+void TestPlace()
+{
+    Database data = Loaded(kSample, "fixture maps load for placing");
+    if (!data.IsLoaded())
+        return;
+    Walker walker;
+    Check(walker.Enter(data, "fixture_a") && At(walker, "fixture_a", 1, 1),
+          "place starts from the fixture");
+    MapTile tile;
+    tile.X = 3;
+    tile.Y = 1;
+    Check(walker.Place(data, "fixture_a", tile) && At(walker, "fixture_a", 3, 1),
+          "place stands on an open tile and does not take a link");
+    MapTile wall;
+    wall.X = 0;
+    wall.Y = 0;
+    Check(!walker.Place(data, "fixture_a", wall) && At(walker, "fixture_a", 3, 1),
+          "place refuses a wall and stays put");
+    Check(!walker.Place(data, "no_such_map", tile) && At(walker, "fixture_a", 3, 1),
+          "place refuses a missing map and stays put");
+    MapTile door;
+    door.X = 4;
+    door.Y = 2;
+    Check(walker.Place(data, "fixture_a", door) && At(walker, "fixture_a", 4, 2),
+          "place can stand on an exit without taking it");
 }
 
 void TestSteps()
@@ -399,6 +428,7 @@ void TestBadWalkFile()
 int main()
 {
     TestRules();
+    TestPlace();
     TestSteps();
     TestScriptPath();
     TestCamera();

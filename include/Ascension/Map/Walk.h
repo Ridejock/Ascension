@@ -54,6 +54,10 @@ public:
     // nothing is left to stand on; the place is cleared.
     bool Adopt(const Database& data, std::string_view fallbackMapId);
 
+    // Stands on this tile. False when the map is missing or the tile is not
+    // walkable. Does not take a link, including when the tile is itself one.
+    bool Place(const Database& data, std::string_view mapId, MapTile tile);
+
     // At most one step. A wall or the edge of the grid is Blocked and the hero
     // does not move. Stepping onto a link is Exited. Being placed on a link,
     // including an arrival tile that is itself a link, does not take it.

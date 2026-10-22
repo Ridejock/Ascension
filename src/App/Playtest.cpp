@@ -105,6 +105,8 @@ bool LookupKey(std::string_view name, SDL_Scancode& scancode, std::string& error
         scancode = SDL_SCANCODE_D;
     else if (key == "escape")
         scancode = SDL_SCANCODE_ESCAPE;
+    else if (key == "f")
+        scancode = SDL_SCANCODE_F;
     else if (key == "f5")
         scancode = SDL_SCANCODE_F5;
     else {

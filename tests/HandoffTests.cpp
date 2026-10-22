@@ -1,0 +1,408 @@
+// A spawn fight's return: a win clears it, a loss stands at full HP with the gold
+// untouched, and a flee steps back and keeps the foe's wound. No window.
+
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "Ascension/Combat/Battle.h"
+#include "Ascension/Map/Handoff.h"
+#include "Ascension/Progress/Inventory.h"
+#include "Ascension/Progress/RunSave.h"
+#include "Ascension/Progress/Vitals.h"
+#include "Check.h"
+
+namespace {
+
+using namespace Ascension;
+
+namespace fs = std::filesystem;
+
+const fs::path kSample = ASCENSION_DATA_DIR;
+
+struct TempCopy {
+    fs::path Path;
+
+    TempCopy()
+    {
+        Path = fs::temp_directory_path() / "ascension-handoff-tests";
+        std::error_code error;
+        fs::remove_all(Path, error);
+        fs::create_directories(Path);
+        fs::copy(kSample, Path, fs::copy_options::recursive);
+    }
+
+    ~TempCopy()
+    {
+        std::error_code error;
+        fs::remove_all(Path, error);
+    }
+};
+
+void WriteFile(const fs::path& path, std::string_view text)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+void ReplaceInFile(const fs::path& path, std::string_view from, std::string_view to)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    const auto at = text.find(from);
+    Check(at != std::string::npos, "the sample text to replace is present");
+    if (at == std::string::npos)
+        return;
+    text.replace(at, from.size(), to);
+    WriteFile(path, text);
+}
+
+// A fixed order, so a flee can be pressed before a faster foe acts.
+class ScriptedTurns final : public TurnModel {
+public:
+    explicit ScriptedTurns(std::vector<CombatantSide> order)
+    {
+        for (const CombatantSide side : order)
+            m_Order.push_back(TurnSeat{side, 0, 0});
+    }
+
+    void Reset() override { m_Index = 0; }
+
+    TurnSeat Next(std::span<const TurnSeat>) override
+    {
+        if (m_Order.empty())
+            return {};
+        if (m_Index >= m_Order.size())
+            return m_Order.back();
+        return m_Order[m_Index];
+    }
+
+    void Advance() override
+    {
+        if (m_Index + 1 < m_Order.size())
+            ++m_Index;
+    }
+
+    void Capture(std::vector<TurnSeat>& order, i32& index) const override
+    {
+        order = m_Order;
+        index = static_cast<i32>(m_Index);
+    }
+
+    void Place(std::span<const TurnSeat> order, i32 index) override
+    {
+        m_Order.assign(order.begin(), order.end());
+        if (index < 0)
+            index = 0;
+        m_Index = static_cast<usize>(index);
+    }
+
+private:
+    std::vector<TurnSeat> m_Order;
+    usize m_Index = 0;
+};
+
+Database Loaded(const fs::path& directory, const char* what)
+{
+    Database data(directory);
+    DataError error;
+    Check(data.Load(&error), what);
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    return data;
+}
+
+bool TileIs(MapTile tile, i32 x, i32 y)
+{
+    return tile.X == x && tile.Y == y;
+}
+
+ContactQuery StepOnto(i32 x, i32 y, i32 fromX, i32 fromY, bool hasFrom)
+{
+    ContactQuery query;
+    query.Tile.X = x;
+    query.Tile.Y = y;
+    query.From.X = fromX;
+    query.From.Y = fromY;
+    query.HasFrom = hasFrom;
+    return query;
+}
+
+ReturnQuery QueryFor(MapOutcome outcome, const MapFightRequest& request)
+{
+    ReturnQuery query;
+    query.Outcome = outcome;
+    query.SpawnId = request.SpawnId;
+    query.FoughtMapId = request.MapId;
+    query.SpawnTile = request.SpawnTile;
+    query.ReturnTile = request.ReturnTile;
+    query.Once = request.Once;
+    return query;
+}
+
+const MapDef* NeedMap(const Database& data, const char* id)
+{
+    const MapDef* map = data.FindMap(id);
+    Check(map != nullptr, id);
+    return map;
+}
+
+void TestOfferAndReturns()
+{
+    Database data = Loaded(kSample, "fixture maps load for a spawn fight");
+    if (!data.IsLoaded())
+        return;
+    const MapDef* home = NeedMap(data, "fixture_a");
+    const MapDef* hold = NeedMap(data, "fixture_b");
+    if (home == nullptr || hold == nullptr)
+        return;
+
+    MapMemory memory;
+    const ContactQuery approach = StepOnto(4, 1, 3, 1, true);
+    const MapFightRequest wolf = OfferSpawn(data, *home, approach, memory);
+    Check(wolf.Active && wolf.SpawnId == "fixture_spawn" && wolf.EncounterId == "wolf" &&
+              wolf.Once && wolf.AllowFlee && wolf.Foes.size() == 1 && wolf.Foes[0] == "wolf" &&
+              wolf.StartStatuses.empty() && TileIs(wolf.SpawnTile, 4, 1) &&
+              TileIs(wolf.ReturnTile, 3, 1),
+          "stepping onto the wolf offers that fight and a step back");
+
+    const ContactQuery empty = StepOnto(1, 1, 1, 1, false);
+    Check(!OfferSpawn(data, *home, empty, memory).Active, "a rest tile is not a fight");
+
+    const MapReturn won = ResolveReturn(data, QueryFor(MapOutcome::Won, wolf));
+    Check(won.Ok && !won.Hub && won.MapId == "fixture_a" && TileIs(won.Tile, 4, 1) &&
+              won.ClearSpawn && !won.KeepWounds && !won.FillPools,
+          "a win stands on the spawn and clears it");
+    FoeWound scratch;
+    scratch.Id = "wolf";
+    scratch.Hp = 11;
+    const FoeWound held[] = {scratch};
+    const MapSettle cleared = ApplyOutcome(data, QueryFor(MapOutcome::Won, wolf), memory, held);
+    Check(cleared.Cleared && IsCleared(memory, "fixture_spawn") &&
+              WoundsOf(memory, "fixture_spawn") == nullptr,
+          "a win records the clear and drops any wound");
+    Check(!OfferSpawn(data, *home, approach, memory).Active,
+          "a cleared spawn does not respawn");
+    const MapSettle again =
+        ApplyOutcome(data, QueryFor(MapOutcome::Won, wolf), memory, held);
+    Check(!again.Cleared && memory.Cleared.size() == 1, "a second win does not record it twice");
+
+    MapMemory fresh;
+    const ContactQuery arrival = StepOnto(4, 1, 0, 0, false);
+    const MapFightRequest dropped = OfferSpawn(data, *home, arrival, fresh);
+    Check(dropped.Active && TileIs(dropped.ReturnTile, 4, 2),
+          "a link arrival flees to the first open neighbor");
+    ReturnQuery blocked = QueryFor(MapOutcome::Fled, wolf);
+    blocked.ReturnTile.X = 0;
+    blocked.ReturnTile.Y = 0;
+    const MapReturn fledWall = ResolveReturn(data, blocked);
+    Check(fledWall.Ok && TileIs(fledWall.Tile, 4, 2) && fledWall.KeepWounds && !fledWall.ClearSpawn,
+          "a flee whose step is a wall uses the first open neighbor");
+
+    const MapSettle fled =
+        ApplyOutcome(data, QueryFor(MapOutcome::Fled, wolf), fresh, held);
+    const FledWounds* wounds = WoundsOf(fresh, "fixture_spawn");
+    Check(fled.Return.Ok && TileIs(fled.Return.Tile, 3, 1) && fled.Return.KeepWounds &&
+              !IsCleared(fresh, "fixture_spawn") && wounds != nullptr && wounds->Foes.size() == 1 &&
+              wounds->Foes[0].Hp == 11 && StoredWound(*wounds, 0, "wolf") == 11 &&
+              StoredWound(*wounds, 0, "bandit") == -1 && StoredWound(*wounds, 1, "wolf") == -1,
+          "a flee steps back, leaves the spawn, and keeps that foe's wound");
+    Check(OfferSpawn(data, *home, approach, fresh).Active, "a fled spawn is still there");
+
+    Inventory bag;
+    std::string error;
+    Check(bag.Start(data, error), "the bag starts for a loss");
+    if (!error.empty())
+        std::printf("    %s\n", error.c_str());
+    bag.GrantGold(40);
+    Vitals vitals;
+    vitals.Known = true;
+    vitals.Hp = 11;
+    vitals.Focus = 1;
+    PoolCaps caps;
+    caps.MaxHp = 80;
+    caps.MaxFocus = 6;
+    LoseToHub(vitals, caps);
+    const MapSettle lost =
+        ApplyOutcome(data, QueryFor(MapOutcome::Lost, wolf), fresh, held);
+    Check(bag.Gold() == 40, "a loss does not spend gold");
+    Check(vitals.Hp == 80 && vitals.Focus == 6 && vitals.ReturnToHub,
+          "a loss fills both pools");
+    Check(lost.Return.Ok && !lost.Return.Hub && lost.Return.MapId == "fixture_a" &&
+              TileIs(lost.Return.Tile, 1, 1) && lost.Return.FillPools && !lost.Return.ClearSpawn &&
+              !IsCleared(fresh, "fixture_spawn") && WoundsOf(fresh, "fixture_spawn") == nullptr,
+          "with no hub, a loss returns to the fought map's rest and forgets the wound");
+    const LossSpot nowhere = FindLossReturn(data, "no_such_map");
+    Check(!nowhere.Ok, "a loss on a missing map has nowhere to stand");
+
+    const ContactQuery ontoHold = StepOnto(1, 1, 1, 2, true);
+    const MapFightRequest staying = OfferSpawn(data, *hold, ontoHold, memory);
+    Check(staying.Active && staying.SpawnId == "fixture_hold" && !staying.Once &&
+              !staying.AllowFlee && TileIs(staying.ReturnTile, 1, 2),
+          "noFlee refuses a flee, and once false keeps the spawn");
+    Check(!FleeAllowed(data, hold->Spawns[0]), "the spawn's noFlee flag is what refuses it");
+    MapMemory holdMemory;
+    RememberWounds(holdMemory, "fixture_hold", held);
+    const MapSettle stayed =
+        ApplyOutcome(data, QueryFor(MapOutcome::Won, staying), holdMemory, held);
+    Check(stayed.Return.Ok && TileIs(stayed.Return.Tile, 1, 1) && !stayed.Return.ClearSpawn &&
+              !stayed.Cleared && !IsCleared(holdMemory, "fixture_hold") &&
+              WoundsOf(holdMemory, "fixture_hold") == nullptr &&
+              OfferSpawn(data, *hold, ontoHold, holdMemory).Active,
+          "a spawn that is not once stays after a win");
+
+    const LossSpot homeLoss = FindLossReturn(data, "fixture_b");
+    Check(homeLoss.Ok && !homeLoss.Hub && homeLoss.MapId == "fixture_b" &&
+              TileIs(homeLoss.Tile, 1, 2),
+          "a map with no rest loses back to its start");
+}
+
+void TestHubLoss()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"hub\": false", "\"hub\": true");
+    Database data = Loaded(copy.Path, "a hub map loads");
+    if (!data.IsLoaded())
+        return;
+    const LossSpot spot = FindLossReturn(data, "fixture_a");
+    Check(spot.Ok && spot.Hub && spot.MapId == "fixture_b" && TileIs(spot.Tile, 1, 2),
+          "a loss returns to the hub start when that map has no rest");
+    ReturnQuery query;
+    query.Outcome = MapOutcome::Lost;
+    query.SpawnId = "fixture_spawn";
+    query.FoughtMapId = "fixture_a";
+    query.SpawnTile.X = 4;
+    query.SpawnTile.Y = 1;
+    query.Once = true;
+    const MapReturn back = ResolveReturn(data, query);
+    Check(back.Ok && back.Hub && back.FillPools && !back.ClearSpawn && back.MapId == "fixture_b" &&
+              TileIs(back.Tile, 1, 2),
+          "the loss return is the hub, not the map that was fought");
+}
+
+void TestBossCannotFlee()
+{
+    Database data = Loaded(kSample, "boss data loads");
+    if (!data.IsLoaded())
+        return;
+    MapSpawn boss;
+    boss.Id = "boss_seat";
+    boss.Encounter = "oathkeeper_varn";
+    boss.NoFlee = false;
+    Check(!FleeAllowed(data, boss), "a foe with boss set cannot be fled");
+
+    std::string error;
+    Battle battle(data, std::make_unique<ScriptedTurns>(
+                            std::vector<CombatantSide>{CombatantSide::Player}));
+    battle.SetFleeAllowed(true);
+    Check(battle.Start("fighter", 1, "oathkeeper_varn", error), "the boss fight starts");
+    if (!error.empty())
+        std::printf("    %s\n", error.c_str());
+    Check(!battle.FleeAllowed(), "start clears flee, so a list fight cannot flee");
+    const ActionResult refused = battle.Flee();
+    Check(!refused.Accepted && battle.Result() == BattleResult::Ongoing,
+          "a boss press does not end the fight and does not spend the turn");
+    CheckHas(refused.Text, "cannot flee", "the refusal says flee is closed");
+    battle.SetFleeAllowed(true);
+    const ActionResult left = battle.Flee();
+    Check(left.Accepted && left.Result == BattleResult::Fled &&
+              battle.Result() == BattleResult::Fled,
+          "an allowed flee ends the fight as fled");
+    CheckHas(left.Text, "flees", "the flee line names the leaving");
+}
+
+void TestFoeWoundRoundTrip()
+{
+    Database data = Loaded(kSample, "wolf data loads for a wound");
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+    Battle first(data, std::make_unique<ScriptedTurns>(
+                           std::vector<CombatantSide>{CombatantSide::Player}));
+    Check(first.Start("fighter", 1, "wolf", error), "the wolf fight starts");
+    if (!error.empty())
+        std::printf("    %s\n", error.c_str());
+    if (first.Result() != BattleResult::Ongoing || first.Enemies().empty())
+        return;
+    const i32 full = first.Enemies()[0].MaxHp;
+    Check(full > 11 && first.SetTarget(0), "the wolf has room for a wound");
+    first.SetEnemyHp(11);
+    first.SetFleeAllowed(true);
+    const ActionResult left = first.Flee();
+    Check(left.Accepted && first.Result() == BattleResult::Fled && first.Enemies()[0].Hp == 11,
+          "fleeing keeps the wolf at the wounded total");
+    std::vector<FoeWound> captured;
+    CaptureFoeWounds(first, captured);
+    MapMemory memory;
+    RememberWounds(memory, "fixture_spawn", captured);
+
+    Battle second(data, std::make_unique<ScriptedTurns>(
+                            std::vector<CombatantSide>{CombatantSide::Player}));
+    Check(second.Start("fighter", 1, "wolf", error), "the wolf is met again");
+    const FledWounds* wounds = WoundsOf(memory, "fixture_spawn");
+    Check(wounds != nullptr, "the flee stored the wolf");
+    if (wounds == nullptr || second.Enemies().empty())
+        return;
+    ApplyFoeWounds(second, *wounds);
+    Check(second.Result() == BattleResult::Ongoing && second.Enemies()[0].Hp == 11,
+          "the next contact writes the wound back");
+
+    FledWounds changed = *wounds;
+    changed.Foes[0].Id = "bandit";
+    Battle third(data, std::make_unique<ScriptedTurns>(
+                           std::vector<CombatantSide>{CombatantSide::Player}));
+    Check(third.Start("fighter", 1, "wolf", error), "a changed seat starts full");
+    if (third.Enemies().empty())
+        return;
+    ApplyFoeWounds(third, changed);
+    Check(third.Enemies()[0].Hp == third.Enemies()[0].MaxHp,
+          "a seat whose id changed keeps the health the new fight rolled");
+}
+
+void TestFangOnce()
+{
+    Database data = Loaded(ASCENSION_SHIPPED_DATA_DIR, "shipped data loads for the fang");
+    if (!data.IsLoaded())
+        return;
+    Inventory bag;
+    std::string error;
+    Check(bag.Start(data, error), "the bag starts for the fang");
+    if (!error.empty())
+        std::printf("    %s\n", error.c_str());
+    std::vector<std::string> found;
+    const std::vector<std::string> killed{"dire_wolf"};
+    const std::vector<std::string> first = bag.TakeDrops(killed, found);
+    Check(first.size() == 1 && found.size() == 1 && found[0] == "alphas_fang",
+          "the dire wolf drops Alpha's Fang once");
+    const std::vector<std::string> second = bag.TakeDrops(killed, found);
+    Check(second.empty() && found.size() == 1, "a later dire wolf does not drop the fang again");
+}
+
+void TestSaveStaysVersion3()
+{
+    Check(RunSave::kVersion == 3, "the save version stays 3");
+    RunState run;
+    RememberOutcome(run, BattleResult::Fled, 3, 1);
+    Check(run.Standing == RunStanding::None && !run.ResourcesKnown && run.Hp == 0 &&
+              run.Focus == 0 && !ResumeWound(run),
+          "a flee is between fights and is not written as a wound");
+}
+
+} // namespace
+
+int main()
+{
+    TestOfferAndReturns();
+    TestHubLoss();
+    TestBossCannotFlee();
+    TestFoeWoundRoundTrip();
+    TestFangOnce();
+    TestSaveStaysVersion3();
+    std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
+    return g_Failures == 0 ? 0 : 1;
+}

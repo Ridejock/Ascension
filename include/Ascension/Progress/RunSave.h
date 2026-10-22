@@ -49,6 +49,12 @@ inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focu
         run.Standing = RunStanding::Defeat;
         return;
     }
+    // A flee is between fights. This version does not store the wound or the spawn,
+    // same as a victory: the in-memory vitals keep the HP until the next save version.
+    if (result == BattleResult::Fled) {
+        run.Standing = RunStanding::None;
+        return;
+    }
     run.Standing = RunStanding::Ongoing;
     run.ResourcesKnown = true;
     run.Hp = hp;

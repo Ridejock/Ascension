@@ -26,6 +26,7 @@ constexpr usize kLogLines = 6;
 constexpr int kMaxHotkeys = 8;
 // Keys are fixed in this file. There is no binding table in the data.
 constexpr SDL_Scancode kItemKey = SDL_SCANCODE_C;
+constexpr SDL_Scancode kFleeKey = SDL_SCANCODE_F;
 // Enemy actions finished inside one scripted key before the press is applied. A round is
 // at most a handful of foes; the cap is several rounds so a leftover foe turn cannot eat
 // the next key, and it still happens on that key's frame.
@@ -64,6 +65,8 @@ FightStanding FightStandingOf(const Battle* battle)
         return FightStanding::Defeat;
     case BattleResult::Ongoing:
         return FightStanding::Ongoing;
+    case BattleResult::Fled:
+        return FightStanding::None;
     }
     return FightStanding::Ongoing;
 }
@@ -521,13 +524,15 @@ void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
         AwardVictory();
     else if (result.Result == BattleResult::Defeat)
         RememberDefeat();
+    MaybeSettle();
 }
 
 void AscensionApp::ResolveFoe()
 {
     if (m_Battle == nullptr)
         return;
-    for (i32 step = 0; step < 8 && m_Battle->Result() == BattleResult::Ongoing &&
+    for (i32 step = 0; step < 8 && m_Battle != nullptr &&
+                       m_Battle->Result() == BattleResult::Ongoing &&
                        m_Battle->Actor() == CombatantSide::Enemy;
          ++step) {
         const i32 markedBefore = m_Battle->TargetIndex();
@@ -572,6 +577,166 @@ void AscensionApp::NoteRest()
     if (!RestOn(*map, tile, m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory)))
         return;
     Note("Rested.");
+}
+
+bool AscensionApp::SpawnFightOpen() const
+{
+    return m_OnMap && m_MapFight.Active && m_Battle != nullptr;
+}
+
+void AscensionApp::TouchSpawn(const ContactQuery& query)
+{
+    if (!m_Walker.Placed() || SpawnFightOpen())
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const MapFightRequest request = OfferSpawn(m_Data, *map, query, m_MapMemory);
+    if (!request.Active)
+        return;
+    m_MapFight.Active = true;
+    m_MapFight.SpawnId = request.SpawnId;
+    m_MapFight.EncounterId = request.EncounterId;
+    m_MapFight.MapId = request.MapId;
+    m_MapFight.SpawnTile = request.SpawnTile;
+    m_MapFight.ReturnTile = request.ReturnTile;
+    m_MapFight.Once = request.Once;
+    m_MapFight.AllowFlee = request.AllowFlee;
+    BeginSpawnFight();
+}
+
+void AscensionApp::BeginSpawnFight()
+{
+    if (!m_MapFight.Active)
+        return;
+    if (const char* block = m_Hero.NextFightBlock()) {
+        if (m_Log.empty() || m_Log.back() != block)
+            Note(block);
+        m_MapFight.Active = false;
+        return;
+    }
+    m_Log.clear();
+    m_StartError.clear();
+    m_XpAwarded = false;
+    m_VitalsSettled = false;
+    m_Camp = false;
+    m_Talk = false;
+    m_Picking = false;
+    if (!m_Data.IsLoaded() || !m_Hero.IsReady()) {
+        m_MapFight.Active = false;
+        return;
+    }
+    if (m_Battle == nullptr)
+        m_Battle = std::make_unique<Battle>(m_Data, std::make_unique<AgilityRoundModel>());
+    m_Battle->SetGear(m_Inventory.GearBonus());
+    m_Battle->SetWornItems(m_Inventory.WornIds());
+    m_Battle->SetPickedSkills(m_Hero.PickedIds());
+    m_Battle->SetBaseStats(m_Hero.Attributes());
+    std::string error;
+    if (!OpenBattle(m_MapFight.EncounterId, error)) {
+        m_StartError = error;
+        Note(error);
+        m_Battle.reset();
+        m_MapFight.Active = false;
+        return;
+    }
+    m_Battle->SetFleeAllowed(m_MapFight.AllowFlee);
+    if (const FledWounds* wounds = WoundsOf(m_MapMemory, m_MapFight.SpawnId))
+        ApplyFoeWounds(*m_Battle, *wounds);
+    m_Standing = RunStanding::Ongoing;
+    PushRanks();
+    if (m_Battle->Result() != BattleResult::Ongoing) {
+        if (m_Battle->Result() == BattleResult::Defeat)
+            RememberDefeat();
+        else if (m_Battle->Result() == BattleResult::Victory) {
+            const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
+            KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+            m_VitalsSettled = true;
+        }
+        Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
+        MaybeSettle();
+        return;
+    }
+    if (m_Battle->Actor() == CombatantSide::Enemy) {
+        const i32 acting = m_Battle->ActorIndex();
+        const auto foes = m_Battle->Enemies();
+        const std::string& name = acting >= 0 && acting < static_cast<i32>(foes.size())
+                                      ? foes[static_cast<usize>(acting)].Name
+                                      : m_Battle->Enemy().Name;
+        Note(name + " moves first.");
+    } else {
+        Note("You move first.");
+    }
+    ResolveFoe();
+}
+
+void AscensionApp::MaybeSettle()
+{
+    if (!m_MapFight.Active || m_Battle == nullptr)
+        return;
+    const BattleResult result = m_Battle->Result();
+    if (result == BattleResult::Ongoing)
+        return;
+    // A win that opened a path stays on that screen. The spawn is settled once
+    // the choice is made, so the next step does not start a fight underneath it.
+    if (result == BattleResult::Victory && m_Hero.NextFightBlock() != nullptr)
+        return;
+    if (result == BattleResult::Fled && !m_VitalsSettled) {
+        const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
+        KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+        m_VitalsSettled = true;
+    }
+
+    ReturnQuery query;
+    query.Outcome = MapOutcome::Won;
+    if (result == BattleResult::Defeat)
+        query.Outcome = MapOutcome::Lost;
+    else if (result == BattleResult::Fled)
+        query.Outcome = MapOutcome::Fled;
+    query.SpawnId = m_MapFight.SpawnId;
+    query.FoughtMapId = m_MapFight.MapId;
+    query.SpawnTile = m_MapFight.SpawnTile;
+    query.ReturnTile = m_MapFight.ReturnTile;
+    query.Once = m_MapFight.Once;
+
+    std::vector<FoeWound> wounds;
+    if (result == BattleResult::Fled)
+        CaptureFoeWounds(*m_Battle, wounds);
+    // Gold is not touched. A win already granted it in AwardVictory. A loss and
+    // a flee do not reach GrantGold, so the purse stays where it was.
+    const MapSettle settled = ApplyOutcome(m_Data, query, m_MapMemory, wounds);
+    const bool placed =
+        settled.Return.Ok && m_Walker.Place(m_Data, settled.Return.MapId, settled.Return.Tile);
+    if (!placed) {
+        Note("The way back is gone.");
+    } else if (result == BattleResult::Victory && settled.Return.ClearSpawn) {
+        Note("The foe is gone.");
+    } else if (result == BattleResult::Victory) {
+        Note("The foe remains.");
+    } else if (result == BattleResult::Fled) {
+        Note("The foe holds its ground.");
+    } else if (settled.Return.Hub) {
+        Note("Back at the hub.");
+    } else {
+        Note("Back at the start.");
+    }
+    // The loss flag only means the walk home has not happened yet. Standing on
+    // the return tile is that walk, including when the tile is not a rest.
+    if (placed && result == BattleResult::Defeat)
+        m_Vitals.ReturnToHub = false;
+
+    m_Battle.reset();
+    m_MapFight = {};
+    if (result == BattleResult::Victory)
+        m_Standing = RunStanding::Victory;
+    else if (result == BattleResult::Defeat)
+        m_Standing = RunStanding::Defeat;
+    else
+        m_Standing = RunStanding::None;
+    m_Camp = false;
+    m_Talk = false;
+    m_Picking = false;
+    NoteRest();
 }
 
 void AscensionApp::BeginFight()
@@ -958,12 +1123,30 @@ void AscensionApp::OnEvent(const SDL_Event& event)
             Note("Saved.");
         return;
     }
-    if (m_OnMap) {
+    if (m_OnMap && !SpawnFightOpen()) {
         // A real key already reached Emerald's keyboard. Only a scripted press,
         // which is injected here and nowhere else, has to be recorded.
         if (m_ApplyingScript)
             m_ScriptDir = DirectionOfKey(event.key.scancode);
         return;
+    }
+    if (m_OnMap && m_MapFight.Active) {
+        if (event.key.scancode == SDL_SCANCODE_R) {
+            if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+                BeginSpawnFight();
+            else if (const char* block = m_Hero.NextFightBlock())
+                Note(block);
+            return;
+        }
+        if (event.key.scancode == SDL_SCANCODE_N) {
+            Note("The next fight is on the map.");
+            return;
+        }
+        if (event.key.scancode == SDL_SCANCODE_I) {
+            if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+                Note("Finish the fight.");
+            return;
+        }
     }
     if (m_Talk) {
         HandleTalk(event.key.scancode);
@@ -1137,6 +1320,18 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         return;
     }
 
+    if (m_MapFight.Active && event.key.scancode == kFleeKey) {
+        if (m_Battle->Actor() != CombatantSide::Player) {
+            Note("Wait for your turn.");
+            return;
+        }
+        const ActionResult fled = m_Battle->Flee();
+        Note(fled);
+        FinishAction(fled, false);
+        ResolveFoe();
+        return;
+    }
+
     const auto skills = m_Battle->PlayerSkillIds();
     if (digit < 0 || digit >= kMaxHotkeys)
         return;
@@ -1251,12 +1446,23 @@ void AscensionApp::StepMap(f32 dt)
     } else if (!scripting) {
         input = ReadMapInput();
     }
+    const WalkPlace before = m_Walker.Place();
     const WalkStep step = m_Walker.Advance(m_Data, m_Data.GetWalk(), input, dt);
     if (step.Kind == WalkStepKind::Exited)
         Note("Exit to " + m_Walker.Place().MapId + ".");
     else if (step.Kind == WalkStepKind::Blocked && input.Fresh)
         Note("Blocked.");
-    NoteRest();
+    if (step.Kind == WalkStepKind::Moved || step.Kind == WalkStepKind::Exited) {
+        ContactQuery contact;
+        contact.Tile = m_Walker.Place().Tile;
+        if (step.Kind == WalkStepKind::Moved) {
+            contact.HasFrom = true;
+            contact.From = before.Tile;
+        }
+        TouchSpawn(contact);
+    }
+    if (!SpawnFightOpen())
+        NoteRest();
 }
 
 void AscensionApp::AdoptMap()
@@ -1282,7 +1488,8 @@ void AscensionApp::PlayScriptedKey()
     // Finish a foe turn left over from the previous frame before this press is spent.
     if (m_Battle != nullptr) {
         for (i32 pass = 0;
-             pass < kScriptPumpPasses && m_Battle->Result() == BattleResult::Ongoing &&
+             pass < kScriptPumpPasses && m_Battle != nullptr &&
+             m_Battle->Result() == BattleResult::Ongoing &&
              m_Battle->Actor() == CombatantSide::Enemy;
              ++pass)
             ResolveFoe();
@@ -1325,8 +1532,10 @@ void AscensionApp::OnUpdate(f32 dt)
 {
     if (!TakeAutoPath())
         return;
+    MaybeSettle();
     PlayScriptedKey();
-    if (m_OnMap)
+    MaybeSettle();
+    if (m_OnMap && !SpawnFightOpen())
         StepMap(dt);
     // Frame time is a float, and Windows file stamps are not stable the way this poll
     // expects. A reload between scripted keys rebuilds the fight on a different frame
@@ -1342,7 +1551,7 @@ void AscensionApp::OnUpdate(f32 dt)
     m_Data.CheckForChanges(&error);
     if (m_Data.GetRevision() == revision)
         return;
-    if (m_OnMap) {
+    if (m_OnMap && !SpawnFightOpen()) {
         AdoptMap();
         return;
     }
@@ -1487,6 +1696,14 @@ void AscensionApp::RememberFoe(std::string_view id)
 
 void AscensionApp::RememberVictory()
 {
+    if (m_MapFight.Active && !m_MapFight.EncounterId.empty()) {
+        const EncounterDef* encounter = m_Data.FindEncounter(m_MapFight.EncounterId);
+        if (encounter == nullptr)
+            return;
+        for (const std::string& id : encounter->Enemies)
+            RememberFoe(id);
+        return;
+    }
     if (!m_DirectEnemy.empty()) {
         RememberFoe(m_DirectEnemy);
         return;
@@ -1573,13 +1790,13 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const f32 height = static_cast<f32>(pixels.y);
     renderer.Begin(Emerald::Mat4::OrthoPixelSpace(width, height));
 
-    if (m_OnMap && m_Data.IsLoaded() && m_StartError.empty()) {
+    if (m_OnMap && !SpawnFightOpen() && m_Data.IsLoaded() && m_StartError.empty()) {
         const PoolCaps caps = m_Hero.IsReady() && m_Inventory.IsReady()
                                   ? HeroPools(m_Data, m_Hero, m_Inventory)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
-                      shown.Focus, caps.MaxFocus);
+                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared);
         renderer.End();
         return;
     }
@@ -2012,6 +2229,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     } else if (m_Battle->Result() == BattleResult::Defeat) {
         banner = "DEFEAT";
         bannerColor = kError;
+    } else if (m_Battle->Result() == BattleResult::Fled) {
+        banner = "FLED";
     } else if (!playerTurn) {
         std::string actingName = enemy.Name;
         if (actorSlot >= 0 && actorSlot < packCount)
@@ -2102,11 +2321,15 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 help += "LEFT RIGHT TARGET    ";
             if (!fightOver)
                 help += "C ITEMS    ";
+            if (!fightOver && m_MapFight.Active && m_MapFight.AllowFlee)
+                help += "F FLEE    ";
             help += "SPACE WAIT    ";
-            if (fightOver)
+            if (fightOver && !m_OnMap)
                 help += "I " + KeeperWord(m_Data.GetShop()) + "    ";
-            help += "R FIGHT    N NEXT FOE    F5 SAVE    ESC QUIT    REV " +
-                    std::to_string(m_Data.GetRevision());
+            help += "R FIGHT    ";
+            if (!m_OnMap)
+                help += "N NEXT FOE    ";
+            help += "F5 SAVE    ESC QUIT    REV " + std::to_string(m_Data.GetRevision());
         }
         Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(help), kDim, 1,
                                width - 96.0f);
