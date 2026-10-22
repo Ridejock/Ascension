@@ -51,7 +51,8 @@ void DrawCell(Emerald::Renderer2D& renderer, f32 left, f32 top, f32 size,
 } // namespace
 
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
-                   std::span<const std::string> log, f32 width, f32 height)
+                   std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
+                   i32 focus, i32 maxFocus)
 {
     const Emerald::Vec4 label = ByteColor(kLabelRed, kLabelGreen, kLabelBlue);
     const Emerald::Vec4 dim = ByteColor(kLogRed, kLogGreen, kLogBlue);
@@ -111,6 +112,10 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     }
 
     Emerald::DrawDebugText(renderer, {16.0f, 16.0f}, Upper(PlaceLabel(walker.Place())), label, 2);
+    const std::string pools = "HP " + std::to_string(hp) + "/" + std::to_string(maxHp) +
+                              "   FOCUS " + std::to_string(focus) + "/" + std::to_string(maxFocus);
+    const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
+    Emerald::DrawDebugText(renderer, {16.0f, poolsY}, Upper(pools), label, 2);
     const usize shown = std::min(log.size(), static_cast<usize>(4));
     const f32 lineStep = Emerald::DebugTextLineHeight(1) + 2.0f;
     f32 logY = height - 16.0f - static_cast<f32>(shown) * lineStep;

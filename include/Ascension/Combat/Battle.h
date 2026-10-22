@@ -199,6 +199,14 @@ struct FightSnapshot {
     std::vector<CombatantSnapshot> Foes;
 };
 
+// Pools a fight starts from. Hp is clamped to 0..MaxHp. 0 is a defeat before anyone
+// acts. Focus is clamped to 0..MaxFocus. The Start that does not take this fills both,
+// which is a lone fight and the single-encounter harness.
+struct OpeningPools {
+    i32 Hp = 0;
+    i32 Focus = 0;
+};
+
 // One player class against an encounter (one enemy, or a pack). Skill ids are kept, not
 // pointers, so a hot reload can replace the database underneath. Pass TurnModel in;
 // AgilityRoundModel is the sandbox default.
@@ -207,6 +215,11 @@ public:
     Battle(const Database& data, std::unique_ptr<TurnModel> turns);
 
     bool Start(std::string_view classId, i32 level, std::string_view enemyId, std::string& error);
+
+    // Same fight, starting at `pools` instead of full. A win's leftover HP and focus are
+    // what the caller passes the next time.
+    bool Start(std::string_view classId, i32 level, std::string_view enemyId, OpeningPools pools,
+               std::string& error);
 
     // A successful reload of the JSON. Keeps the wound, the spent focus and whose action it
     // is. If the class or the enemy is gone, the fight is left unchanged.
@@ -290,6 +303,8 @@ private:
         ActionResult Result;
     };
 
+    bool StartFight(std::string_view classId, i32 level, std::string_view enemyId, bool usePools,
+                    i32 hp, i32 focus, std::string& error);
     bool Build(std::string& error, bool keepWounds);
     ActionResult Reject(std::string text) const;
     void FinishIfDead();

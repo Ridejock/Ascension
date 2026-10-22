@@ -145,7 +145,7 @@ void TestSample()
     Check(progress.UsesPerRank.size() == 4 && progress.UsesPerRank[0] == 3 &&
               progress.UsesPerRank[1] == 6 && progress.UsesPerRank[2] == 10 &&
               progress.UsesPerRank[3] == 15 && progress.MaxSkillRank == 5 &&
-              progress.PowerPerRank == 2,
+              progress.PowerPerRank == 2 && progress.LevelHp == LevelHpRule::Gained,
           "ranks use the escalating thresholds and add two power");
 
     const ClassDef* fighter = MustClass(data, "fighter");
@@ -550,6 +550,12 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "progress.json", "[3, 6, 10, 15]", "0");
         TestRejected(copy.Path, "progress.json", "usesPerRank", "uses per rank must be at least 1");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "progress.json", "\"levelHp\": \"gained\"",
+                      "\"levelHp\": \"heal\"");
+        TestRejected(copy.Path, "progress.json", "levelHp", "levelHp must name gained, full, or kept");
     }
     {
         TempCopy copy;

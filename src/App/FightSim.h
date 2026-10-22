@@ -48,6 +48,36 @@ SimulateEncounterRates(const Database& data, const SimRateQuery& query, std::str
 [[nodiscard]] std::string FormatSimRates(const std::vector<SimRateRow>& rows,
                                          const SimRateQuery& query);
 
+// One fight in a chain. The harness kit is the single-fight one: level 6, a rusty
+// sword, and an oak shield, with no fang. The first fight of a build starts full, so
+// its HP left matches that build's single-fight row. A win carries HP and focus into
+// the next encounter. A loss or a timeout leaves HP left at 0 and the next fight
+// starts full, which is the loss rule (back at full health, gold untouched).
+struct ChainRow {
+    std::string Encounter;
+    std::string Build;
+    i32 StartHp = 0;
+    i32 StartFocus = 0;
+    i32 MaxHp = 0;
+    bool Won = false;
+    i32 HpLeft = 0;
+    i32 FocusLeft = 0;
+    bool Ok = false;
+    std::string Error;
+};
+
+// Empty ClassId is every harness build. PickId, when set, keeps only the build whose
+// level-6 option is that skill.
+struct ChainQuery {
+    std::string ClassId;
+    std::string PickId;
+};
+
+[[nodiscard]] std::vector<ChainRow> SimulateChain(const Database& data, const ChainQuery& query,
+                                                  std::string& error);
+
+[[nodiscard]] std::string FormatChain(const std::vector<ChainRow>& rows);
+
 // --sim. No --class prints the rate table for --enemy. A class or a focus plays that
 // one row. 0 when every row was built. Losses are still 0: the table is the result.
 [[nodiscard]] int RunPlaytestSim(const PlaytestOptions& options);

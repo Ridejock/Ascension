@@ -575,6 +575,16 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.Sim = true;
+        } else if (flag == "--chain") {
+            if (attached.has_value()) {
+                error = "--chain does not take a value";
+                return false;
+            }
+            if (options.Chain) {
+                error = "--chain was already set";
+                return false;
+            }
+            options.Chain = true;
         } else if (flag == "--runs") {
             if (AlreadySet(sawRuns, flag, error) ||
                 !TakeValue(args, index, attached, flag, value, error))
@@ -613,8 +623,24 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
             return false;
         }
     }
-    if (options.Sim && options.Fight.Id.empty()) {
+    if (options.Chain && !options.Sim) {
+        error = "--chain is only used with --sim";
+        return false;
+    }
+    if (options.Sim && !options.Chain && options.Fight.Id.empty()) {
         error = "--sim needs --enemy";
+        return false;
+    }
+    if (options.Chain && !options.Fight.Id.empty()) {
+        error = "pass --chain or --enemy, not both";
+        return false;
+    }
+    if (options.Chain && !options.FocusId.empty()) {
+        error = "--chain does not take --focus";
+        return false;
+    }
+    if (options.Chain && (sawRuns || sawSeed || sawSlip)) {
+        error = "--chain does not take --runs, --seed, or --slip";
         return false;
     }
     if (!options.MapId.empty() && options.Sim) {

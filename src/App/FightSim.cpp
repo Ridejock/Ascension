@@ -48,6 +48,10 @@ struct SimRun {
     bool Victory = false;
     bool TimedOut = false;
     i32 Hp = 0;
+    i32 Focus = 0;
+    i32 StartHp = 0;
+    i32 StartFocus = 0;
+    i32 MaxHp = 0;
     i32 PlayerTurns = 0;
     std::string Error;
 };
@@ -467,6 +471,11 @@ struct RunSpec {
     bool RandomFocus = false;
     i32 Slip = 0;
     u32 RngState = 1;
+    // False starts full, which is every single-fight row. True uses StartHp and
+    // StartFocus, clamped by the fight.
+    bool UsePools = false;
+    i32 StartHp = 0;
+    i32 StartFocus = 0;
 };
 
 // xorshift32. State 0 is stuck, so a zero result is replaced.
@@ -589,10 +598,21 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
     battle.SetPickedSkills(hero.PickedIds());
     PushRanks(battle, hero, data, {});
     std::string why;
-    if (!battle.Start(hero.ClassId(), hero.Level(), spec.EncounterId, why)) {
+    if (spec.UsePools) {
+        OpeningPools opening;
+        opening.Hp = spec.StartHp;
+        opening.Focus = spec.StartFocus;
+        if (!battle.Start(hero.ClassId(), hero.Level(), spec.EncounterId, opening, why)) {
+            row.Error = why;
+            return row;
+        }
+    } else if (!battle.Start(hero.ClassId(), hero.Level(), spec.EncounterId, why)) {
         row.Error = why;
         return row;
     }
+    row.StartHp = battle.Player().Hp;
+    row.StartFocus = battle.Player().Focus;
+    row.MaxHp = battle.Player().MaxHp;
 
     u32 state = spec.RngState == 0 ? 1u : spec.RngState;
     i32 steps = 0;
@@ -630,6 +650,7 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
     row.Victory = battle.Result() == BattleResult::Victory;
     row.TimedOut = battle.Result() == BattleResult::Ongoing;
     row.Hp = battle.Player().Hp;
+    row.Focus = battle.Player().Focus;
     return row;
 }
 
@@ -858,6 +879,123 @@ std::string FormatSimRates(const std::vector<SimRateRow>& rows, const SimRateQue
     return text;
 }
 
+bool WantedBuild(const BuildSpec& build, const ChainQuery& query)
+{
+    if (!query.ClassId.empty() && query.ClassId != build.ClassId)
+        return false;
+    if (!query.PickId.empty()) {
+        if (build.Pick == nullptr || query.PickId != build.Pick)
+            return false;
+    }
+    return true;
+}
+
+std::vector<ChainRow> SimulateChain(const Database& data, const ChainQuery& query,
+                                    std::string& error)
+{
+    error.clear();
+    std::vector<ChainRow> rows;
+    bool any = false;
+    for (const BuildSpec& build : kBuilds) {
+        if (WantedBuild(build, query))
+            any = true;
+    }
+    if (!any) {
+        error = "no harness build matches that class";
+        return rows;
+    }
+    const auto encounters = data.GetEncounters();
+    if (encounters.empty()) {
+        error = "no encounters";
+        return rows;
+    }
+
+    for (const BuildSpec& build : kBuilds) {
+        if (!WantedBuild(build, query))
+            continue;
+        bool carry = false;
+        i32 hp = 0;
+        i32 focus = 0;
+        for (const EncounterDef& encounter : encounters) {
+            const std::vector<FocusOrder> orders = OrdersFor(encounter);
+            FocusOrder order;
+            if (!orders.empty())
+                order = orders.front();
+            RunSpec spec;
+            spec.Build = &build;
+            spec.EncounterId = encounter.Id;
+            spec.FocusId = order.First;
+            spec.ThenId = order.Then;
+            spec.RandomFocus = order.Random;
+            spec.RngState = 1;
+            spec.UsePools = carry;
+            spec.StartHp = hp;
+            spec.StartFocus = focus;
+            const SimRun run = SimulateBuild(data, spec);
+
+            ChainRow row;
+            row.Encounter = encounter.Name;
+            row.Build = build.Label;
+            row.Ok = run.Ok;
+            row.Error = run.Error;
+            if (!run.Ok) {
+                rows.push_back(std::move(row));
+                error = run.Error.empty() ? "the chain could not start a fight" : run.Error;
+                return rows;
+            }
+            row.StartHp = run.StartHp;
+            row.StartFocus = run.StartFocus;
+            row.MaxHp = run.MaxHp;
+            row.Won = run.Victory && !run.TimedOut;
+            row.HpLeft = row.Won ? run.Hp : 0;
+            row.FocusLeft = row.Won ? run.Focus : 0;
+            if (row.Won) {
+                carry = true;
+                hp = run.Hp;
+                focus = run.Focus;
+            } else {
+                carry = false;
+                hp = 0;
+                focus = 0;
+            }
+            rows.push_back(std::move(row));
+        }
+    }
+    return rows;
+}
+
+std::string FormatChain(const std::vector<ChainRow>& rows)
+{
+    std::string text;
+    text += "Chain at level 6 with a rusty sword and an oak shield. No fang.\n";
+    text += "Fights run in encounter order. The pack kills the dire wolf first.\n";
+    text += "The first fight of a build starts full, so it matches that single-fight row.\n";
+    text += "A win carries HP and focus. A loss restores both, and the next fight starts full.\n";
+    text += "HP left and focus left are 0 on a loss or a timeout.\n";
+    text += Pad("Encounter", 18);
+    text += Pad("Build", 22);
+    text += Pad("Start HP", 10);
+    text += Pad("Win%", 8);
+    text += Pad("HP left", 10);
+    text += "Focus\n";
+    for (const ChainRow& row : rows) {
+        text += Pad(row.Encounter, 18);
+        text += Pad(row.Build, 22);
+        if (!row.Ok) {
+            text += "setup failed: ";
+            text += row.Error;
+            text += "\n";
+            continue;
+        }
+        text += Pad(std::to_string(row.StartHp), 10);
+        text += Pad(row.Won ? "100.0" : "0.0", 8);
+        text += Pad(std::to_string(row.HpLeft), 10);
+        text += std::to_string(row.FocusLeft);
+        text += "\n";
+    }
+    return text;
+}
+
 int RunPlaytestSim(const PlaytestOptions& options)
 {
     const std::filesystem::path directory = PlaytestDataDirectory(options);
@@ -868,6 +1006,25 @@ int RunPlaytestSim(const PlaytestOptions& options)
             loadError.Message.empty() ? "could not load data" : loadError.Message;
         std::fprintf(stderr, "%s\n", message.c_str());
         return 1;
+    }
+
+    if (options.Chain) {
+        ChainQuery chain;
+        chain.ClassId = options.ClassId;
+        if (!options.PickIds.empty())
+            chain.PickId = options.PickIds.front();
+        std::string error;
+        const std::vector<ChainRow> rows = SimulateChain(data, chain, error);
+        if (rows.empty()) {
+            std::fprintf(stderr, "%s\n", error.c_str());
+            return 1;
+        }
+        std::fputs(FormatChain(rows).c_str(), stdout);
+        if (!error.empty()) {
+            std::fprintf(stderr, "%s\n", error.c_str());
+            return 1;
+        }
+        return 0;
     }
 
     SimRateQuery query;

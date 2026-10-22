@@ -11,6 +11,7 @@
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/RunSave.h"
+#include "Ascension/Progress/Vitals.h"
 #include "Emerald/Core/Application.h"
 #include "Playtest.h"
 
@@ -39,6 +40,13 @@ protected:
 
 private:
     void BeginFight();
+    // Starts the battle at the hero's carried HP and focus. A lone Start() fills both;
+    // this path is the one the encounter list uses.
+    bool OpenBattle(std::string_view fightId, std::string& error);
+    // A loss fills both pools and marks a hub return. Gold is not touched.
+    void RememberDefeat();
+    // Standing on a rest point fills both pools, once per arrival.
+    void NoteRest();
     void ResolveFoe();
     void PushRanks(std::string_view pendingSkill = {});
     void AwardVictory();
@@ -144,6 +152,17 @@ private:
     // A scripted key does not reach Emerald's keyboard, so the map records it here
     // for the step taken later in the same frame.
     WalkDir m_ScriptDir = WalkDir::None;
+    // HP and focus between fights. A new hero is full. A win writes the leftover
+    // back. A loss fills both and sets ReturnToHub. The save still uses version 3,
+    // which does not store this.
+    Vitals m_Vitals;
+    // True once this fight's end has been written into m_Vitals. R mid-fight leaves
+    // it clear, so the retry starts from the pools the fight opened with.
+    bool m_VitalsSettled = false;
+    // The tile NoteRest last considered, so standing still does not log Rested again.
+    bool m_RestSeen = false;
+    std::string m_RestMap;
+    MapTile m_RestTile;
 };
 
 } // namespace Ascension

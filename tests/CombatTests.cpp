@@ -2230,6 +2230,58 @@ void TestLowestHpHeal()
         std::printf("    alone: %s\n", alone.Text.c_str());
 }
 
+void TestCarriedHp()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+
+    OpeningPools low;
+    low.Hp = 50;
+    low.Focus = 2;
+    Battle wounded(data, std::make_unique<AgilityRoundModel>());
+    Check(wounded.Start("fighter", 1, "wolf", low, error), "a wounded fight starts");
+    Check(wounded.Player().Hp == 50 && wounded.Player().Focus == 2 && wounded.Player().MaxHp == 72,
+          "a fight started at 50 HP and 2 focus shows those pools");
+    const ActionResult bite = wounded.EnemyAct();
+    Check(bite.Accepted && bite.Damage == 5 && wounded.Player().Hp == 45,
+          "the bite comes off the carried HP");
+
+    Battle full(data, std::make_unique<AgilityRoundModel>());
+    Check(full.Start("fighter", 1, "wolf", error), "a lone fight starts");
+    Check(full.Player().Hp == full.Player().MaxHp && full.Player().Focus == full.Player().MaxFocus &&
+              full.Player().Hp == 72 && full.Player().Focus == 8,
+          "a fight with no opening pools still starts full");
+
+    OpeningPools matched;
+    matched.Hp = 72;
+    matched.Focus = 8;
+    Battle same(data, std::make_unique<AgilityRoundModel>());
+    Check(same.Start("fighter", 1, "wolf", matched, error), "a full pool start succeeds");
+    const ActionResult sameBite = same.EnemyAct();
+    Check(same.Player().Hp == 67 && sameBite.Damage == 5,
+          "starting at full through the pool path matches a lone fight");
+
+    Battle first(data, std::make_unique<AgilityRoundModel>());
+    Check(first.Start("fighter", 1, "wolf", error), "the carry fight starts full");
+    Check(first.EnemyAct().Accepted, "the wolf bites");
+    Check(first.UseSkill("strike").Accepted, "the first strike lands");
+    Check(first.EnemyAct().Accepted, "the wolf bites again");
+    Check(first.UseSkill("strike").Accepted, "the second strike lands");
+    Check(first.EnemyAct().Accepted, "the wolf bites a third time");
+    const ActionResult last = first.UseSkill("strike");
+    Check(last.Result == BattleResult::Victory && first.Player().Hp == 57,
+          "the full wolf fight still ends at 57 HP");
+    OpeningPools kept;
+    kept.Hp = first.Player().Hp;
+    kept.Focus = first.Player().Focus;
+    Battle second(data, std::make_unique<AgilityRoundModel>());
+    Check(second.Start("fighter", 1, "bandit", kept, error), "the next fight takes the leftover");
+    Check(second.Player().Hp == 57 && second.Player().Focus == first.Player().Focus &&
+              second.Player().Hp < second.Player().MaxHp,
+          "a win keeps the HP and focus that were left");
+}
+
 } // namespace
 
 int main()
@@ -2270,6 +2322,7 @@ int main()
     TestStatusNameOnce();
     TestAllyCount();
     TestLowestHpHeal();
+    TestCarriedHp();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
