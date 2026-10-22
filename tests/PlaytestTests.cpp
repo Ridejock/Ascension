@@ -174,8 +174,14 @@ void TestParseExampleAndEngineFlags()
     PlaytestOptions map;
     Check(Parse({"--map", "fixture_a", "--keys", "right right right down"}, map, why),
           "--map parses with a key script");
-    Check(map.MapId == "fixture_a" && map.Keys.size() == 4 && map.DefinesRun() && map.UsesData(),
-          "--map names the map and builds its own run");
+    Check(map.MapId == "fixture_a" && map.Keys.size() == 4 && map.DefinesRun() && map.UsesData() &&
+              !map.LoadsSave(),
+          "--map names the map and does not open the per-user save");
+    PlaytestOptions mapped;
+    Check(Parse({"--map", "fixture_a", "--save-dir", "playtest-saves"}, mapped, why),
+          "--map with a save folder parses");
+    Check(mapped.DefinesRun() && mapped.LoadsSave() && mapped.SaveDir == "playtest-saves",
+          "--map with a save folder resumes that folder");
     Check(!Parse({"--map"}, map, why), "--map needs an id");
     Check(!Parse({"--map", "fixture_a", "--map", "fixture_b"}, map, why), "a repeated --map fails");
     Check(!Parse({"--map", "fixture_a", "--enemy", "wolf"}, map, why),

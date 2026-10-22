@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Map/Handoff.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 
@@ -16,8 +17,8 @@ namespace Ascension {
 // so the same win is not awarded twice.
 enum class RunStanding : u8 { None, Ongoing, Victory, Defeat };
 
-// One run: the career, the bag, the foes already defeated, and the place in the encounter
-// list. This is the current data version. Older files are migrated before they fill this.
+// One run: the career, the bag, where the hero is standing, and the spawns already
+// cleared. This is the current data version. Older files are migrated before they fill this.
 struct RunState {
     CareerRecord Career;
     BagRecord Bag;
@@ -26,7 +27,21 @@ struct RunState {
     std::vector<std::string> Found;
     // Flags set by dialogue. A version 3 file with no list has set none.
     std::vector<std::string> Flags;
-    i32 Position = 0;
+    // Empty when the run has no map yet. The tile is the hero's cell on that map.
+    std::string MapId;
+    MapTile Tile;
+    // Spawn ids, stable across inserts and reorders. An id the data no longer has
+    // stays here so a later file that brings the spawn back is still cleared.
+    std::vector<std::string> Cleared;
+    // Wounds a flee left, keyed by spawn id. The same shape the map keeps in memory.
+    std::vector<FledWounds> Wounds;
+    // The spawn an ongoing fight came from. Empty for a list fight, and between fights.
+    std::string SpawnId;
+    // Encounter id for the fight screen. Not an index: inserting a row does not shift it.
+    std::string EncounterId;
+    // Set by the version 3 migration until AdoptLegacyMap has read the maps. -1 after that,
+    // and on a file that was written as version 4.
+    i32 LegacyIndex = -1;
     std::string DirectEnemy;
     RunStanding Standing = RunStanding::None;
     bool ResourcesKnown = false;
@@ -35,12 +50,15 @@ struct RunState {
     FightSnapshot Fight;
 };
 
-// An ongoing fight keeps the hero's HP and focus in this version of the file. Victory and
-// defeat do not, so a loaded run still opens the next fight full. The in-memory vitals
-// carry a win's leftover HP between fights; writing that down is a later save version.
-// Hp and Focus stay at whatever the run already held; a fresh run leaves them at 0.
+// Records the fight's result and the pools the caller wants kept. A win, a flee, and an
+// ongoing blow store HP and focus. A loss stores whatever the caller passes, which is the
+// refilled pools when the map has already sent the hero home. A flee is between fights
+// (standing None) and still keeps the wound.
 inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focus)
 {
+    run.ResourcesKnown = true;
+    run.Hp = hp;
+    run.Focus = focus;
     if (result == BattleResult::Victory) {
         run.Standing = RunStanding::Victory;
         return;
@@ -49,22 +67,17 @@ inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focu
         run.Standing = RunStanding::Defeat;
         return;
     }
-    // A flee is between fights. This version does not store the wound or the spawn,
-    // same as a victory: the in-memory vitals keep the HP until the next save version.
     if (result == BattleResult::Fled) {
         run.Standing = RunStanding::None;
         return;
     }
     run.Standing = RunStanding::Ongoing;
-    run.ResourcesKnown = true;
-    run.Hp = hp;
-    run.Focus = focus;
 }
 
-// True when a loaded run should open on the saved wound instead of full health.
+// True when a loaded run should open on the saved pools instead of full health.
 [[nodiscard]] inline bool ResumeWound(const RunState& run)
 {
-    return run.Standing == RunStanding::Ongoing && run.ResourcesKnown;
+    return run.ResourcesKnown;
 }
 
 enum class RunSaveError : u8 {
@@ -93,10 +106,11 @@ struct RunLoad {
 // the previous good copy. The folder is the per-user path unless a test passes its own.
 class RunSave {
 public:
-    // Version 3. Found ids and dialogue flags are optional in this version, so an older
-    // file of it needs no migration: a missing list is a run that has claimed no drops
-    // and set no talk flags.
-    static constexpr u32 kVersion = 3;
+    // Version 4. The place is a map id and a tile, cleared spawns are string ids, and
+    // HP and focus are kept between fights, including after a flee. Found ids and
+    // dialogue flags were already optional in version 3: a missing list claimed nothing
+    // and set no talk flags, and this version still reads them that way.
+    static constexpr u32 kVersion = 4;
 
     explicit RunSave(std::filesystem::path folder);
 
@@ -112,5 +126,29 @@ public:
 private:
     std::filesystem::path m_Folder;
 };
+
+// Version 3 stored `position` as an index into encounters.json, and defeated foe ids.
+// The registered step renames that index to `legacy.index` and drops `position`, so a
+// list index is never read as a tile. It also drops HP on a victory or a defeat: version
+// 3 did not carry pools after a finished fight, and a version 1 file can still hold the
+// old health field. An ongoing file keeps its HP and its fight snapshot. The snapshot
+// has no spawn id, because those fights were the list.
+//
+// This applies `legacy.index` once the maps are loaded, then clears it. A version 4 run
+// has no legacy index, and this does nothing.
+//
+// * The encounter id is the encounter at that index, or the first encounter when the
+//   index is past the end. The fight screen resumes that id. The index is not written
+//   again.
+// * The hero stands on the start tile of the map with `hub` set. When no map sets it,
+//   the first map in file order is the stand-in. No maps leaves the place empty.
+// * A spawn is cleared when its encounter id is one of the defeated ids. The list stores
+//   foe ids, and a one-foe encounter uses that same id, so those spawns match. An
+//   encounter id that is not a foe id (the wolf pack) is not cleared. A spawn with
+//   `once` left false stays up: list progress does not remove a repeatable seat.
+//   The ids are copied from the data loaded now. A spawn added after this run is saved
+//   as version 4 is not cleared by the old index.
+// * `found` is left alone, so a claimed drop such as Alpha's Fang stays claimed.
+void AdoptLegacyMap(const Database& data, RunState& run);
 
 } // namespace Ascension

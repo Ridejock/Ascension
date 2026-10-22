@@ -1,0 +1,18 @@
+EMERALD-SAVE 1
+version = 3
+saved = 1710000000
+summary = v3 fixture
+---
+class = fighter
+xp = 8
+gold = 4
+standing = victory
+position = 1
+defeated.count = 2
+defeated.0 = wolf
+defeated.1 = bandit
+found.count = 1
+found.0 = alphas_fang
+flag.count = 1
+flag.0 = met
+bag.count = 0

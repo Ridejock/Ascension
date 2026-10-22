@@ -383,14 +383,14 @@ void TestFangOnce()
     Check(second.empty() && found.size() == 1, "a later dire wolf does not drop the fang again");
 }
 
-void TestSaveStaysVersion3()
+void TestFleeKeepsTheWound()
 {
-    Check(RunSave::kVersion == 3, "the save version stays 3");
+    Check(RunSave::kVersion == 4, "the save version records the map");
     RunState run;
     RememberOutcome(run, BattleResult::Fled, 3, 1);
-    Check(run.Standing == RunStanding::None && !run.ResourcesKnown && run.Hp == 0 &&
-              run.Focus == 0 && !ResumeWound(run),
-          "a flee is between fights and is not written as a wound");
+    Check(run.Standing == RunStanding::None && run.ResourcesKnown && run.Hp == 3 &&
+              run.Focus == 1 && ResumeWound(run),
+          "a flee is between fights and the wound is kept");
 }
 
 } // namespace
@@ -402,7 +402,7 @@ int main()
     TestBossCannotFlee();
     TestFoeWoundRoundTrip();
     TestFangOnce();
-    TestSaveStaysVersion3();
+    TestFleeKeepsTheWound();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
