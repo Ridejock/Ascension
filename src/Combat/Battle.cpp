@@ -632,6 +632,18 @@ bool Battle::Build(std::string& error, bool keepWounds)
 bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId,
                    std::string& error)
 {
+    return StartFight(classId, level, enemyId, false, 0, 0, error);
+}
+
+bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId,
+                   OpeningPools pools, std::string& error)
+{
+    return StartFight(classId, level, enemyId, true, pools.Hp, pools.Focus, error);
+}
+
+bool Battle::StartFight(std::string_view classId, i32 level, std::string_view enemyId,
+                        bool usePools, i32 hp, i32 focus, std::string& error)
+{
     m_ClassId = std::string(classId);
     m_Level = level;
     m_EncounterId.clear();
@@ -661,6 +673,10 @@ bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId
     m_Enemies.clear();
     if (!Build(error, false))
         return false;
+    if (usePools) {
+        m_Player.Hp = ClampPoolTo(hp, 0, m_Player.MaxHp);
+        m_Player.Focus = ClampPoolTo(focus, 0, m_Player.MaxFocus);
+    }
     m_Turns->Reset();
     if (m_Player.Hp <= 0)
         m_Result = BattleResult::Defeat;

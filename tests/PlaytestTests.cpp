@@ -960,6 +960,70 @@ void TestSimRates()
           "the rate table names the win rate and the bear");
 }
 
+const ChainRow* FindChain(const std::vector<ChainRow>& rows, std::string_view build,
+                          std::string_view encounter)
+{
+    for (const ChainRow& row : rows) {
+        if (row.Build == build && row.Encounter == encounter)
+            return &row;
+    }
+    return nullptr;
+}
+
+void TestChainCarry()
+{
+    std::string error;
+    PlaytestOptions chain;
+    Check(Parse({"--sim", "--chain"}, chain, error), "--sim --chain parses");
+    Check(chain.Sim && chain.Chain && chain.Fight.Id.empty(),
+          "chain walks the encounter list and does not need --enemy");
+
+    PlaytestOptions bare;
+    Check(!Parse({"--chain"}, bare, error), "--chain without --sim fails");
+    Check(error.find("--chain") != std::string::npos, "the message names --chain");
+
+    PlaytestOptions both;
+    Check(!Parse({"--sim", "--chain", "--enemy", "wolf"}, both, error),
+          "--chain and --enemy together fail");
+    Check(error.find("--chain") != std::string::npos && error.find("--enemy") != std::string::npos,
+          "the message names both flags");
+
+    PlaytestOptions still;
+    Check(!Parse({"--sim"}, still, error), "--sim without --enemy still fails");
+
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the chain");
+    if (!data.IsLoaded())
+        return;
+
+    ChainQuery query;
+    const std::vector<ChainRow> rows = SimulateChain(data, query, error);
+    Check(error.empty() && !rows.empty(), "the chain builds");
+    const ChainRow* wolf = FindChain(rows, "Fighter", "Wolf");
+    const ChainRow* bandit = FindChain(rows, "Fighter", "Bandit");
+    Check(wolf != nullptr && wolf->Ok && wolf->Won && wolf->StartHp == wolf->MaxHp,
+          "the fighter's first fight starts full and wins");
+    Check(bandit != nullptr && wolf != nullptr && bandit->Ok && bandit->StartHp == wolf->HpLeft &&
+              bandit->StartFocus == wolf->FocusLeft && bandit->StartHp < bandit->MaxHp,
+          "the next fight starts at the HP and focus the win left");
+
+    SimRateQuery rate;
+    rate.EncounterId = "wolf";
+    rate.Runs = 1;
+    rate.Seed = 1;
+    rate.Slip = 0;
+    const std::vector<SimRateRow> singles = SimulateEncounterRates(data, rate, error);
+    const SimRateRow* single = FindRate(singles, "Fighter", "wolf", false);
+    Check(single != nullptr && single->Ok && single->Wins == 1 && wolf != nullptr &&
+              wolf->HpLeft == single->SumHp,
+          "a full single fight still leaves the same HP");
+
+    const std::string text = FormatChain(rows);
+    Check(text.find("Win%") != std::string::npos && text.find("Fighter") != std::string::npos,
+          "the chain table names the win rate and the build");
+}
+
 } // namespace
 
 int main()
@@ -976,6 +1040,7 @@ int main()
     TestSaveQuitLoadKeys();
     TestPellRumorKeys();
     TestSimRates();
+    TestChainCarry();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

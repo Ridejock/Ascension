@@ -13,6 +13,7 @@
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
+#include "Ascension/Progress/Vitals.h"
 #include "Check.h"
 
 namespace {
@@ -713,6 +714,97 @@ void TestStartUsesFirstStarter()
           "Hero::Start picks the first starter in the file");
 }
 
+void TestLevelHpRestAndLoss()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    Check(data.GetProgress().LevelHp == LevelHpRule::Gained,
+          "the sample level-up rule adds the gained max HP");
+
+    Hero hero;
+    Inventory bag;
+    std::string why;
+    Check(hero.Start(data, why) && bag.Start(data, why), "the hero and the bag start");
+    const PoolCaps caps = HeroPools(data, hero, bag);
+    Check(caps.MaxHp == 72 && caps.MaxFocus == 8, "level 1 pools are 72 HP and 8 focus");
+
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    battle.SetBaseStats(hero.Attributes());
+    battle.SetGear(bag.GearBonus());
+    battle.SetWornItems(bag.WornIds());
+    Check(battle.Start(hero.ClassId(), hero.Level(), "wolf", why), "the comparison fight starts");
+    Check(battle.Player().MaxHp == caps.MaxHp && battle.Player().MaxFocus == caps.MaxFocus,
+          "the carried caps match the fight");
+
+    Check(hero.GrantXp(8).LevelAfter == 2, "8 XP is level 2");
+    const PoolCaps grown = HeroPools(data, hero, bag);
+    Check(grown.MaxHp == caps.MaxHp + 16 && grown.MaxFocus == caps.MaxFocus + 1,
+          "one fighter level adds 16 HP and 1 focus");
+
+    Vitals body;
+    body.Known = true;
+    body.Hp = 40;
+    body.Focus = 3;
+    ApplyLevelHp(body, caps.MaxHp, grown.MaxHp, data.GetProgress().LevelHp);
+    Check(body.Hp == 40 + (grown.MaxHp - caps.MaxHp) && body.Focus == 3,
+          "gained adds the new max HP and leaves focus");
+
+    body.Hp = 40;
+    ApplyLevelHp(body, caps.MaxHp, grown.MaxHp, LevelHpRule::Full);
+    Check(body.Hp == grown.MaxHp, "full refills to the new max");
+
+    body.Hp = 40;
+    ApplyLevelHp(body, caps.MaxHp, grown.MaxHp, LevelHpRule::Kept);
+    Check(body.Hp == 40, "kept does not take the new room");
+    body.Hp = grown.MaxHp;
+    ApplyLevelHp(body, grown.MaxHp, caps.MaxHp, LevelHpRule::Kept);
+    Check(body.Hp == caps.MaxHp, "kept clamps a full bar down to a smaller max");
+
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "progress.json", "\"levelHp\": \"gained\"", "\"levelHp\": \"full\"");
+    Database fullData(copy.Path);
+    DataError fullError;
+    Check(fullData.Load(&fullError) && fullData.GetProgress().LevelHp == LevelHpRule::Full,
+          "levelHp full loads");
+    if (!fullError.Message.empty())
+        std::printf("    %s\n", fullError.Message.c_str());
+    ReplaceInFile(copy.Path / "progress.json", "\"levelHp\": \"full\"", "\"levelHp\": \"kept\"");
+    Database keptData(copy.Path);
+    DataError keptError;
+    Check(keptData.Load(&keptError) && keptData.GetProgress().LevelHp == LevelHpRule::Kept,
+          "levelHp kept loads");
+    if (!keptError.Message.empty())
+        std::printf("    %s\n", keptError.Message.c_str());
+
+    const MapDef* map = data.FindMap("fixture_a");
+    Check(map != nullptr, "fixture_a loads");
+    if (map == nullptr)
+        return;
+    Vitals wounded;
+    wounded.Known = true;
+    wounded.Hp = 10;
+    wounded.Focus = 1;
+    wounded.ReturnToHub = true;
+    const MapTile floor{1, 2};
+    Check(!RestOn(*map, floor, wounded, caps), "a bare floor is not a rest");
+    Check(wounded.Hp == 10 && wounded.Focus == 1 && wounded.ReturnToHub,
+          "a miss leaves the wound and the hub mark");
+    Check(RestOn(*map, map->Start, wounded, caps), "the start rest refills");
+    Check(wounded.Hp == caps.MaxHp && wounded.Focus == caps.MaxFocus && !wounded.ReturnToHub,
+          "rest fills both pools and clears the hub return");
+
+    bag.GrantGold(15);
+    Vitals fallen;
+    fallen.Known = true;
+    fallen.Hp = 4;
+    fallen.Focus = 0;
+    LoseToHub(fallen, caps);
+    Check(fallen.Hp == caps.MaxHp && fallen.Focus == caps.MaxFocus && fallen.ReturnToHub &&
+              fallen.Known,
+          "a loss restores both pools and marks the hub");
+    Check(bag.Gold() == 15, "a loss does not take gold");
+}
+
 } // namespace
 
 int main()
@@ -728,6 +820,7 @@ int main()
     TestResetClearsItemPractice();
     TestNextFoeStaysWhileChoosing();
     TestSkillPicks();
+    TestLevelHpRestAndLoss();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

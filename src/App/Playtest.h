@@ -74,6 +74,9 @@ struct PlaytestOptions {
     // --sim plays the fight without a window. With no class and no focus, --enemy prints
     // a rate table for every class build.
     bool Sim = false;
+    // --chain, with --sim. Walks encounters.json in order and carries HP and focus.
+    // No --enemy. The single-fight table is unchanged.
+    bool Chain = false;
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;

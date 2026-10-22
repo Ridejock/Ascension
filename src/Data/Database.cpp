@@ -2642,7 +2642,9 @@ bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body, {"xpToReach", "usesPerRank", "maxSkillRank", "powerPerRank"}, unknown)) {
+    if (!AllowKeys(*body,
+                   {"xpToReach", "usesPerRank", "maxSkillRank", "powerPerRank", "levelHp"},
+                   unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
@@ -2715,6 +2717,19 @@ bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
     if (!RequireInt(*body, "maxSkillRank", 1, 99, rules.MaxSkillRank, error) ||
         !RequireInt(*body, "powerPerRank", 0, 999, rules.PowerPerRank, error))
         return false;
+    std::string levelHp;
+    if (!RequireString(*body, "levelHp", levelHp, error))
+        return false;
+    if (levelHp == "gained")
+        rules.LevelHp = LevelHpRule::Gained;
+    else if (levelHp == "full")
+        rules.LevelHp = LevelHpRule::Full;
+    else if (levelHp == "kept")
+        rules.LevelHp = LevelHpRule::Kept;
+    else {
+        error = "'levelHp' must be gained, full, or kept";
+        return false;
+    }
     parsed.Progress = std::move(rules);
     return true;
 }

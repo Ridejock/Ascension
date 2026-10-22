@@ -171,16 +171,33 @@ struct CombatRules {
     i32 FocusOnWait = 0;
 };
 
+// What a level-up does to current HP. The new max is always the new vitality. Gained adds
+// the increase in that max (a full hero stays full, a wound keeps its missing health plus
+// nothing extra). Full refills. Kept leaves the wound, then clamps it to the new max.
+// Focus is not part of this rule. progress.json names which one the run uses.
+enum class LevelHpRule : u8 { Gained, Full, Kept };
+
+[[nodiscard]] inline const char* ToString(LevelHpRule rule)
+{
+    if (rule == LevelHpRule::Full)
+        return "full";
+    if (rule == LevelHpRule::Kept)
+        return "kept";
+    return "gained";
+}
+
 // The integers from progress.json. XpToReach[n] is the total XP required to be level n+1, and
 // the first entry is 0. Rank starts at 1 and stops at MaxSkillRank. UsesPerRank is either one
 // integer (a flat step: rank = 1 + uses / step) or a longer strictly increasing list of the
 // total uses required to reach rank 2, rank 3, and so on. Each rank above 1 adds PowerPerRank
 // to that skill's power (damage, healing, and a reflect's flat power, not a guard's percent).
+// LevelHp is the level-up rule above.
 struct ProgressRules {
     std::vector<i32> XpToReach;
     std::vector<i32> UsesPerRank;
     i32 MaxSkillRank = 1;
     i32 PowerPerRank = 0;
+    LevelHpRule LevelHp = LevelHpRule::Gained;
 };
 
 // 1 when the table is empty. XP below the first step stays at 1, and XP past the last step

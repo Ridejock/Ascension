@@ -3,6 +3,7 @@
     "xpToReach": [0, 8, 20, 40, 60, 90, 130, 180, 240, 310],
     "usesPerRank": [3, 6, 10, 15],
     "maxSkillRank": 5,
-    "powerPerRank": 2
+    "powerPerRank": 2,
+    "levelHp": "gained"
   }
 }

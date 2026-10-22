@@ -35,9 +35,10 @@ struct RunState {
     FightSnapshot Fight;
 };
 
-// An ongoing fight keeps the hero's HP and focus. Victory and defeat do not, so the next
-// fight starts full, the same as moving on without quitting. Hp and Focus stay at whatever
-// the run already held; a fresh run leaves them at 0.
+// An ongoing fight keeps the hero's HP and focus in this version of the file. Victory and
+// defeat do not, so a loaded run still opens the next fight full. The in-memory vitals
+// carry a win's leftover HP between fights; writing that down is a later save version.
+// Hp and Focus stay at whatever the run already held; a fresh run leaves them at 0.
 inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focus)
 {
     if (result == BattleResult::Victory) {

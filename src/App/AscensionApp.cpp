@@ -466,6 +466,17 @@ void AscensionApp::AwardVictory()
         Note(line);
     if (grant.LevelAfter > grant.LevelBefore)
         Note("Level " + std::to_string(grant.LevelAfter) + ".");
+    const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
+    KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+    if (grant.LevelAfter > grant.LevelBefore) {
+        const i32 beforeHp = m_Vitals.Hp;
+        const PoolCaps now = HeroPools(m_Data, m_Hero, m_Inventory);
+        ApplyLevelHp(m_Vitals, fought.MaxHp, now.MaxHp, m_Data.GetProgress().LevelHp);
+        ClampFocus(m_Vitals, now.MaxFocus);
+        if (m_Vitals.Hp > beforeHp)
+            Note("HP +" + std::to_string(m_Vitals.Hp - beforeHp) + ".");
+    }
+    m_VitalsSettled = true;
     if (grant.ChoiceOpened) {
         std::string line = "Choose a path.";
         const std::vector<std::string> choices = m_Hero.ChoiceIds();
@@ -508,6 +519,8 @@ void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
     }
     if (result.Result == BattleResult::Victory)
         AwardVictory();
+    else if (result.Result == BattleResult::Defeat)
+        RememberDefeat();
 }
 
 void AscensionApp::ResolveFoe()
@@ -525,6 +538,42 @@ void AscensionApp::ResolveFoe()
     }
 }
 
+bool AscensionApp::OpenBattle(std::string_view fightId, std::string& error)
+{
+    const PoolPair pools = PoolsFrom(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
+    OpeningPools opening;
+    opening.Hp = pools.Hp;
+    opening.Focus = pools.Focus;
+    return m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, opening, error);
+}
+
+void AscensionApp::RememberDefeat()
+{
+    if (m_VitalsSettled || m_Battle == nullptr)
+        return;
+    LoseToHub(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
+    m_VitalsSettled = true;
+    m_Standing = RunStanding::Defeat;
+}
+
+void AscensionApp::NoteRest()
+{
+    if (!m_Walker.Placed() || !m_Hero.IsReady() || !m_Inventory.IsReady())
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const MapTile tile = m_Walker.Place().Tile;
+    if (m_RestSeen && m_RestMap == map->Id && m_RestTile.X == tile.X && m_RestTile.Y == tile.Y)
+        return;
+    m_RestSeen = true;
+    m_RestMap = map->Id;
+    m_RestTile = tile;
+    if (!RestOn(*map, tile, m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory)))
+        return;
+    Note("Rested.");
+}
+
 void AscensionApp::BeginFight()
 {
     if (const char* block = m_Hero.NextFightBlock()) {
@@ -539,6 +588,7 @@ void AscensionApp::BeginFight()
     m_StartError.clear();
     // R and N start the fight over. A unique drop already in m_Found is not granted again.
     m_XpAwarded = false;
+    m_VitalsSettled = false;
     m_Camp = false;
     m_Talk = false;
     m_Picking = false;
@@ -564,7 +614,7 @@ void AscensionApp::BeginFight()
     m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
-    if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, error)) {
+    if (!OpenBattle(fightId, error)) {
         m_StartError = error;
         m_ResumeResources = false;
         m_ResumeFight = {};
@@ -582,7 +632,7 @@ void AscensionApp::BeginFight()
             Note("Resumed.");
             return;
         }
-        if (!m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, restoreError)) {
+        if (!OpenBattle(fightId, restoreError)) {
             m_StartError = restoreError;
             m_ResumeResources = false;
             return;
@@ -595,6 +645,13 @@ void AscensionApp::BeginFight()
         m_ResumeResources = false;
     }
     if (m_Battle->Result() != BattleResult::Ongoing) {
+        if (m_Battle->Result() == BattleResult::Defeat)
+            RememberDefeat();
+        else {
+            const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
+            KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+            m_VitalsSettled = true;
+        }
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
         return;
     }
@@ -821,6 +878,8 @@ void AscensionApp::OnStart()
     }
     if (!TakeAutoPath())
         return;
+    if (m_Hero.IsReady() && m_Inventory.IsReady())
+        FillVitals(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
     OpenPads();
     EnsureIcons();
     BindMapActions();
@@ -834,6 +893,7 @@ void AscensionApp::OnStart()
         }
         m_OnMap = true;
         Note("Map " + m_Walker.Place().MapId + ".");
+        NoteRest();
         return;
     }
     if (resumed && (m_Standing == RunStanding::Victory || m_Standing == RunStanding::Defeat)) {
@@ -1196,6 +1256,7 @@ void AscensionApp::StepMap(f32 dt)
         Note("Exit to " + m_Walker.Place().MapId + ".");
     else if (step.Kind == WalkStepKind::Blocked && input.Fresh)
         Note("Blocked.");
+    NoteRest();
 }
 
 void AscensionApp::AdoptMap()
@@ -1211,6 +1272,7 @@ void AscensionApp::AdoptMap()
         Note("Back to the start.");
     else
         Note("Data reloaded.");
+    NoteRest();
 }
 
 void AscensionApp::PlayScriptedKey()
@@ -1512,7 +1574,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     renderer.Begin(Emerald::Mat4::OrthoPixelSpace(width, height));
 
     if (m_OnMap && m_Data.IsLoaded() && m_StartError.empty()) {
-        DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height);
+        const PoolCaps caps = m_Hero.IsReady() && m_Inventory.IsReady()
+                                  ? HeroPools(m_Data, m_Hero, m_Inventory)
+                                  : PoolCaps{};
+        const PoolPair shown = PoolsFrom(m_Vitals, caps);
+        DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
+                      shown.Focus, caps.MaxFocus);
         renderer.End();
         return;
     }

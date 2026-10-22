@@ -94,9 +94,11 @@ add_library(AscensionProgress STATIC
     src/Progress/Hero.cpp
     src/Progress/Inventory.cpp
     src/Progress/RunSave.cpp
+    src/Progress/Vitals.cpp
     include/Ascension/Progress/Hero.h
     include/Ascension/Progress/Inventory.h
     include/Ascension/Progress/RunSave.h
+    include/Ascension/Progress/Vitals.h
 )
 target_link_libraries(AscensionProgress PUBLIC AscensionData)
 emerald_set_warnings(AscensionProgress)
