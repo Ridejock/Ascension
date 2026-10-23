@@ -28,3 +28,6 @@ Thumbs.db
 imgui.ini
 *.log
 logs/
+
+# Local licensed art. See design/art-pack.md. Never commit a pack.
+artpack/

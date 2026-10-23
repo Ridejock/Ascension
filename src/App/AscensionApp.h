@@ -15,6 +15,7 @@
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
 #include "Emerald/Core/Application.h"
+#include "ArtGallery.h"
 #include "Playtest.h"
 
 #include <SDL3/SDL_gamepad.h>
@@ -176,6 +177,8 @@ private:
     i32 m_PickRow = 0;
     Emerald::AssetHandle<Emerald::TextureAtlas> m_Icons;
     Emerald::AssetHandle<Emerald::Texture> m_Accents;
+    // Empty when this launch has no art pack. Drawing then stays on the CC0 art.
+    ArtGallery m_Gallery;
     // The hero is walking a map. A launch with no --enemy opens the hub (or --map
     // when that was passed). --enemy stays on the fight screen.
     bool m_OnMap = false;

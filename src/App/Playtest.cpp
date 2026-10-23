@@ -4,6 +4,7 @@
 #include <fstream>
 #include <utility>
 
+#include "Ascension/Data/ArtPack.h"
 #include "Emerald/Core/Paths.h"
 
 namespace Ascension {
@@ -432,6 +433,15 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.DataDir = std::string(value);
+        } else if (flag == "--art-pack") {
+            if (AlreadySet(!options.ArtPackDir.empty(), flag, error) ||
+                !TakeValue(args, index, attached, flag, value, error))
+                return false;
+            if (value.empty()) {
+                error = "--art-pack needs a directory";
+                return false;
+            }
+            options.ArtPackDir = std::string(value);
         } else if (flag == "--transcript") {
             if (AlreadySet(!options.Transcript.empty(), flag, error) ||
                 !TakeValue(args, index, attached, flag, value, error))
@@ -853,7 +863,8 @@ bool CheckPlaytestStartup(const PlaytestOptions& options, std::string& error)
             return false;
         }
     }
-    if (!options.UsesData()) {
+    const bool pack = !options.ArtPackDir.empty();
+    if (!options.UsesData() && !pack) {
         error.clear();
         return true;
     }
@@ -872,6 +883,18 @@ bool CheckPlaytestStartup(const PlaytestOptions& options, std::string& error)
     if (!data.Load(&loadError)) {
         error = loadError.Message.empty() ? "could not load data" : loadError.Message;
         return false;
+    }
+    if (pack) {
+        ArtPack art;
+        DataError packError;
+        if (!art.Load(options.ArtPackDir, data, &packError)) {
+            error = packError.Message.empty() ? "could not load art pack" : packError.Message;
+            return false;
+        }
+    }
+    if (!options.UsesData()) {
+        error.clear();
+        return true;
     }
     Hero hero;
     Inventory inventory;

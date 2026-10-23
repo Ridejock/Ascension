@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "ArtGallery.h"
 #include "Emerald/Renderer/DebugText.h"
 
 namespace Ascension {
@@ -67,12 +68,22 @@ MapTile SpawnDrawTile(const MapSpawn& spawn, std::span<const SpawnPlace> places)
     return spawn.Tile;
 }
 
+// The foe drawn on a spawn tile. The encounter lists that foe first. A pack with
+// no enemies, or a missing encounter, keeps the built-in square.
+const std::string* SpawnFoeId(const Database& data, const MapSpawn& spawn)
+{
+    const EncounterDef* encounter = data.FindEncounter(spawn.Encounter);
+    if (encounter == nullptr || encounter->Enemies.empty())
+        return nullptr;
+    return &encounter->Enemies.front();
+}
+
 } // namespace
 
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
                    i32 focus, i32 maxFocus, std::span<const std::string> cleared,
-                   std::span<const SpawnPlace> places)
+                   std::span<const SpawnPlace> places, const ArtGallery* art)
 {
     const Emerald::Vec4 label = ByteColor(kLabelRed, kLabelGreen, kLabelBlue);
     const Emerald::Vec4 dim = ByteColor(kLogRed, kLogGreen, kLogBlue);
@@ -94,6 +105,8 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     const i32 lastY =
         static_cast<i32>(std::ceil(static_cast<double>(frame.OriginY + frame.TilesHigh)));
     const Emerald::Vec4 link = ByteColor(rules.LinkRed, rules.LinkGreen, rules.LinkBlue);
+    const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
+    const bool packed = art != nullptr && !art->IsEmpty();
     const f32 inset = tile * static_cast<f32>(rules.HeroInsetPercent) / 100.0f;
     const f32 inner = tile - inset * 2.0f;
 
@@ -111,14 +124,25 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                 continue;
             const f32 left = (static_cast<f32>(x) - frame.OriginX) * tile;
             const f32 top = (static_cast<f32>(y) - frame.OriginY) * tile;
-            DrawCell(renderer, left, top, tile, ByteColor(def->Red, def->Green, def->Blue));
+            // The cell is this tile id. Neighbouring walls are not consulted, so a pack
+            // cannot pick a wall piece from what the cell touches.
+            ArtPlace place;
+            place.Map = map->Id;
+            place.X = x;
+            place.Y = y;
+            if (!packed || !DrawArt(renderer, art, ArtSlot::Tile, def->Id, {left, top}, {tile, tile},
+                                    white, place))
+                DrawCell(renderer, left, top, tile, ByteColor(def->Red, def->Green, def->Blue));
             bool linked = false;
             for (const MapLink& door : map->Links) {
                 if (door.Tile.X == x && door.Tile.Y == y)
                     linked = true;
             }
-            if (linked && inner > 0.0f)
-                DrawCell(renderer, left + inset, top + inset, inner, link);
+            if (linked && inner > 0.0f) {
+                if (!packed || !DrawArt(renderer, art, ArtSlot::ExitMarker, "",
+                                        {left + inset, top + inset}, {inner, inner}, white))
+                    DrawCell(renderer, left + inset, top + inset, inner, link);
+            }
         }
     }
 
@@ -130,14 +154,29 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             if (point.Tile.X < firstX || point.Tile.X >= lastX || point.Tile.Y < firstY ||
                 point.Tile.Y >= lastY)
                 continue;
-            const Emerald::Vec4* color = &restColor;
-            if (point.Kind == MapPointKind::Talk)
-                color = &talkColor;
-            else if (point.Kind == MapPointKind::Shop)
-                color = &shopColor;
             const f32 left = (static_cast<f32>(point.Tile.X) - frame.OriginX) * tile + inset;
             const f32 top = (static_cast<f32>(point.Tile.Y) - frame.OriginY) * tile + inset;
-            DrawCell(renderer, left, top, inner, *color);
+            bool drewNpc = false;
+            if (packed && point.Kind == MapPointKind::Talk)
+                drewNpc = DrawArt(renderer, art, ArtSlot::NpcSprite, point.Dialogue, {left, top},
+                                  {inner, inner}, white);
+            else if (packed && point.Kind == MapPointKind::Shop) {
+                drewNpc = DrawArt(renderer, art, ArtSlot::NpcSprite, data.GetShop().Dialogue,
+                                  {left, top}, {inner, inner}, white);
+                if (!drewNpc)
+                    drewNpc = DrawArt(renderer, art, ArtSlot::ShopMarker, "", {left, top},
+                                      {inner, inner}, white);
+            } else if (packed && point.Kind == MapPointKind::Rest)
+                drewNpc = DrawArt(renderer, art, ArtSlot::RestMarker, "", {left, top},
+                                  {inner, inner}, white);
+            if (!drewNpc) {
+                const Emerald::Vec4* color = &restColor;
+                if (point.Kind == MapPointKind::Talk)
+                    color = &talkColor;
+                else if (point.Kind == MapPointKind::Shop)
+                    color = &shopColor;
+                DrawCell(renderer, left, top, inner, *color);
+            }
         }
     }
 
@@ -152,7 +191,11 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                 continue;
             const f32 left = (static_cast<f32>(at.X) - frame.OriginX) * tile + inset;
             const f32 top = (static_cast<f32>(at.Y) - frame.OriginY) * tile + inset;
-            DrawCell(renderer, left, top, inner, spawnColor);
+            const std::string* foeId = packed ? SpawnFoeId(data, spawn) : nullptr;
+            if (foeId == nullptr ||
+                !DrawArt(renderer, art, ArtSlot::FoeOverland, *foeId, {left, top}, {inner, inner},
+                         white))
+                DrawCell(renderer, left, top, inner, spawnColor);
         }
     }
 
@@ -162,7 +205,9 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         const f32 top = (static_cast<f32>(hero.Y) - frame.OriginY) * tile + inset;
         const Emerald::Vec4 heroColor =
             ByteColor(rules.HeroRed, rules.HeroGreen, rules.HeroBlue);
-        DrawCell(renderer, left, top, inner, heroColor);
+        if (!packed || !DrawArt(renderer, art, ArtSlot::HeroMarker, "", {left, top}, {inner, inner},
+                                white))
+            DrawCell(renderer, left, top, inner, heroColor);
     }
 
     Emerald::DrawDebugText(renderer, {16.0f, 16.0f}, Upper(PlaceLabel(walker.Place())), label, 2);

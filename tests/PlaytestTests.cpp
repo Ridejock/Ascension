@@ -1213,11 +1213,75 @@ void TestRoute()
           "the route table names both walks and the win rate");
 }
 
+const unsigned char kPng[] = {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+    0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+    0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+    0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+    0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+
+void WritePng(const fs::path& path)
+{
+    std::error_code error;
+    fs::create_directories(path.parent_path(), error);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(kPng), static_cast<std::streamsize>(sizeof(kPng)));
+}
+
+void TestArtPackFlag()
+{
+    std::string why;
+    PlaytestOptions parsed;
+    Check(Parse({"--art-pack", "private-pack"}, parsed, why), "--art-pack keeps the directory");
+    Check(parsed.ArtPackDir == "private-pack", "--art-pack stores the path");
+    Check(parsed.LoadsSave() && !parsed.DefinesRun(), "--art-pack does not change the save or the hero");
+
+    PlaytestOptions attached;
+    Check(Parse({"--art-pack=private-pack"}, attached, why), "--art-pack=dir parses");
+    Check(attached.ArtPackDir == "private-pack", "the attached directory is stored");
+
+    PlaytestOptions bare;
+    Check(!Parse({"--art-pack"}, bare, why), "a missing art pack directory fails");
+    CheckHas(why, "--art-pack", "the message names --art-pack");
+    Check(!Parse({"--art-pack="}, bare, why), "an empty --art-pack fails");
+    Check(!Parse({"--art-pack", "a", "--art-pack", "b"}, bare, why), "a repeated --art-pack fails");
+
+    const fs::path root = fs::temp_directory_path() / "ascension-artpack-playtest";
+    std::error_code error;
+    fs::remove_all(root, error);
+    fs::create_directories(root / "tiles", error);
+    WritePng(root / "tiles" / "floor.png");
+    WriteFile(root / "manifest.json",
+              "{ \"tiles\": [ { \"id\": \"floor\", \"file\": \"tiles/floor.png\" } ] }\n");
+
+    PlaytestOptions good;
+    Check(Parse({"--art-pack", root.string()}, good, why), "a real art pack path parses");
+    Check(CheckPlaytestStartup(good, why), "a manifest of a known tile passes startup");
+    if (!why.empty())
+        std::printf("    message was: %s\n", why.c_str());
+
+    WriteFile(root / "manifest.json",
+              "{ \"tiles\": [ { \"id\": \"no_such_tile\", \"file\": \"tiles/floor.png\" } ] }\n");
+    PlaytestOptions bad;
+    Check(Parse({"--art-pack", root.string()}, bad, why), "a bad art pack path still parses");
+    Check(!CheckPlaytestStartup(bad, why), "an unknown art pack id fails startup");
+    CheckHas(why, "no_such_tile", "startup names the unknown id");
+    CheckHas(why, "manifest.json", "startup names the manifest");
+
+    PlaytestOptions missing;
+    Check(Parse({"--art-pack", (root / "gone").string()}, missing, why), "a missing folder parses");
+    Check(!CheckPlaytestStartup(missing, why), "a missing art pack folder fails startup");
+    CheckHas(why, "not a directory", "startup says the folder is not a directory");
+
+    fs::remove_all(root, error);
+}
+
 } // namespace
 
 int main()
 {
     TestParseExampleAndEngineFlags();
+    TestArtPackFlag();
     TestBadIds();
     TestVarnSetupAndChoose();
     TestWolfPackAndLoneEnemy();
