@@ -8,7 +8,9 @@
 
 #include <SDL3/SDL_gpu.h>
 
+#include "Ascension/Data/ArtPack.h"
 #include "Emerald/Core/DevOptions.h"
+#include "Emerald/Core/Paths.h"
 
 int main(int argc, char** argv)
 {
@@ -23,6 +25,7 @@ int main(int argc, char** argv)
     Ascension::PlaytestOptions play;
     std::string why;
     if (!Ascension::ParsePlaytestOptions(args, play, why) ||
+        !Ascension::DiscoverArtPack(play.ArtPackDir, Emerald::Paths::GetBasePath(), why) ||
         !Ascension::CheckPlaytestStartup(play, why)) {
         std::fprintf(stderr, "%s\n", why.c_str());
         return 1;

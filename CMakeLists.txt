@@ -56,7 +56,9 @@ FetchContent_MakeAvailable(Emerald) # also brings SDL3, spdlog, stb, nlohmann/js
 add_library(AscensionData STATIC
     src/Data/Database.cpp
     src/Data/Talk.cpp
+    src/Data/ArtPack.cpp
     include/Ascension/Data/Database.h
+    include/Ascension/Data/ArtPack.h
     include/Ascension/Data/Map.h
     include/Ascension/Data/Talk.h
     include/Ascension/Data/Types.h
@@ -118,6 +120,8 @@ add_executable(Ascension
     src/App/Main.cpp
     src/App/AscensionApp.cpp
     src/App/AscensionApp.h
+    src/App/ArtGallery.cpp
+    src/App/ArtGallery.h
     src/App/MapView.cpp
     src/App/MapView.h
     src/App/FightSim.cpp
@@ -134,8 +138,10 @@ target_compile_definitions(Ascension PRIVATE ASCENSION_DATA_DIR="${CMAKE_CURRENT
 emerald_add_shaders(Ascension)
 emerald_set_warnings(Ascension)
 
-# data/ is copied next to the executable. A custom target instead of a POST_BUILD step, so
-# files added later are copied on the next build even when nothing needed relinking.
+# data/ and assets/ are copied next to the executable. A custom target instead of a POST_BUILD
+# step, so files added later are copied on the next build even when nothing needed relinking.
+# artpack/ is not copied. A private pack is passed with --art-pack or placed next to the
+# executable by hand, and it is never part of this tree's build output.
 add_custom_target(AscensionContent
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Ascension>/data"
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
@@ -237,6 +243,19 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     emerald_set_warnings(AscensionPlaytestTests)
     add_test(NAME Playtest COMMAND AscensionPlaytestTests)
+
+    add_executable(AscensionArtPackTests tests/ArtPackTests.cpp tests/Check.h)
+    target_link_libraries(AscensionArtPackTests PRIVATE AscensionData)
+    target_compile_definitions(AscensionArtPackTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+    emerald_set_warnings(AscensionArtPackTests)
+    add_test(NAME ArtPack COMMAND AscensionArtPackTests)
+
+    add_test(
+        NAME ArtPackUntracked
+        COMMAND ${CMAKE_COMMAND} "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckArtPackUntracked.cmake"
+    )
 
     add_executable(AscensionDialogueTests tests/DialogueTests.cpp tests/Check.h)
     target_link_libraries(AscensionDialogueTests PRIVATE AscensionData)

@@ -114,11 +114,17 @@ void DrawFigure(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, f32 
     renderer.FillRect(origin + Emerald::Vec2{s * 2.3f, s * 4.4f}, {s * 0.8f, s * 2.1f}, color);
 }
 
-// A foe with a data color is a square of that color. Anyone else keeps the figure.
-// The id is never consulted; the color field is the only switch.
-void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const CombatantState& foe,
-                 const Emerald::Vec2& origin, f32 size, bool alive, const Emerald::Vec4& fallback)
+// A pack battle image is drawn when the manifest lists this foe. Otherwise a foe
+// with a data color is a square of that color, and anyone else keeps the figure.
+void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const ArtGallery* art,
+                 const CombatantState& foe, const Emerald::Vec2& origin, f32 size, bool alive,
+                 const Emerald::Vec4& fallback)
 {
+    const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
+    if (art != nullptr && !art->IsEmpty() &&
+        DrawArt(renderer, art, ArtSlot::FoeBattle, foe.Id, origin, {size * 4.0f, size * 6.5f},
+                alive ? white : kDim))
+        return;
     const EnemyDef* def = data.FindEnemy(foe.Id);
     if (def != nullptr && def->HasColor) {
         const Emerald::Vec4 tint = alive ? Emerald::Vec4{def->Red / 255.0f, def->Green / 255.0f,
@@ -1223,13 +1229,34 @@ void AscensionApp::OnStart()
         }
     }
     if (!m_Data.Load()) {
-        if (m_Play.UsesData() || !m_Play.Keys.empty() || !m_Play.Transcript.empty()) {
+        if (m_Play.UsesData() || !m_Play.Keys.empty() || !m_Play.Transcript.empty() ||
+            !m_Play.ArtPackDir.empty()) {
             const std::string& message = m_Data.GetLastError();
             if (!message.empty())
                 std::fprintf(stderr, "%s\n", message.c_str());
             Quit();
         }
         return;
+    }
+    if (!m_Play.ArtPackDir.empty()) {
+        ArtPack pack;
+        DataError packError;
+        if (!pack.Load(m_Play.ArtPackDir, m_Data, &packError)) {
+            m_StartError =
+                packError.Message.empty() ? "could not load art pack" : packError.Message;
+            std::fprintf(stderr, "%s\n", m_StartError.c_str());
+            Note(m_StartError);
+            Quit();
+            return;
+        }
+        std::string packWhy;
+        if (!m_Gallery.Load(GetAssets(), pack, packWhy)) {
+            m_StartError = std::move(packWhy);
+            std::fprintf(stderr, "%s\n", m_StartError.c_str());
+            Note(m_StartError);
+            Quit();
+            return;
+        }
     }
     PlaytestSetup setup;
     std::string why;
@@ -2088,7 +2115,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
-                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places);
+                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places, &m_Gallery);
         renderer.End();
         return;
     }
@@ -2139,7 +2166,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const bool playerTurn =
         m_Battle->Result() == BattleResult::Ongoing && m_Battle->Actor() == CombatantSide::Player;
 
-    DrawFigure(renderer, {left.x + 28.0f, left.y + 28.0f}, 16.0f, kFigure);
+    const Emerald::Vec2 figureAt{left.x + 28.0f, left.y + 28.0f};
+    const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
+    if (m_Gallery.IsEmpty() ||
+        !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, m_Hero.ClassId(), figureAt,
+                 {16.0f * 4.0f, 16.0f * 6.5f}, white))
+        DrawFigure(renderer, figureAt, 16.0f, kFigure);
     f32 y = left.y + 24.0f;
     std::string title = player.Name;
     if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
@@ -2378,7 +2410,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     }
 
     if (packCount <= 1) {
-        DrawFoeBody(renderer, m_Data, enemy, {right.x + 28.0f, right.y + 28.0f}, 16.0f,
+        DrawFoeBody(renderer, m_Data, &m_Gallery, enemy, {right.x + 28.0f, right.y + 28.0f}, 16.0f,
                     enemy.Alive(), kFoe);
         y = right.y + 24.0f;
         y = DrawZone(renderer, zone, {right.x + 140.0f, y}, 1);
@@ -2440,8 +2472,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             const Emerald::Vec4 ink = member.Alive() ? kInk : kDim;
             if (selected)
                 renderer.DrawRect({columnX, cardTop}, {columnWidth, cardHeight}, kFrame);
-            DrawFoeBody(renderer, m_Data, member, {columnX + 8.0f, cardTop + 8.0f}, figureSize,
-                        member.Alive(), kFoe);
+            DrawFoeBody(renderer, m_Data, &m_Gallery, member, {columnX + 8.0f, cardTop + 8.0f},
+                        figureSize, member.Alive(), kFoe);
             f32 textY = cardTop + 12.0f + figureSize * 6.6f;
             const f32 textX = columnX + 8.0f;
             const f32 textWrap = columnWidth - 16.0f;
@@ -3116,14 +3148,21 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
     TalkBoxLines(node->Line, kTalkLineWidth, lines);
 
     DrawPanel(renderer, {28.0f, 24.0f}, {width - 56.0f, height - 48.0f});
+    const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
+    f32 textX = 52.0f;
+    if (!m_Gallery.IsEmpty() &&
+        DrawArt(renderer, &m_Gallery, ArtSlot::NpcPortrait, m_TalkId, {52.0f, 44.0f}, {96.0f, 96.0f},
+                white))
+        textX = 52.0f + 96.0f + 16.0f;
+    const f32 textWrap = width - textX - 52.0f;
     const f32 lineH = Emerald::DebugTextLineHeight(2);
     f32 y = 44.0f;
-    Emerald::DrawDebugText(renderer, {52.0f, y}, Upper(m_Data.GetShop().Keeper), kFrame, 2);
+    Emerald::DrawDebugText(renderer, {textX, y}, Upper(m_Data.GetShop().Keeper), kFrame, 2);
     y += lineH + 10.0f;
     for (const std::string& line : lines) {
         if (y > height - 120.0f)
             break;
-        Emerald::DrawDebugText(renderer, {52.0f, y}, Upper(line), kInk, 2, width - 104.0f);
+        Emerald::DrawDebugText(renderer, {textX, y}, Upper(line), kInk, 2, textWrap);
         y += lineH + 2.0f;
     }
     y += 10.0f;
@@ -3136,7 +3175,7 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
         std::string text = marked ? "> " : "  ";
         text += choice.Text;
         const Emerald::Vec4 color = marked ? kFrame : kInk;
-        Emerald::DrawDebugText(renderer, {52.0f, y}, Upper(text), color, 2, width - 104.0f);
+        Emerald::DrawDebugText(renderer, {textX, y}, Upper(text), color, 2, textWrap);
         y += lineH + 2.0f;
     }
     const char* help = "UP DOWN MOVE    E SPEAK    I CLOSE";

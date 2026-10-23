@@ -42,6 +42,10 @@ struct ResolvedFight {
 // Emerald's own flags (--frames, --screenshot, and the rest) are skipped, not stored.
 struct PlaytestOptions {
     std::filesystem::path DataDir;
+    // --art-pack. Empty until startup finds artpack/ next to the executable, and
+    // still empty when that folder is absent. The built-in CC0 art is used then.
+    // This does not build a hero and does not change the save.
+    std::filesystem::path ArtPackDir;
     std::filesystem::path Transcript;
     // Empty uses the per-user save folder. A set path is where this run reads and writes.
     std::filesystem::path SaveDir;

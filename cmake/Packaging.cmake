@@ -6,6 +6,8 @@
 #
 # The zip holds the executable, its compiled shaders, data/, assets/, README.txt, LICENSE.txt,
 # THIRD_PARTY_LICENSES.txt and .itch.toml (Play launches the executable).
+# artpack/ is a local licensed pack. It is not installed. The rules below name data/ and
+# assets/ and never a pack directory.
 
 set(package_dir "${CMAKE_BINARY_DIR}/package")
 
@@ -71,6 +73,14 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/" DESTINATION assets COMPO
 install(FILES "${package_dir}/README.txt" "${package_dir}/LICENSE.txt" "${notices}"
               "${package_dir}/.itch.toml"
         DESTINATION . COMPONENT Game)
+
+# A pack that still landed in the staging directory fails the package. The check runs
+# with the Game component, which is the only component the zip installs.
+install(CODE [[
+if(EXISTS "${CMAKE_INSTALL_PREFIX}/artpack")
+  message(FATAL_ERROR "artpack/ must not be packaged")
+endif()
+]] COMPONENT Game)
 
 if(WIN32)
     set(package_platform windows)
