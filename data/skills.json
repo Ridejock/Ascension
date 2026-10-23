@@ -336,8 +336,8 @@
       "target": "enemy",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "strength" },
-        { "id": "hit2", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" },
+        { "id": "hit2", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
       ]
     },
     {
@@ -348,7 +348,7 @@
       "target": "self",
       "focusCost": 0,
       "effects": [
-        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 10 }
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8 }
       ]
     },
     {
@@ -371,7 +371,7 @@
       "focusCost": 0,
       "windup": 1,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 75, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 43, "scaling": "strength" }
       ]
     },
     {
