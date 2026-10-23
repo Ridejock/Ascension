@@ -16,9 +16,11 @@ class ArtGallery;
 // `cleared` is the spawn ids a win already removed. Those tiles are not drawn.
 // `art` is the optional pack. A null or empty gallery keeps the built-in CC0 squares.
 // A tile uses the picture for this map, else its theme, else the plain tile id.
+// `motion` is where spawns are drawn. Null stands each spawn on its tile.
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
                    i32 focus, i32 maxFocus, std::span<const std::string> cleared,
-                   std::span<const SpawnPlace> places = {}, const ArtGallery* art = nullptr);
+                   std::span<const SpawnPlace> places = {}, const ArtGallery* art = nullptr,
+                   const SpawnGlides* motion = nullptr);
 
 } // namespace Ascension

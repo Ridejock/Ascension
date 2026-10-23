@@ -600,13 +600,18 @@ void AscensionApp::SyncPlaces()
 {
     m_Places.clear();
     m_PlacesMap.clear();
-    if (!m_Walker.Placed())
+    if (!m_Walker.Placed()) {
+        m_Glides.Snap(m_Places);
         return;
+    }
     const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
-    if (map == nullptr)
+    if (map == nullptr) {
+        m_Glides.Snap(m_Places);
         return;
+    }
     PlaceSpawns(*map, m_MapMemory, m_Places);
     m_PlacesMap = map->Id;
+    m_Glides.Snap(m_Places);
 }
 
 void AscensionApp::StepMovers()
@@ -1671,6 +1676,8 @@ WalkDir AscensionApp::DirectionOfKey(SDL_Scancode scancode)
 
 WalkInput AscensionApp::ReadMapInput()
 {
+    // Actions only. A parallel change can rebind MoveNorth and the rest without
+    // this function looking at a scancode or a button.
     Emerald::Input& input = GetInput();
     WalkInput held;
     for (const MoveBinding& move : kMoves) {
@@ -1691,16 +1698,27 @@ void AscensionApp::StepMap(f32 dt)
     if (!m_Walker.Placed())
         return;
     WalkInput input;
-    const bool scripting = m_KeyCursor < m_Play.Keys.size() || m_ScriptDir != WalkDir::None;
-    if (m_ScriptDir != WalkDir::None) {
+    const bool scriptedStep = m_ScriptDir != WalkDir::None;
+    const bool scripting = m_KeyCursor < m_Play.Keys.size() || scriptedStep;
+    if (scriptedStep) {
         input.Direction = m_ScriptDir;
         input.Fresh = true;
         m_ScriptDir = WalkDir::None;
     } else if (!scripting) {
         input = ReadMapInput();
     }
+    // A scripted direction is one tile, so the key harness still lands on that
+    // tile before the next key. Live play uses the frame dt.
+    f32 stepDt = dt;
+    const WalkRules& rules = m_Data.GetWalk();
+    i32 moveMs = rules.MoveMilliseconds;
+    if (moveMs < 1)
+        moveMs = 1;
+    const f32 moveSeconds = static_cast<f32>(moveMs) / 1000.0f;
+    if (scriptedStep && stepDt < moveSeconds)
+        stepDt = moveSeconds;
     const WalkPlace before = m_Walker.Place();
-    const WalkStep step = m_Walker.Advance(m_Data, m_Data.GetWalk(), input, dt);
+    const WalkStep step = m_Walker.Advance(m_Data, rules, input, stepDt);
     if (step.Kind == WalkStepKind::Exited)
         Note("Exit to " + m_Walker.Place().MapId + ".");
     else if (step.Kind == WalkStepKind::Blocked && input.Fresh)
@@ -1716,10 +1734,13 @@ void AscensionApp::StepMap(f32 dt)
         }
         TouchSpawn(contact);
     }
-    if (step.Kind == WalkStepKind::Moved && !SpawnFightOpen())
+    if (SpawnFightOpen())
+        m_Walker.Halt();
+    else if (step.Kind == WalkStepKind::Moved)
         StepMovers();
     if (!SpawnFightOpen())
         NoteRest();
+    m_Glides.Advance(m_Places, stepDt, moveSeconds);
 }
 
 void AscensionApp::AdoptMap()
@@ -2116,7 +2137,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
-                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places, &m_Gallery);
+                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places, &m_Gallery,
+                      &m_Glides);
         renderer.End();
         return;
     }

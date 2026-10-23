@@ -83,7 +83,8 @@ const std::string* SpawnFoeId(const Database& data, const MapSpawn& spawn)
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
                    i32 focus, i32 maxFocus, std::span<const std::string> cleared,
-                   std::span<const SpawnPlace> places, const ArtGallery* art)
+                   std::span<const SpawnPlace> places, const ArtGallery* art,
+                   const SpawnGlides* motion)
 {
     const Emerald::Vec4 label = ByteColor(kLabelRed, kLabelGreen, kLabelBlue);
     const Emerald::Vec4 dim = ByteColor(kLogRed, kLogGreen, kLogBlue);
@@ -97,7 +98,8 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     const f32 tile = static_cast<f32>(rules.TilePixels);
     const f32 tilesWide = width / tile;
     const f32 tilesHigh = height / tile;
-    const WalkFrame frame = FrameMap(*map, walker.Place().Tile, tilesWide, tilesHigh);
+    const WalkPoint heroPoint = walker.DrawTile();
+    const WalkFrame frame = FrameMap(*map, heroPoint.X, heroPoint.Y, tilesWide, tilesHigh);
     const i32 firstX = static_cast<i32>(std::floor(static_cast<double>(frame.OriginX)));
     const i32 firstY = static_cast<i32>(std::floor(static_cast<double>(frame.OriginY)));
     const i32 lastX =
@@ -187,10 +189,14 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             if (SpawnCleared(cleared, spawn.Id))
                 continue;
             const MapTile at = SpawnDrawTile(spawn, places);
-            if (at.X < firstX || at.X >= lastX || at.Y < firstY || at.Y >= lastY)
+            const WalkPoint drawn =
+                motion != nullptr ? motion->Sample(spawn.Id, at)
+                                  : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
+            if (drawn.X + 1.0f < static_cast<f32>(firstX) || drawn.X >= static_cast<f32>(lastX) ||
+                drawn.Y + 1.0f < static_cast<f32>(firstY) || drawn.Y >= static_cast<f32>(lastY))
                 continue;
-            const f32 left = (static_cast<f32>(at.X) - frame.OriginX) * tile + inset;
-            const f32 top = (static_cast<f32>(at.Y) - frame.OriginY) * tile + inset;
+            const f32 left = (drawn.X - frame.OriginX) * tile + inset;
+            const f32 top = (drawn.Y - frame.OriginY) * tile + inset;
             const std::string* foeId = packed ? SpawnFoeId(data, spawn) : nullptr;
             if (foeId == nullptr ||
                 !DrawArt(renderer, art, ArtSlot::FoeOverland, *foeId, {left, top}, {inner, inner},
@@ -200,9 +206,8 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     }
 
     if (inner > 0.0f) {
-        const MapTile hero = walker.Place().Tile;
-        const f32 left = (static_cast<f32>(hero.X) - frame.OriginX) * tile + inset;
-        const f32 top = (static_cast<f32>(hero.Y) - frame.OriginY) * tile + inset;
+        const f32 left = (heroPoint.X - frame.OriginX) * tile + inset;
+        const f32 top = (heroPoint.Y - frame.OriginY) * tile + inset;
         const Emerald::Vec4 heroColor =
             ByteColor(rules.HeroRed, rules.HeroGreen, rules.HeroBlue);
         if (!packed || !DrawArt(renderer, art, ArtSlot::HeroMarker, "", {left, top}, {inner, inner},

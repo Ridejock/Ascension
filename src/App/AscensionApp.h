@@ -209,6 +209,8 @@ private:
     // exit, and after a reload. Idle leaves every tile on its home.
     std::vector<SpawnPlace> m_Places;
     std::string m_PlacesMap;
+    // Drawn points for m_Places. The tiles themselves stay on m_Places.
+    SpawnGlides m_Glides;
     // The place a save recorded when this launch is not standing on the map. The
     // walker is the place while --map is up. A fight-screen launch writes this back
     // so it does not erase a map the save already had.
