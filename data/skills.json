@@ -25,12 +25,13 @@
     {
       "id": "heavy_blow",
       "name": "Heavy Blow",
-      "description": "A committed swing. It stuns a foe who is winding up.",
+      "description": "A committed swing. It stuns a foe who is winding up. A {crush.ifTargetHas} foe takes another blow that scales with {crush.scaling}.",
       "kind": "active",
       "target": "enemy",
       "focusCost": 3,
       "effects": [
         { "id": "hit", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "strength" },
+        { "id": "crush", "trigger": "onUse", "op": "damage", "power": 16, "scaling": "strength", "ifTargetHas": "steadfast" },
         { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
       ]
     },
