@@ -1,0 +1,418 @@
+{
+  "prompts": {
+    "iconScale": 1,
+    "textScale": 2,
+    "gap": 4,
+    "groupGap": 16,
+    "textFamily": "keyboard",
+    "defaultFamily": "switch",
+    "devices": [
+      {
+        "family": "xbox",
+        "types": [
+          "Xbox 360",
+          "Xbox One/Series"
+        ]
+      },
+      {
+        "family": "playstation",
+        "types": [
+          "PS3",
+          "PS4",
+          "PS5"
+        ]
+      },
+      {
+        "family": "switch",
+        "types": [
+          "Switch Pro",
+          "Joy-Con (L)",
+          "Joy-Con (R)",
+          "Joy-Con pair",
+          "Standard",
+          "Unknown",
+          "GameCube"
+        ]
+      }
+    ],
+    "sheets": [
+      {
+        "family": "xbox",
+        "image": "prompts/xbox.png",
+        "atlas": "prompts/xbox.json"
+      },
+      {
+        "family": "playstation",
+        "image": "prompts/playstation.png",
+        "atlas": "prompts/playstation.json"
+      },
+      {
+        "family": "switch",
+        "image": "prompts/switch.png",
+        "atlas": "prompts/switch.json"
+      }
+    ],
+    "glyphs": [
+      {
+        "family": "xbox",
+        "button": "South",
+        "tile": "a"
+      },
+      {
+        "family": "xbox",
+        "button": "East",
+        "tile": "b"
+      },
+      {
+        "family": "xbox",
+        "button": "West",
+        "tile": "x"
+      },
+      {
+        "family": "xbox",
+        "button": "North",
+        "tile": "y"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftShoulder",
+        "tile": "lb"
+      },
+      {
+        "family": "xbox",
+        "button": "RightShoulder",
+        "tile": "rb"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftTrigger",
+        "tile": "lt"
+      },
+      {
+        "family": "xbox",
+        "button": "RightTrigger",
+        "tile": "rt"
+      },
+      {
+        "family": "xbox",
+        "button": "Start",
+        "tile": "menu"
+      },
+      {
+        "family": "xbox",
+        "button": "Back",
+        "tile": "view"
+      },
+      {
+        "family": "xbox",
+        "button": "DPadUp",
+        "tile": "dpad_up"
+      },
+      {
+        "family": "xbox",
+        "button": "DPadDown",
+        "tile": "dpad_down"
+      },
+      {
+        "family": "xbox",
+        "button": "DPadLeft",
+        "tile": "dpad_left"
+      },
+      {
+        "family": "xbox",
+        "button": "DPadRight",
+        "tile": "dpad_right"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftStick",
+        "tile": "stick_l_click"
+      },
+      {
+        "family": "xbox",
+        "button": "RightStick",
+        "tile": "stick_r_click"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftStickUp",
+        "tile": "stick_l"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftStickDown",
+        "tile": "stick_l"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftStickLeft",
+        "tile": "stick_l"
+      },
+      {
+        "family": "xbox",
+        "button": "LeftStickRight",
+        "tile": "stick_l"
+      },
+      {
+        "family": "xbox",
+        "button": "RightStickUp",
+        "tile": "stick_r"
+      },
+      {
+        "family": "xbox",
+        "button": "RightStickDown",
+        "tile": "stick_r"
+      },
+      {
+        "family": "xbox",
+        "button": "RightStickLeft",
+        "tile": "stick_r"
+      },
+      {
+        "family": "xbox",
+        "button": "RightStickRight",
+        "tile": "stick_r"
+      },
+      {
+        "family": "playstation",
+        "button": "South",
+        "tile": "cross"
+      },
+      {
+        "family": "playstation",
+        "button": "East",
+        "tile": "circle"
+      },
+      {
+        "family": "playstation",
+        "button": "West",
+        "tile": "square"
+      },
+      {
+        "family": "playstation",
+        "button": "North",
+        "tile": "triangle"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftShoulder",
+        "tile": "l1"
+      },
+      {
+        "family": "playstation",
+        "button": "RightShoulder",
+        "tile": "r1"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftTrigger",
+        "tile": "l2"
+      },
+      {
+        "family": "playstation",
+        "button": "RightTrigger",
+        "tile": "r2"
+      },
+      {
+        "family": "playstation",
+        "button": "Start",
+        "tile": "options"
+      },
+      {
+        "family": "playstation",
+        "button": "Back",
+        "tile": "create"
+      },
+      {
+        "family": "playstation",
+        "button": "DPadUp",
+        "tile": "dpad_up"
+      },
+      {
+        "family": "playstation",
+        "button": "DPadDown",
+        "tile": "dpad_down"
+      },
+      {
+        "family": "playstation",
+        "button": "DPadLeft",
+        "tile": "dpad_left"
+      },
+      {
+        "family": "playstation",
+        "button": "DPadRight",
+        "tile": "dpad_right"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftStick",
+        "tile": "stick_l_click"
+      },
+      {
+        "family": "playstation",
+        "button": "RightStick",
+        "tile": "stick_r_click"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftStickUp",
+        "tile": "stick_l"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftStickDown",
+        "tile": "stick_l"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftStickLeft",
+        "tile": "stick_l"
+      },
+      {
+        "family": "playstation",
+        "button": "LeftStickRight",
+        "tile": "stick_l"
+      },
+      {
+        "family": "playstation",
+        "button": "RightStickUp",
+        "tile": "stick_r"
+      },
+      {
+        "family": "playstation",
+        "button": "RightStickDown",
+        "tile": "stick_r"
+      },
+      {
+        "family": "playstation",
+        "button": "RightStickLeft",
+        "tile": "stick_r"
+      },
+      {
+        "family": "playstation",
+        "button": "RightStickRight",
+        "tile": "stick_r"
+      },
+      {
+        "family": "switch",
+        "button": "South",
+        "tile": "b"
+      },
+      {
+        "family": "switch",
+        "button": "East",
+        "tile": "a"
+      },
+      {
+        "family": "switch",
+        "button": "West",
+        "tile": "y"
+      },
+      {
+        "family": "switch",
+        "button": "North",
+        "tile": "x"
+      },
+      {
+        "family": "switch",
+        "button": "LeftShoulder",
+        "tile": "l"
+      },
+      {
+        "family": "switch",
+        "button": "RightShoulder",
+        "tile": "r"
+      },
+      {
+        "family": "switch",
+        "button": "LeftTrigger",
+        "tile": "zl"
+      },
+      {
+        "family": "switch",
+        "button": "RightTrigger",
+        "tile": "zr"
+      },
+      {
+        "family": "switch",
+        "button": "Start",
+        "tile": "plus"
+      },
+      {
+        "family": "switch",
+        "button": "Back",
+        "tile": "minus"
+      },
+      {
+        "family": "switch",
+        "button": "DPadUp",
+        "tile": "dpad_up"
+      },
+      {
+        "family": "switch",
+        "button": "DPadDown",
+        "tile": "dpad_down"
+      },
+      {
+        "family": "switch",
+        "button": "DPadLeft",
+        "tile": "dpad_left"
+      },
+      {
+        "family": "switch",
+        "button": "DPadRight",
+        "tile": "dpad_right"
+      },
+      {
+        "family": "switch",
+        "button": "LeftStick",
+        "tile": "stick_l_click"
+      },
+      {
+        "family": "switch",
+        "button": "RightStick",
+        "tile": "stick_r_click"
+      },
+      {
+        "family": "switch",
+        "button": "LeftStickUp",
+        "tile": "stick_l"
+      },
+      {
+        "family": "switch",
+        "button": "LeftStickDown",
+        "tile": "stick_l"
+      },
+      {
+        "family": "switch",
+        "button": "LeftStickLeft",
+        "tile": "stick_l"
+      },
+      {
+        "family": "switch",
+        "button": "LeftStickRight",
+        "tile": "stick_l"
+      },
+      {
+        "family": "switch",
+        "button": "RightStickUp",
+        "tile": "stick_r"
+      },
+      {
+        "family": "switch",
+        "button": "RightStickDown",
+        "tile": "stick_r"
+      },
+      {
+        "family": "switch",
+        "button": "RightStickLeft",
+        "tile": "stick_r"
+      },
+      {
+        "family": "switch",
+        "button": "RightStickRight",
+        "tile": "stick_r"
+      }
+    ]
+  }
+}

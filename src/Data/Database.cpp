@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include "Emerald/Core/Log.h"
+#include "Emerald/Input/InputBindings.h"
 
 namespace Ascension {
 
@@ -25,7 +26,8 @@ constexpr const char* kFileNames[] = {
     "stats.json",   "effects.json", "skills.json",     "statuses.json",
     "classes.json", "enemies.json", "encounters.json", "items.json",
     "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-    "tiles.json",   "walk.json",    "movers.json",
+    "tiles.json",   "walk.json",    "movers.json",     "input.json",
+    "prompts.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -40,6 +42,17 @@ std::filesystem::path IconSheetFor(const std::filesystem::path& dataDirectory)
         return source;
 #endif
     return dataDirectory.parent_path() / "assets" / "icons" / "icons_sheet.json";
+}
+
+std::filesystem::path AssetsRoot(const std::filesystem::path& dataDirectory)
+{
+#ifdef ASCENSION_ASSETS_DIR
+    const std::filesystem::path source{ASCENSION_ASSETS_DIR};
+    std::error_code missing;
+    if (std::filesystem::is_directory(source, missing))
+        return source;
+#endif
+    return dataDirectory.parent_path() / "assets";
 }
 
 constexpr i32 kMinLevel = 1;
@@ -335,6 +348,9 @@ struct Parsed {
     CombatRules Rules;
     ProgressRules Progress;
     WalkRules Walk;
+    ControlRules Controls;
+    PromptRules Prompts;
+    std::filesystem::path Directory;
     std::vector<std::string> HigherFields;
     std::vector<std::string> LowerFields;
 };
@@ -2677,6 +2693,333 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool ReadNameList(const Json& object, const char* key, std::vector<std::string>& out,
+                  std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end() || !it->is_array()) {
+        error = std::string("'") + key + "' must be a list";
+        return false;
+    }
+    for (const Json& entry : *it) {
+        if (!entry.is_string()) {
+            error = std::string("'") + key + "' must be names";
+            return false;
+        }
+        const std::string name = entry.get<std::string>();
+        if (name.empty()) {
+            error = std::string("'") + key + "' must not contain an empty name";
+            return false;
+        }
+        out.push_back(name);
+    }
+    return true;
+}
+
+bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("controls");
+    if (body == root.end() || !body->is_object()) {
+        error = "'controls' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"navInitialMilliseconds", "navRepeatMilliseconds", "actions"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    ControlRules rules;
+    if (!RequireInt(*body, "navInitialMilliseconds", 1, 2000, rules.NavInitialMilliseconds,
+                    error) ||
+        !RequireInt(*body, "navRepeatMilliseconds", 1, 2000, rules.NavRepeatMilliseconds, error))
+        return false;
+    const auto list = body->find("actions");
+    if (list == body->end() || !list->is_array()) {
+        error = "'actions' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "action entries must be objects";
+            return false;
+        }
+        std::string extra;
+        if (!AllowKeys(entry, {"name", "keys", "buttons"}, extra)) {
+            error = "unknown field " + Quote(extra);
+            return false;
+        }
+        ControlBind bind;
+        if (!RequireString(entry, "name", bind.Name, error))
+            return false;
+        if (!IsControlAction(bind.Name)) {
+            error = "unknown action " + Quote(bind.Name);
+            return false;
+        }
+        if (FindControl(rules, bind.Name) != nullptr) {
+            error = "action " + Quote(bind.Name) + " is listed twice";
+            return false;
+        }
+        if (!ReadNameList(entry, "keys", bind.Keys, error) ||
+            !ReadNameList(entry, "buttons", bind.Buttons, error))
+            return false;
+        if (bind.Keys.empty() && bind.Buttons.empty()) {
+            error = "action " + Quote(bind.Name) + " has no keys or buttons";
+            return false;
+        }
+        rules.Actions.push_back(std::move(bind));
+    }
+    for (const std::string_view action : kControlActions) {
+        if (FindControl(rules, action) == nullptr) {
+            error = "missing action " + Quote(action);
+            return false;
+        }
+    }
+    parsed.Controls = std::move(rules);
+    return true;
+}
+
+bool ReadAtlasTiles(const std::filesystem::path& path, PromptSheet& sheet, std::string& error)
+{
+    std::string text;
+    std::string why;
+    if (!ReadText(path, text, why)) {
+        error = path.filename().string() + ": " + why;
+        return false;
+    }
+    Json root;
+    if (!ParseRoot(text, root, why)) {
+        error = path.filename().string() + ": " + why;
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(root, {"tile_size", "tiles"}, unknown)) {
+        error = path.filename().string() + ": unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireInt(root, "tile_size", 1, 256, sheet.TilePixels, error)) {
+        error = path.filename().string() + ": " + error;
+        return false;
+    }
+    const auto tiles = root.find("tiles");
+    if (tiles == root.end() || !tiles->is_object()) {
+        error = path.filename().string() + ": 'tiles' must be an object";
+        return false;
+    }
+    for (auto it = tiles->begin(); it != tiles->end(); ++it) {
+        if (!it->is_object()) {
+            error = path.filename().string() + ": tile " + Quote(it.key()) + " must be an object";
+            return false;
+        }
+        std::string extra;
+        if (!AllowKeys(*it, {"x", "y", "w", "h"}, extra)) {
+            error = path.filename().string() + ": unknown field " + Quote(extra);
+            return false;
+        }
+        PromptTile tile;
+        tile.Name = it.key();
+        if (tile.Name.empty()) {
+            error = path.filename().string() + ": a tile needs a name";
+            return false;
+        }
+        if (FindPromptTile(sheet, tile.Name) != nullptr) {
+            error = path.filename().string() + ": tile " + Quote(tile.Name) + " is listed twice";
+            return false;
+        }
+        if (!RequireInt(*it, "x", 0, 4096, tile.X, error) ||
+            !RequireInt(*it, "y", 0, 4096, tile.Y, error) ||
+            !RequireInt(*it, "w", 1, 256, tile.Width, error) ||
+            !RequireInt(*it, "h", 1, 256, tile.Height, error)) {
+            error = path.filename().string() + ": tile " + Quote(tile.Name) + ": " + error;
+            return false;
+        }
+        if (tile.Width != sheet.TilePixels || tile.Height != sheet.TilePixels) {
+            error = path.filename().string() + ": tile " + Quote(tile.Name) +
+                    " is not tile_size";
+            return false;
+        }
+        sheet.Tiles.push_back(std::move(tile));
+    }
+    if (sheet.Tiles.empty()) {
+        error = path.filename().string() + ": 'tiles' is empty";
+        return false;
+    }
+    return true;
+}
+
+bool LoadPrompts(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("prompts");
+    if (body == root.end() || !body->is_object()) {
+        error = "'prompts' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body,
+                   {"iconScale", "textScale", "gap", "groupGap", "textFamily", "defaultFamily",
+                    "devices", "sheets", "glyphs"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    PromptRules rules;
+    if (!RequireInt(*body, "iconScale", 1, 32, rules.IconScale, error) ||
+        !RequireInt(*body, "textScale", 1, 32, rules.TextScale, error) ||
+        !RequireInt(*body, "gap", 0, 64, rules.Gap, error) ||
+        !RequireInt(*body, "groupGap", 0, 128, rules.GroupGap, error) ||
+        !RequireString(*body, "textFamily", rules.TextFamily, error) ||
+        !RequireString(*body, "defaultFamily", rules.DefaultFamily, error))
+        return false;
+    if (rules.TextFamily.empty() || rules.DefaultFamily.empty()) {
+        error = "textFamily and defaultFamily must be named";
+        return false;
+    }
+
+    const auto devices = body->find("devices");
+    if (devices == body->end() || !devices->is_array()) {
+        error = "'devices' must be a list";
+        return false;
+    }
+    for (const Json& entry : *devices) {
+        if (!entry.is_object()) {
+            error = "device entries must be objects";
+            return false;
+        }
+        std::string extra;
+        if (!AllowKeys(entry, {"family", "types"}, extra)) {
+            error = "unknown field " + Quote(extra);
+            return false;
+        }
+        PromptDevice device;
+        if (!RequireString(entry, "family", device.Family, error))
+            return false;
+        if (device.Family == rules.TextFamily) {
+            error = "device family " + Quote(device.Family) + " is the text family";
+            return false;
+        }
+        if (!ReadNameList(entry, "types", device.Types, error))
+            return false;
+        if (device.Types.empty()) {
+            error = "device family " + Quote(device.Family) + " has no types";
+            return false;
+        }
+        for (const std::string& type : device.Types) {
+            for (const PromptDevice& earlier : rules.Devices) {
+                for (const std::string& used : earlier.Types) {
+                    if (used == type) {
+                        error = "pad type " + Quote(type) + " is listed twice";
+                        return false;
+                    }
+                }
+            }
+        }
+        rules.Devices.push_back(std::move(device));
+    }
+
+    const auto sheets = body->find("sheets");
+    if (sheets == body->end() || !sheets->is_array()) {
+        error = "'sheets' must be a list";
+        return false;
+    }
+    const std::filesystem::path assets = AssetsRoot(parsed.Directory);
+    i32 sharedTile = 0;
+    for (const Json& entry : *sheets) {
+        if (!entry.is_object()) {
+            error = "sheet entries must be objects";
+            return false;
+        }
+        std::string extra;
+        if (!AllowKeys(entry, {"family", "image", "atlas"}, extra)) {
+            error = "unknown field " + Quote(extra);
+            return false;
+        }
+        PromptSheet sheet;
+        std::string image;
+        std::string atlas;
+        if (!RequireString(entry, "family", sheet.Family, error) ||
+            !RequireString(entry, "image", image, error) ||
+            !RequireString(entry, "atlas", atlas, error))
+            return false;
+        if (FindPromptSheet(rules, sheet.Family) != nullptr) {
+            error = "sheet " + Quote(sheet.Family) + " is listed twice";
+            return false;
+        }
+        bool knownFamily = false;
+        for (const PromptDevice& device : rules.Devices) {
+            if (device.Family == sheet.Family)
+                knownFamily = true;
+        }
+        if (!knownFamily) {
+            error = "sheet " + Quote(sheet.Family) + " has no device";
+            return false;
+        }
+        sheet.Image = assets / image;
+        if (!ReadAtlasTiles(assets / atlas, sheet, error))
+            return false;
+        if (sharedTile == 0)
+            sharedTile = sheet.TilePixels;
+        else if (sheet.TilePixels != sharedTile) {
+            error = "sheet " + Quote(sheet.Family) + " tile_size does not match";
+            return false;
+        }
+        rules.Sheets.push_back(std::move(sheet));
+    }
+    if (FindPromptSheet(rules, rules.DefaultFamily) == nullptr) {
+        error = "defaultFamily " + Quote(rules.DefaultFamily) + " has no sheet";
+        return false;
+    }
+    if (rules.TextFamily == rules.DefaultFamily) {
+        error = "textFamily and defaultFamily must differ";
+        return false;
+    }
+
+    const auto glyphs = body->find("glyphs");
+    if (glyphs == body->end() || !glyphs->is_array()) {
+        error = "'glyphs' must be a list";
+        return false;
+    }
+    for (const Json& entry : *glyphs) {
+        if (!entry.is_object()) {
+            error = "glyph entries must be objects";
+            return false;
+        }
+        std::string extra;
+        if (!AllowKeys(entry, {"family", "button", "tile"}, extra)) {
+            error = "unknown field " + Quote(extra);
+            return false;
+        }
+        PromptGlyph glyph;
+        if (!RequireString(entry, "family", glyph.Family, error) ||
+            !RequireString(entry, "button", glyph.Button, error) ||
+            !RequireString(entry, "tile", glyph.Tile, error))
+            return false;
+        const PromptSheet* sheet = FindPromptSheet(rules, glyph.Family);
+        if (sheet == nullptr) {
+            error = "glyph family " + Quote(glyph.Family) + " has no sheet";
+            return false;
+        }
+        if (FindPromptTile(*sheet, glyph.Tile) == nullptr) {
+            error = "glyph tile " + Quote(glyph.Tile) + " is not on " + glyph.Family;
+            return false;
+        }
+        if (!Emerald::FindGamepadButton(glyph.Button)) {
+            error = "unknown button " + Quote(glyph.Button);
+            return false;
+        }
+        if (FindPromptGlyph(rules, glyph.Family, glyph.Button) != nullptr) {
+            error = "button " + Quote(glyph.Button) + " is listed twice for " + glyph.Family;
+            return false;
+        }
+        rules.Glyphs.push_back(std::move(glyph));
+    }
+    if (rules.Glyphs.empty()) {
+        error = "'glyphs' is empty";
+        return false;
+    }
+    parsed.Prompts = std::move(rules);
+    return true;
+}
+
 bool ParseMoverKind(std::string_view text, MoverKind& out)
 {
     if (text == "idle") {
@@ -4079,17 +4422,20 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         error = "internal: data file list";
         return false;
     }
+    parsed.Directory = files[0].parent_path();
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
                               LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
                               LoadShop,    LoadCombat,  LoadProgress,   LoadRarities,
-                              LoadTiles,   LoadWalk,    LoadMovers};
+                              LoadTiles,   LoadWalk,    LoadMovers,     LoadControls,
+                              LoadPrompts};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
                            "classes.json", "enemies.json", "encounters.json", "items.json",
                            "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-                           "tiles.json",   "walk.json",    "movers.json"};
+                           "tiles.json",   "walk.json",    "movers.json",     "input.json",
+                           "prompts.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4108,7 +4454,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
                                     "classes", "enemies", "encounters", "items",
                                     "shop",    "combat",  "progress",   "rarities",
-                                    "tiles",   "walk",    "movers"};
+                                    "tiles",   "walk",    "movers",     "controls",
+                                    "prompts"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -4362,6 +4709,8 @@ bool Database::Load(DataError* error)
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
     m_Walk = parsed.Walk;
+    m_Controls = std::move(parsed.Controls);
+    m_Prompts = std::move(parsed.Prompts);
     m_HigherFields = std::move(parsed.HigherFields);
     m_LowerFields = std::move(parsed.LowerFields);
     ApplyTimes(times);

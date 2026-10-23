@@ -1,0 +1,36 @@
+{
+  "controls": {
+    "navInitialMilliseconds": 280,
+    "navRepeatMilliseconds": 120,
+    "actions": [
+      { "name": "MoveNorth", "keys": ["W", "Up"], "buttons": ["DPadUp", "LeftStickUp"] },
+      { "name": "MoveSouth", "keys": ["S", "Down"], "buttons": ["DPadDown", "LeftStickDown"] },
+      { "name": "MoveEast", "keys": ["D", "Right"], "buttons": ["DPadRight", "LeftStickRight"] },
+      { "name": "MoveWest", "keys": ["A", "Left"], "buttons": ["DPadLeft", "LeftStickLeft"] },
+      { "name": "Confirm", "keys": ["E", "Return", "Keypad Enter"], "buttons": ["South"] },
+      { "name": "Cancel", "keys": [], "buttons": ["East"] },
+      { "name": "Menu", "keys": ["C"], "buttons": ["West"] },
+      { "name": "Context", "keys": ["X"], "buttons": ["North"] },
+      { "name": "Pause", "keys": ["P"], "buttons": ["Start"] },
+      { "name": "Help", "keys": ["H"], "buttons": ["Back"] },
+      { "name": "CyclePrev", "keys": [], "buttons": ["LeftShoulder"] },
+      { "name": "CycleNext", "keys": [], "buttons": ["RightShoulder"] },
+      { "name": "Wait", "keys": ["Space"], "buttons": ["RightTrigger"] },
+      { "name": "Flee", "keys": ["F"], "buttons": ["LeftTrigger"] },
+      { "name": "Interact", "keys": ["I"], "buttons": [] },
+      { "name": "Unequip", "keys": ["U"], "buttons": [] },
+      { "name": "Save", "keys": ["F5"], "buttons": [] },
+      { "name": "Quit", "keys": ["Escape"], "buttons": [] },
+      { "name": "Retry", "keys": ["R"], "buttons": [] },
+      { "name": "Next", "keys": ["N"], "buttons": [] },
+      { "name": "Slot1", "keys": ["1"], "buttons": [] },
+      { "name": "Slot2", "keys": ["2"], "buttons": [] },
+      { "name": "Slot3", "keys": ["3"], "buttons": [] },
+      { "name": "Slot4", "keys": ["4"], "buttons": [] },
+      { "name": "Slot5", "keys": ["5"], "buttons": [] },
+      { "name": "Slot6", "keys": ["6"], "buttons": [] },
+      { "name": "Slot7", "keys": ["7"], "buttons": [] },
+      { "name": "Slot8", "keys": ["8"], "buttons": [] }
+    ]
+  }
+}

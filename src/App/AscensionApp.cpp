@@ -8,10 +8,10 @@
 #include "GearLine.h"
 #include "MapView.h"
 #include "SourceTag.h"
-#include "TalkInput.h"
 
 #include <SDL3/SDL.h>
 
+#include "Emerald/Input/InputBindings.h"
 #include "Emerald/Math/Mat4.h"
 #include "Emerald/Renderer/DebugText.h"
 #include "Emerald/Renderer/Sprite.h"
@@ -24,9 +24,6 @@ namespace {
 constexpr f32 kPollSeconds = 0.25f;
 constexpr usize kLogLines = 6;
 constexpr int kMaxHotkeys = 8;
-// Keys are fixed in this file. There is no binding table in the data.
-constexpr SDL_Scancode kItemKey = SDL_SCANCODE_C;
-constexpr SDL_Scancode kFleeKey = SDL_SCANCODE_F;
 // Enemy actions finished inside one scripted key before the press is applied. A round is
 // at most a handful of foes; the cap is several rounds so a leftover foe turn cannot eat
 // the next key, and it still happens on that key's frame.
@@ -43,26 +40,17 @@ bool SameIds(const std::vector<std::string>& left, const std::vector<std::string
     return true;
 }
 
-// One row is one direction. BindMapActions and the readers below share it, so a
-// new key cannot be bound without also being read.
-struct MoveBinding {
-    const char* Action;
+// Directions the map and the menus share. The keys and buttons are input.json.
+struct MoveAction {
+    std::string_view Action;
     WalkDir Direction;
-    Emerald::Key KeyA;
-    Emerald::Key KeyB;
-    Emerald::GamepadButton Pad;
-    Emerald::GamepadButton Stick;
 };
 
-const MoveBinding kMoves[] = {
-    {"MoveNorth", WalkDir::North, Emerald::Key::W, Emerald::Key::Up, Emerald::GamepadButton::DPadUp,
-     Emerald::GamepadButton::LeftStickUp},
-    {"MoveEast", WalkDir::East, Emerald::Key::D, Emerald::Key::Right,
-     Emerald::GamepadButton::DPadRight, Emerald::GamepadButton::LeftStickRight},
-    {"MoveSouth", WalkDir::South, Emerald::Key::S, Emerald::Key::Down,
-     Emerald::GamepadButton::DPadDown, Emerald::GamepadButton::LeftStickDown},
-    {"MoveWest", WalkDir::West, Emerald::Key::A, Emerald::Key::Left,
-     Emerald::GamepadButton::DPadLeft, Emerald::GamepadButton::LeftStickLeft},
+const MoveAction kMoves[] = {
+    {kMoveNorth, WalkDir::North},
+    {kMoveEast, WalkDir::East},
+    {kMoveSouth, WalkDir::South},
+    {kMoveWest, WalkDir::West},
 };
 
 FightStanding FightStandingOf(const Battle* battle)
@@ -725,6 +713,7 @@ void AscensionApp::BeginSpawnFight()
     m_Camp = false;
     m_Talk = false;
     m_Picking = false;
+    m_CommandRow = 0;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady()) {
         m_MapFight.Active = false;
         return;
@@ -910,6 +899,7 @@ void AscensionApp::BeginFight()
     m_Camp = false;
     m_Talk = false;
     m_Picking = false;
+    m_CommandRow = 0;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
     std::string fightId = m_DirectEnemy;
@@ -990,54 +980,6 @@ void AscensionApp::BeginFight()
     }
 }
 
-AscensionApp::~AscensionApp()
-{
-    for (const HeldPad& held : m_Pads) {
-        if (held.Pad != nullptr)
-            SDL_CloseGamepad(held.Pad);
-    }
-    m_Pads.clear();
-}
-
-void AscensionApp::OpenPad(SDL_JoystickID id)
-{
-    for (const HeldPad& held : m_Pads) {
-        if (held.Id == id)
-            return;
-    }
-    SDL_Gamepad* pad = SDL_OpenGamepad(id);
-    if (pad == nullptr)
-        return;
-    HeldPad held;
-    held.Id = id;
-    held.Pad = pad;
-    m_Pads.push_back(held);
-}
-
-void AscensionApp::ClosePad(SDL_JoystickID id)
-{
-    for (usize index = 0; index < m_Pads.size(); ++index) {
-        if (m_Pads[index].Id != id)
-            continue;
-        if (m_Pads[index].Pad != nullptr)
-            SDL_CloseGamepad(m_Pads[index].Pad);
-        m_Pads.erase(m_Pads.begin() + static_cast<std::ptrdiff_t>(index));
-        return;
-    }
-}
-
-void AscensionApp::OpenPads()
-{
-    SDL_InitSubSystem(SDL_INIT_GAMEPAD);
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    if (ids == nullptr)
-        return;
-    for (int index = 0; index < count; ++index)
-        OpenPad(ids[index]);
-    SDL_free(ids);
-}
-
 void AscensionApp::FillTalkFacts(TalkList lists[2], TalkFacts& facts) const
 {
     lists[0].Name = "found";
@@ -1093,9 +1035,9 @@ void AscensionApp::RunTalkAction(std::string_view action)
     }
 }
 
-void AscensionApp::HandleTalk(SDL_Scancode scancode)
+void AscensionApp::HandleTalk(std::string_view action)
 {
-    if (scancode == SDL_SCANCODE_I) {
+    if (action == kInteract || action == kCancel) {
         m_Talk = false;
         return;
     }
@@ -1115,23 +1057,22 @@ void AscensionApp::HandleTalk(SDL_Scancode scancode)
     if (m_TalkRow < 0)
         m_TalkRow = 0;
 
-    const TalkCommand command = TalkCommandFromKey(scancode);
-    if (command == TalkCommand::Up) {
+    if (action == kMoveNorth || action == kCyclePrev) {
         if (m_TalkRow > 0)
             --m_TalkRow;
         return;
     }
-    if (command == TalkCommand::Down) {
+    if (action == kMoveSouth || action == kCycleNext) {
         if (m_TalkRow + 1 < static_cast<i32>(visible.size()))
             ++m_TalkRow;
         return;
     }
 
     i32 pick = -1;
-    const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
+    const int digit = SlotIndex(action);
     if (digit >= 0 && digit < kMaxHotkeys && digit < static_cast<int>(visible.size()))
         pick = digit;
-    else if (command == TalkCommand::Confirm)
+    else if (action == kConfirm)
         pick = visible.empty() ? -1 : m_TalkRow;
     else
         return;
@@ -1285,9 +1226,11 @@ void AscensionApp::OnStart()
         return;
     if (m_Hero.IsReady() && m_Inventory.IsReady() && !m_Vitals.Known)
         FillVitals(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
-    OpenPads();
     EnsureIcons();
-    BindMapActions();
+    if (!BindControls()) {
+        Quit();
+        return;
+    }
     // --enemy is the fight screen, including N to the next list row. Anything else
     // walks. No --map means the hub, and the per-user save when this command did
     // not build a hero.
@@ -1312,287 +1255,516 @@ void AscensionApp::OnStart()
     BeginFight();
 }
 
-void AscensionApp::OnEvent(const SDL_Event& event)
+bool AscensionApp::BindControls()
 {
-    if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
-        OpenPad(event.gdevice.which);
-        return;
+    std::string error;
+    if (ApplyControls(GetInput(), m_Data.GetControls(), error))
+        return true;
+    m_StartError = error;
+    std::fprintf(stderr, "%s\n", error.c_str());
+    Note(error);
+    return false;
+}
+
+bool AscensionApp::Pressed(std::string_view action)
+{
+    return GetInput().WasActionPressed(action);
+}
+
+bool AscensionApp::NavStep(NavHold& hold, std::string_view action, f32 dt)
+{
+    Emerald::Input& input = GetInput();
+    const ControlRules& rules = m_Data.GetControls();
+    if (!input.IsActionDown(action)) {
+        hold.Elapsed = 0.0f;
+        hold.Repeating = false;
+        return false;
     }
-    if (event.type == SDL_EVENT_GAMEPAD_REMOVED) {
-        ClosePad(event.gdevice.which);
-        return;
+    if (input.WasActionPressed(action)) {
+        hold.Elapsed = 0.0f;
+        hold.Repeating = false;
+        return true;
     }
-    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-        if (!m_Talk)
+    hold.Elapsed += dt;
+    const f32 initial = static_cast<f32>(rules.NavInitialMilliseconds) / 1000.0f;
+    const f32 every = static_cast<f32>(rules.NavRepeatMilliseconds) / 1000.0f;
+    if (!hold.Repeating) {
+        if (hold.Elapsed < initial)
+            return false;
+        hold.Repeating = true;
+        hold.Elapsed = 0.0f;
+        return true;
+    }
+    if (hold.Elapsed < every)
+        return false;
+    hold.Elapsed = 0.0f;
+    return true;
+}
+
+bool AscensionApp::Choosing() const
+{
+    const bool pickingClass = m_Hero.ChoosingStarter();
+    const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
+    const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
+    return pickingClass || spending || choosingPath ||
+           (m_Hero.PickPending() && !pickingClass && !spending);
+}
+
+bool AscensionApp::CursorActive() const
+{
+    if (m_Paused || !m_Data.IsLoaded())
+        return false;
+    if (m_Talk || m_Camp || m_Picking)
+        return true;
+    if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+        return true;
+    return Choosing();
+}
+
+int AscensionApp::ChoiceCount() const
+{
+    const bool pickingClass = m_Hero.ChoosingStarter();
+    const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
+    const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
+    const bool pickingSkill =
+        m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+    if (pickingClass) {
+        const int starters = static_cast<int>(m_Hero.StarterIds().size());
+        return starters < kMaxHotkeys ? starters : kMaxHotkeys;
+    }
+    if (spending) {
+        int count = static_cast<int>(m_Data.GetStats().size());
+        if (count > kMaxHotkeys)
+            count = kMaxHotkeys;
+        if (m_Hero.ChoicePending() && count < kMaxHotkeys)
+            ++count;
+        return count;
+    }
+    if (pickingSkill) {
+        const int options = static_cast<int>(m_Hero.PickOptions().size());
+        return options < kMaxHotkeys ? options : kMaxHotkeys;
+    }
+    if (choosingPath) {
+        const int choices = static_cast<int>(m_Hero.ChoiceIds().size());
+        int count = choices < kMaxHotkeys ? choices : kMaxHotkeys;
+        if (m_Hero.ChoiceIds().size() < static_cast<usize>(kMaxHotkeys))
+            ++count;
+        return count;
+    }
+    return 0;
+}
+
+int AscensionApp::CommandCount() const
+{
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
+        return 0;
+    int skills = static_cast<int>(m_Battle->PlayerSkillIds().size());
+    if (skills > kMaxHotkeys)
+        skills = kMaxHotkeys;
+    int count = skills + 1;
+    if (!m_Inventory.ConsumableSlots().empty())
+        ++count;
+    if (m_MapFight.Active && m_MapFight.AllowFlee)
+        ++count;
+    return count;
+}
+
+std::string AscensionApp::ActionLabel(std::string_view action)
+{
+    Emerald::Input& input = GetInput();
+    const Emerald::Gamepads& pads = input.GetGamepads();
+    const std::span<const Emerald::GamepadButton> buttons = input.GetActionButtons(action);
+    if (pads.GetCount() > 0 && !buttons.empty()) {
+        const char* label = pads.GetButtonLabel(buttons.front());
+        if (label != nullptr && label[0] != '\0')
+            return label;
+    }
+    const std::span<const Emerald::Key> keys = input.GetActionKeys(action);
+    if (!keys.empty())
+        return Emerald::GetKeyLabel(keys.front());
+    return {};
+}
+
+std::string AscensionApp::CloseLabel()
+{
+    if (GetInput().GetGamepads().GetCount() > 0)
+        return ActionLabel(kCancel);
+    return ActionLabel(kInteract);
+}
+
+std::string_view AscensionApp::CloseAction() const
+{
+    const PromptRules& rules = m_Data.GetPrompts();
+    if (m_PromptFamily.empty() || m_PromptFamily == rules.TextFamily)
+        return kInteract;
+    return kCancel;
+}
+
+void AscensionApp::NotePromptDevice()
+{
+    const PromptRules& rules = m_Data.GetPrompts();
+    if (m_PromptFamily.empty())
+        m_PromptFamily = rules.TextFamily;
+    Emerald::Input& input = GetInput();
+    if (input.GetKeyboard().GetPressedKey().has_value())
+        m_PromptFamily = rules.TextFamily;
+    const Emerald::Gamepads& pads = input.GetGamepads();
+    if (pads.GetPressedButton().has_value())
+        m_PromptFamily = PromptFamilyForType(rules, Emerald::GetGamepadTypeName(pads.GetLastUsedType()));
+}
+
+void AscensionApp::EnsurePromptSheets()
+{
+    const PromptRules& rules = m_Data.GetPrompts();
+    if (m_PromptSheets.size() == rules.Sheets.size() && !m_PromptSheets.empty())
+        return;
+    m_PromptSheets.clear();
+    Emerald::TextureOptions options;
+    options.Filter = Emerald::TextureFilter::Nearest;
+    for (const PromptSheet& sheet : rules.Sheets) {
+        PromptPicture picture;
+        picture.Family = sheet.Family;
+        picture.Texture = GetAssets().Load<Emerald::Texture>(sheet.Image, options);
+        m_PromptSheets.push_back(std::move(picture));
+    }
+}
+
+void AscensionApp::DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 maxX,
+                             std::span<const HintChip> hints, bool helpLine)
+{
+    if ((helpLine && !m_ShowHelp) || hints.empty() || !m_Data.IsLoaded())
+        return;
+    EnsurePromptSheets();
+    const PromptRules& rules = m_Data.GetPrompts();
+    const PromptMetrics metrics = MeasurePrompts(rules);
+    const std::string family = m_PromptFamily.empty() ? rules.TextFamily : m_PromptFamily;
+    const PromptSheet* sheet = FindPromptSheet(rules, family);
+    const Emerald::Texture* texture = nullptr;
+    for (const PromptPicture& picture : m_PromptSheets) {
+        if (picture.Family != family || !picture.Texture)
+            continue;
+        const std::optional<Emerald::AssetInfo> info = GetAssets().GetInfo(picture.Texture.GetId());
+        if (info.has_value() && !info->Placeholder)
+            texture = &picture.Texture.Get();
+    }
+    f32 pen = x;
+    bool first = true;
+    for (const HintChip& hint : hints) {
+        const PromptMark mark =
+            hint.Action.empty() ? PromptMark{} : ResolvePrompt(GetInput(), rules, hint.Action, family);
+        const PromptTile* tile = nullptr;
+        if (mark.Icon && sheet != nullptr && texture != nullptr)
+            tile = FindPromptTile(*sheet, mark.Tile);
+        const bool icon = tile != nullptr;
+        const std::string label = icon ? std::string{} : Upper(mark.Label);
+        const std::string word = Upper(hint.Word);
+        f32 chip = 0.0f;
+        if (icon)
+            chip = metrics.Icon;
+        else if (!label.empty())
+            chip = Emerald::MeasureDebugText(label, metrics.TextScale).x;
+        f32 wordWidth = 0.0f;
+        if (!word.empty())
+            wordWidth = Emerald::MeasureDebugText(word, metrics.TextScale).x;
+        if (chip == 0.0f && wordWidth == 0.0f)
+            continue;
+        const f32 lead = first ? 0.0f : metrics.GroupGap;
+        const f32 mid = (chip > 0.0f && wordWidth > 0.0f) ? metrics.Gap : 0.0f;
+        if (!first && pen + lead > maxX)
             return;
-        const TalkCommand command =
-            TalkCommandFromPad(static_cast<SDL_GamepadButton>(event.gbutton.button));
-        SDL_Scancode key = SDL_SCANCODE_UNKNOWN;
-        if (command == TalkCommand::Up)
-            key = SDL_SCANCODE_UP;
-        else if (command == TalkCommand::Down)
-            key = SDL_SCANCODE_DOWN;
-        else if (command == TalkCommand::Confirm)
-            key = SDL_SCANCODE_E;
-        else
+        pen += lead;
+        first = false;
+        const f32 textY = y + metrics.TextOffset;
+        if (icon) {
+            Emerald::Sprite sprite;
+            sprite.Source = texture;
+            sprite.Region.Position = {static_cast<f32>(tile->X), static_cast<f32>(tile->Y)};
+            sprite.Region.Size = {static_cast<f32>(tile->Width), static_cast<f32>(tile->Height)};
+            Emerald::SpriteOptions options;
+            options.Size = {metrics.Icon, metrics.Icon};
+            options.Origin = {0.0f, 0.0f};
+            options.PixelSnap = true;
+            renderer.DrawSprite(sprite, {pen, y}, options);
+            pen += metrics.Icon;
+        } else if (!label.empty()) {
+            Emerald::DrawDebugText(renderer, {pen, textY}, label, kDim, metrics.TextScale);
+            pen += Emerald::MeasureDebugText(label, metrics.TextScale).x;
+        }
+        if (wordWidth > 0.0f) {
+            pen += mid;
+            Emerald::DrawDebugText(renderer, {pen, textY}, word, kDim, metrics.TextScale);
+            pen += wordWidth;
+        }
+    }
+}
+
+void AscensionApp::FinishFrame(Emerald::Renderer2D& renderer, f32 width)
+{
+    if (m_Paused) {
+        Emerald::DrawDebugText(renderer, {width * 0.5f - 42.0f, 16.0f}, "PAUSED", kFrame, 2);
+    }
+    renderer.End();
+}
+
+void AscensionApp::InspectTile()
+{
+    if (!m_Walker.Placed())
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const MapTile tile = m_Walker.Place().Tile;
+    for (const MapPoint& point : map->Points) {
+        if (point.Tile.X != tile.X || point.Tile.Y != tile.Y)
+            continue;
+        if (point.Kind == MapPointKind::Talk) {
+            Note("Someone here will talk.");
             return;
-        SDL_Event keyEvent;
-        SDL_zero(keyEvent);
-        keyEvent.type = SDL_EVENT_KEY_DOWN;
-        keyEvent.key.scancode = key;
-        keyEvent.key.down = true;
-        keyEvent.key.repeat = false;
-        OnEvent(keyEvent);
-        return;
+        }
+        if (point.Kind == MapPointKind::Shop) {
+            Note(m_Data.GetShop().Name + ".");
+            return;
+        }
+        if (point.Kind == MapPointKind::Rest) {
+            Note("A place to rest.");
+            return;
+        }
     }
-    if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat)
-        return;
-    if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
-        WriteSave();
-        Quit();
-        return;
+    for (const SpawnPlace& place : m_Places) {
+        if (place.Tile.X == tile.X && place.Tile.Y == tile.Y) {
+            Note("A foe holds this tile.");
+            return;
+        }
     }
+    Note("Nothing here.");
+}
+
+void AscensionApp::InspectFoe()
+{
+    if (m_Battle == nullptr)
+        return;
+    const std::span<const CombatantState> foes = m_Battle->Enemies();
+    const i32 index = m_Battle->TargetIndex();
+    if (index < 0 || index >= static_cast<i32>(foes.size()))
+        return;
+    const CombatantState& foe = foes[static_cast<usize>(index)];
+    std::string line = foe.Name + "  " + std::to_string(foe.Hp) + "/" + std::to_string(foe.MaxHp);
+    for (const StatusInstance& status : foe.Statuses) {
+        const StatusDef* def = m_Data.FindStatus(status.Id);
+        line += "  ";
+        line += def != nullptr ? def->Name : status.Id;
+    }
+    Note(line);
+}
+
+void AscensionApp::PollActions(f32 dt)
+{
     if (!m_Data.IsLoaded())
         return;
-    ScriptedPressQuery window;
-    window.ScriptRunning = m_KeyCursor < m_Play.Keys.size();
-    window.FromScript = m_ApplyingScript;
-    if (DecideScriptedPress(window) == ScriptedPress::IgnoreWindow)
-        return;
-    if (event.key.scancode == SDL_SCANCODE_F5) {
-        if (WriteSave())
-            Note("Saved.");
-        return;
-    }
-    if (m_OnMap && !SpawnFightOpen()) {
-        if (m_Talk) {
-            HandleTalk(event.key.scancode);
-            return;
-        }
-        if (m_Camp) {
-            if (event.key.scancode == SDL_SCANCODE_I) {
-                m_Camp = false;
-                return;
-            }
-            HandleCamp(event.key.scancode);
-            return;
-        }
-        if (event.key.scancode == SDL_SCANCODE_I) {
-            if (!UseMapPoint())
-                Note("Nothing here.");
-            return;
-        }
-        // A real key already reached Emerald's keyboard. Only a scripted press,
-        // which is injected here and nowhere else, has to be recorded.
-        if (m_ApplyingScript)
-            m_ScriptDir = DirectionOfKey(event.key.scancode);
+    NotePromptDevice();
+    if (m_Paused) {
+        if (Pressed(kQuit))
+            HandleAction(kQuit);
+        if (Pressed(kSave))
+            HandleAction(kSave);
+        if (Pressed(kHelp))
+            HandleAction(kHelp);
+        if (Pressed(kPause))
+            HandleAction(kPause);
+        if (Pressed(kCancel))
+            HandleAction(kCancel);
         return;
     }
-    if (m_OnMap && m_MapFight.Active) {
-        if (event.key.scancode == SDL_SCANCODE_R) {
-            if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
-                BeginSpawnFight();
-            else if (const char* block = m_Hero.NextFightBlock())
-                Note(block);
+    if (Pressed(kQuit)) {
+        HandleAction(kQuit);
+        return;
+    }
+    if (Pressed(kPause)) {
+        HandleAction(kPause);
+        if (m_Paused)
             return;
+    }
+    if (Pressed(kSave))
+        HandleAction(kSave);
+    if (Pressed(kHelp))
+        HandleAction(kHelp);
+
+    if (!CursorActive()) {
+        for (NavHold& hold : m_Nav) {
+            hold.Elapsed = 0.0f;
+            hold.Repeating = false;
         }
-        if (event.key.scancode == SDL_SCANCODE_N) {
-            Note("The next fight is on the map.");
-            return;
-        }
-        if (event.key.scancode == SDL_SCANCODE_I) {
-            if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
-                Note("Finish the fight.");
-            return;
+    } else {
+        const std::string_view nav[] = {kMoveNorth, kMoveSouth, kMoveWest, kMoveEast, kCyclePrev,
+                                        kCycleNext};
+        for (int index = 0; index < 6; ++index) {
+            if (NavStep(m_Nav[index], nav[index], dt))
+                HandleAction(nav[index]);
         }
     }
+
+    const std::string_view shots[] = {kConfirm, kCancel,  kMenu,   kContext, kInteract, kWait,
+                                      kFlee,    kUnequip, kRetry,  kNext,    kSlot1,    kSlot2,
+                                      kSlot3,   kSlot4,   kSlot5,  kSlot6,   kSlot7,    kSlot8};
+    for (const std::string_view action : shots) {
+        if (Pressed(action))
+            HandleAction(action);
+    }
+}
+
+void AscensionApp::HandleOverland(std::string_view action)
+{
     if (m_Talk) {
-        HandleTalk(event.key.scancode);
+        HandleTalk(action);
         return;
     }
-    if (event.key.scancode == SDL_SCANCODE_R) {
-        BeginFight();
-        return;
-    }
-    if (event.key.scancode == SDL_SCANCODE_N) {
-        if (!NextFightAllowed(FightStandingOf(m_Battle.get()))) {
-            Note("Finish the fight.");
-            return;
-        }
-        m_DirectEnemy.clear();
-        const i32 count = static_cast<i32>(m_Data.GetEncounters().size());
-        m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
-        BeginFight();
-        return;
-    }
-    if (event.key.scancode == SDL_SCANCODE_I) {
-        if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
-            Note("Finish the fight. " + KeeperWord(m_Data.GetShop()) + " waits between battles.");
-            return;
-        }
-        if (m_Camp) {
+    if (m_Camp) {
+        if (action == kInteract || action == kCancel || action == kMenu) {
             m_Camp = false;
             return;
         }
-        if (OpenTalk(m_Data.GetShop().Dialogue))
-            return;
+        HandleCamp(action);
+        return;
+    }
+    if (action == kInteract || action == kConfirm) {
+        if (!UseMapPoint() && action == kInteract)
+            Note("Nothing here.");
+        return;
+    }
+    if (action == kMenu) {
         m_Camp = true;
         m_CampColumn = 0;
         m_CampRow = 0;
         m_Picking = false;
         return;
     }
-    if (m_Camp) {
-        HandleCamp(event.key.scancode);
+    if (action == kContext) {
+        InspectTile();
         return;
     }
-    if (!m_StartError.empty())
-        return;
+    if (m_ApplyingScript)
+        m_ScriptDir = DirectionOfAction(action);
+}
 
-    if (m_Battle != nullptr && m_Picking) {
-        if (m_Battle->Result() != BattleResult::Ongoing ||
-            m_Battle->Actor() != CombatantSide::Player)
-            m_Picking = false;
-        else {
-            HandlePicker(event.key.scancode);
+void AscensionApp::ChooseHotkey(int digit)
+{
+    const bool pickingClass = m_Hero.ChoosingStarter();
+    const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
+    const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
+    const bool pickingSkill =
+        m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+    if (!pickingClass && !spending && !choosingPath && !pickingSkill)
+        return;
+    if (digit < 0 || digit >= kMaxHotkeys)
+        return;
+    std::string why;
+    if (pickingClass) {
+        const std::vector<std::string> starters = m_Hero.StarterIds();
+        if (digit >= static_cast<int>(starters.size()))
+            return;
+        if (!m_Hero.ChooseStarter(starters[static_cast<usize>(digit)], why)) {
+            Note(why);
             return;
         }
+        const ClassDef* starter = m_Data.FindClass(m_Hero.ClassId());
+        Note(std::string(starter != nullptr ? starter->Name : m_Hero.ClassId()) +
+             ". Spend the class points.");
+        m_ChoiceRow = 0;
+        return;
     }
-
-    const int digit = static_cast<int>(event.key.scancode) - static_cast<int>(SDL_SCANCODE_1);
-    // A resumed victory has no battle. The path, the skill pick, and a build reset still use
-    // the number keys, the same as a fight whose result is already decided.
-    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing) {
-        const bool pickingClass = m_Hero.ChoosingStarter();
-        const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
-        const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
-        const bool pickingSkill =
-            m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
-        if (!pickingClass && !spending && !choosingPath && !pickingSkill)
-            return;
-        if (digit < 0 || digit >= kMaxHotkeys)
-            return;
-        std::string why;
-        if (pickingClass) {
-            const std::vector<std::string> starters = m_Hero.StarterIds();
-            if (digit >= static_cast<int>(starters.size()))
-                return;
-            if (!m_Hero.ChooseStarter(starters[static_cast<usize>(digit)], why)) {
+    if (spending) {
+        const std::span<const StatDef> stats = m_Data.GetStats();
+        if (digit >= 0 && static_cast<usize>(digit) < stats.size()) {
+            const StatDef& stat = stats[static_cast<usize>(digit)];
+            if (!m_Hero.SpendClassPoint(stat.Id, why)) {
                 Note(why);
                 return;
             }
-            const ClassDef* starter = m_Data.FindClass(m_Hero.ClassId());
-            Note(std::string(starter != nullptr ? starter->Name : m_Hero.ClassId()) +
-                 ". Spend the class points.");
+            Note(stat.Name + " +1. " + std::to_string(m_Hero.ClassPool()) + " class points left.");
             return;
         }
-        if (spending) {
-            const std::span<const StatDef> stats = m_Data.GetStats();
-            if (digit >= 0 && static_cast<usize>(digit) < stats.size()) {
-                const StatDef& stat = stats[static_cast<usize>(digit)];
-                if (!m_Hero.SpendClassPoint(stat.Id, why)) {
-                    Note(why);
-                    return;
-                }
-                Note(stat.Name + " +1. " + std::to_string(m_Hero.ClassPool()) +
-                     " class points left.");
-                return;
-            }
-            if (digit == static_cast<int>(stats.size()) && m_Hero.ChoicePending()) {
-                if (!m_Hero.ResetBuild(why)) {
-                    Note(why);
-                    return;
-                }
-                Note("Build reset. Skill ranks cleared. Pick a starter class.");
-                PushRanks();
-            }
-            return;
-        }
-        if (pickingSkill) {
-            const std::vector<std::string> options = m_Hero.PickOptions();
-            if (digit >= static_cast<int>(options.size()))
-                return;
-            const std::string& optionId = options[static_cast<usize>(digit)];
-            if (!m_Hero.Pick(optionId, why)) {
-                Note(why);
-                return;
-            }
-            Note(SkillName(m_Data, optionId) + " chosen.");
-            PushRanks();
-            return;
-        }
-        const std::vector<std::string> choices = m_Hero.ChoiceIds();
-        if (digit == static_cast<int>(choices.size())) {
+        if (digit == static_cast<int>(stats.size()) && m_Hero.ChoicePending()) {
             if (!m_Hero.ResetBuild(why)) {
                 Note(why);
                 return;
             }
             Note("Build reset. Skill ranks cleared. Pick a starter class.");
             PushRanks();
-            return;
+            m_ChoiceRow = 0;
         }
-        if (digit >= static_cast<int>(choices.size()))
+        return;
+    }
+    if (pickingSkill) {
+        const std::vector<std::string> options = m_Hero.PickOptions();
+        if (digit >= static_cast<int>(options.size()))
             return;
-        if (!m_Hero.Choose(choices[static_cast<usize>(digit)], why)) {
+        const std::string& optionId = options[static_cast<usize>(digit)];
+        if (!m_Hero.Pick(optionId, why)) {
             Note(why);
             return;
         }
-        const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
-        Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
+        Note(SkillName(m_Data, optionId) + " chosen.");
         PushRanks();
+        m_ChoiceRow = 0;
         return;
     }
-
-    if (event.key.scancode == SDL_SCANCODE_LEFT || event.key.scancode == SDL_SCANCODE_RIGHT) {
-        if (m_Battle->Actor() != CombatantSide::Player) {
-            Note("Wait for your turn.");
+    const std::vector<std::string> choices = m_Hero.ChoiceIds();
+    if (digit == static_cast<int>(choices.size())) {
+        if (!m_Hero.ResetBuild(why)) {
+            Note(why);
             return;
         }
-        const i32 markedBefore = m_Battle->TargetIndex();
-        m_Battle->CycleTarget(event.key.scancode == SDL_SCANCODE_RIGHT ? 1 : -1);
-        NoteMarked(markedBefore);
+        Note("Build reset. Skill ranks cleared. Pick a starter class.");
+        PushRanks();
+        m_ChoiceRow = 0;
         return;
     }
-
-    if (event.key.scancode == kItemKey) {
-        if (m_Battle->Actor() != CombatantSide::Player) {
-            Note("Wait for your turn.");
-            return;
-        }
-        if (m_Inventory.ConsumableSlots().empty()) {
-            Note("The bag has no drinks.");
-            return;
-        }
-        m_Picking = true;
-        m_PickRow = 0;
+    if (digit >= static_cast<int>(choices.size()))
+        return;
+    if (!m_Hero.Choose(choices[static_cast<usize>(digit)], why)) {
+        Note(why);
         return;
     }
+    const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
+    Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
+    PushRanks();
+    m_ChoiceRow = 0;
+}
 
-    if (event.key.scancode == SDL_SCANCODE_SPACE) {
-        const i32 markedBefore = m_Battle->TargetIndex();
-        const ActionResult waited = m_Battle->Wait();
-        Note(waited);
-        NoteMarked(markedBefore);
-        FinishAction(waited, true);
-        ResolveFoe();
+void AscensionApp::HandleChoice(std::string_view action)
+{
+    const int count = ChoiceCount();
+    if (count <= 0)
+        return;
+    if (m_ChoiceRow >= count)
+        m_ChoiceRow = count - 1;
+    if (m_ChoiceRow < 0)
+        m_ChoiceRow = 0;
+    if (action == kMoveNorth || action == kCyclePrev) {
+        if (m_ChoiceRow > 0)
+            --m_ChoiceRow;
         return;
     }
-
-    if (m_MapFight.Active && event.key.scancode == kFleeKey) {
-        if (m_Battle->Actor() != CombatantSide::Player) {
-            Note("Wait for your turn.");
-            return;
-        }
-        const ActionResult fled = m_Battle->Flee();
-        Note(fled);
-        FinishAction(fled, false);
-        ResolveFoe();
+    if (action == kMoveSouth || action == kCycleNext) {
+        if (m_ChoiceRow + 1 < count)
+            ++m_ChoiceRow;
         return;
     }
+    int digit = SlotIndex(action);
+    if (action == kConfirm)
+        digit = m_ChoiceRow;
+    if (digit < 0)
+        return;
+    ChooseHotkey(digit);
+}
 
-    const auto skills = m_Battle->PlayerSkillIds();
+void AscensionApp::UseHotkey(int digit)
+{
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
+        return;
     if (digit < 0 || digit >= kMaxHotkeys)
         return;
+    const auto skills = m_Battle->PlayerSkillIds();
     if (digit < static_cast<int>(skills.size())) {
         const std::string& skillId = skills[static_cast<usize>(digit)];
         PushRanks(skillId);
@@ -1613,63 +1785,276 @@ void AscensionApp::OnEvent(const SDL_Event& event)
     DrinkAt(drinks[static_cast<usize>(drink)]);
 }
 
-bool AscensionApp::TakeAutoPath()
+void AscensionApp::UseCommand(int row)
 {
-    if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
-        return true;
-    std::string why;
-    const EvolutionPick pick = PickEvolution(m_Hero, m_Play.ChooseId, why);
-    if (pick == EvolutionPick::Failed) {
-        Note(why);
-        std::fprintf(stderr, "%s\n", why.c_str());
-        if (m_Battle == nullptr)
-            m_StartError = std::move(why);
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
+        return;
+    if (m_Battle->Actor() != CombatantSide::Player) {
+        Note("Wait for your turn.");
+        return;
+    }
+    int skills = static_cast<int>(m_Battle->PlayerSkillIds().size());
+    if (skills > kMaxHotkeys)
+        skills = kMaxHotkeys;
+    if (row < 0)
+        return;
+    if (row < skills) {
+        UseHotkey(row);
+        return;
+    }
+    int cursor = skills;
+    if (row == cursor) {
+        const i32 markedBefore = m_Battle->TargetIndex();
+        const ActionResult waited = m_Battle->Wait();
+        Note(waited);
+        NoteMarked(markedBefore);
+        FinishAction(waited, true);
+        ResolveFoe();
+        return;
+    }
+    ++cursor;
+    if (!m_Inventory.ConsumableSlots().empty()) {
+        if (row == cursor) {
+            m_Picking = true;
+            m_PickRow = 0;
+            return;
+        }
+        ++cursor;
+    }
+    if (m_MapFight.Active && m_MapFight.AllowFlee && row == cursor) {
+        const ActionResult fled = m_Battle->Flee();
+        Note(fled);
+        FinishAction(fled, false);
+        ResolveFoe();
+    }
+}
+
+void AscensionApp::HandleBattle(std::string_view action)
+{
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
+        return;
+    const bool vertical = action == kMoveNorth || action == kMoveSouth;
+    const bool horizontal = action == kMoveWest || action == kMoveEast || action == kCyclePrev ||
+                            action == kCycleNext;
+    if (vertical) {
+        const int count = CommandCount();
+        if (count <= 0)
+            return;
+        if (m_CommandRow >= count)
+            m_CommandRow = count - 1;
+        if (m_CommandRow < 0)
+            m_CommandRow = 0;
+        if (action == kMoveNorth) {
+            if (m_CommandRow > 0)
+                --m_CommandRow;
+        } else if (m_CommandRow + 1 < count) {
+            ++m_CommandRow;
+        }
+        return;
+    }
+    if (horizontal) {
+        if (m_Battle->Actor() != CombatantSide::Player) {
+            Note("Wait for your turn.");
+            return;
+        }
+        const int step = (action == kMoveEast || action == kCycleNext) ? 1 : -1;
+        const i32 markedBefore = m_Battle->TargetIndex();
+        m_Battle->CycleTarget(step);
+        NoteMarked(markedBefore);
+        return;
+    }
+    if (action == kContext) {
+        InspectFoe();
+        return;
+    }
+    if (action == kWait) {
+        const i32 markedBefore = m_Battle->TargetIndex();
+        const ActionResult waited = m_Battle->Wait();
+        Note(waited);
+        NoteMarked(markedBefore);
+        FinishAction(waited, true);
+        ResolveFoe();
+        return;
+    }
+    if (action == kFlee) {
+        if (!m_MapFight.Active)
+            return;
+        if (m_Battle->Actor() != CombatantSide::Player) {
+            Note("Wait for your turn.");
+            return;
+        }
+        const ActionResult fled = m_Battle->Flee();
+        Note(fled);
+        FinishAction(fled, false);
+        ResolveFoe();
+        return;
+    }
+    if (action == kConfirm) {
+        UseCommand(m_CommandRow);
+        return;
+    }
+    const int digit = SlotIndex(action);
+    if (digit >= 0)
+        UseHotkey(digit);
+}
+
+void AscensionApp::HandleAction(std::string_view action)
+{
+    if (action == kQuit) {
+        WriteSave();
         Quit();
-        return false;
+        return;
     }
-    if (pick == EvolutionPick::Chosen) {
-        const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
-        Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
-        PushRanks();
+    if (!m_Data.IsLoaded())
+        return;
+    if (action == kSave) {
+        if (WriteSave())
+            Note("Saved.");
+        return;
     }
-    while (m_PickCursor < m_Play.PickIds.size() && m_Hero.PickPending()) {
-        const std::string& id = m_Play.PickIds[m_PickCursor];
-        const SkillOptionPick kept = PickSkillOption(m_Hero, id, why);
-        if (kept == SkillOptionPick::Failed) {
-            Note(why);
-            std::fprintf(stderr, "%s\n", why.c_str());
-            if (m_Battle == nullptr)
-                m_StartError = std::move(why);
-            Quit();
-            return false;
+    if (action == kHelp) {
+        m_ShowHelp = !m_ShowHelp;
+        return;
+    }
+    if (action == kPause) {
+        m_Paused = !m_Paused;
+        Note(m_Paused ? "Paused." : "Resumed.");
+        return;
+    }
+    if (m_Paused) {
+        if (action == kCancel) {
+            m_Paused = false;
+            Note("Resumed.");
         }
-        if (kept != SkillOptionPick::Chosen)
-            break;
-        ++m_PickCursor;
-        Note(SkillName(m_Data, id) + " chosen.");
-        PushRanks();
+        return;
     }
-    return true;
+    ScriptedPressQuery window;
+    window.ScriptRunning = m_KeyCursor < m_Play.Keys.size();
+    window.FromScript = m_ApplyingScript;
+    if (DecideScriptedPress(window) == ScriptedPress::IgnoreWindow)
+        return;
+
+    if (m_OnMap && !SpawnFightOpen()) {
+        HandleOverland(action);
+        return;
+    }
+    if (m_OnMap && m_MapFight.Active) {
+        if (action == kRetry) {
+            if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+                BeginSpawnFight();
+            else if (const char* block = m_Hero.NextFightBlock())
+                Note(block);
+            return;
+        }
+        if (action == kNext) {
+            Note("The next fight is on the map.");
+            return;
+        }
+        if (action == kInteract) {
+            if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+                Note("Finish the fight.");
+            return;
+        }
+    }
+    if (m_Talk) {
+        HandleTalk(action);
+        return;
+    }
+    if (action == kRetry) {
+        BeginFight();
+        return;
+    }
+    if (action == kNext) {
+        if (!NextFightAllowed(FightStandingOf(m_Battle.get()))) {
+            Note("Finish the fight.");
+            return;
+        }
+        m_DirectEnemy.clear();
+        const i32 count = static_cast<i32>(m_Data.GetEncounters().size());
+        m_EnemyIndex = m_Hero.IndexAfterNextFoe(m_EnemyIndex, count);
+        BeginFight();
+        return;
+    }
+    if (action == kInteract) {
+        if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
+            Note("Finish the fight. " + KeeperWord(m_Data.GetShop()) + " waits between battles.");
+            return;
+        }
+        if (m_Camp) {
+            m_Camp = false;
+            return;
+        }
+        if (OpenTalk(m_Data.GetShop().Dialogue))
+            return;
+        m_Camp = true;
+        m_CampColumn = 0;
+        m_CampRow = 0;
+        m_Picking = false;
+        return;
+    }
+    if (action == kMenu) {
+        const bool ongoing = m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing;
+        if (ongoing) {
+            if (m_Battle->Actor() != CombatantSide::Player) {
+                Note("Wait for your turn.");
+                return;
+            }
+            if (m_Picking) {
+                m_Picking = false;
+                return;
+            }
+            if (m_Inventory.ConsumableSlots().empty()) {
+                Note("The bag has no drinks.");
+                return;
+            }
+            m_Picking = true;
+            m_PickRow = 0;
+            return;
+        }
+        if (Choosing() && !m_Camp)
+            return;
+        m_Camp = !m_Camp;
+        if (m_Camp) {
+            m_CampColumn = 0;
+            m_CampRow = 0;
+        }
+        m_Picking = false;
+        m_Talk = false;
+        return;
+    }
+    if (action == kCancel && m_Camp) {
+        m_Camp = false;
+        return;
+    }
+    if (m_Camp) {
+        HandleCamp(action);
+        return;
+    }
+    if (!m_StartError.empty())
+        return;
+
+    if (m_Battle != nullptr && m_Picking) {
+        if (m_Battle->Result() != BattleResult::Ongoing ||
+            m_Battle->Actor() != CombatantSide::Player)
+            m_Picking = false;
+        else {
+            HandlePicker(action);
+            return;
+        }
+    }
+
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing) {
+        HandleChoice(action);
+        return;
+    }
+    HandleBattle(action);
 }
 
-void AscensionApp::BindMapActions()
+WalkDir AscensionApp::DirectionOfAction(std::string_view action) const
 {
-    Emerald::Input& input = GetInput();
-    for (const MoveBinding& move : kMoves) {
-        input.BindAction(move.Action, {move.KeyA, move.KeyB});
-        input.BindAction(move.Action, {move.Pad, move.Stick});
-    }
-}
-
-WalkDir AscensionApp::DirectionOfKey(SDL_Scancode scancode)
-{
-    const auto key = static_cast<Emerald::Key>(static_cast<u16>(scancode));
-    const std::vector<std::string_view> actions = GetInput().FindActionsUsing(key);
-    for (const std::string_view action : actions) {
-        for (const MoveBinding& move : kMoves) {
-            if (action == move.Action)
-                return move.Direction;
-        }
+    for (const MoveAction& move : kMoves) {
+        if (action == move.Action)
+            return move.Direction;
     }
     return WalkDir::None;
 }
@@ -1680,7 +2065,7 @@ WalkInput AscensionApp::ReadMapInput()
     // this function looking at a scancode or a button.
     Emerald::Input& input = GetInput();
     WalkInput held;
-    for (const MoveBinding& move : kMoves) {
+    for (const MoveAction& move : kMoves) {
         if (input.WasActionPressed(move.Action)) {
             WalkInput fresh;
             fresh.Direction = move.Direction;
@@ -1780,25 +2165,20 @@ void AscensionApp::PlayScriptedKey()
     script.FromScript = true;
     script.FightOngoing = ongoing;
     script.PlayerTurn = !ongoing || m_Battle->Actor() == CombatantSide::Player;
-    script.NeedsPlayerTurn = KeyNeedsPlayerTurn(scancode);
+    const Emerald::Key key = static_cast<Emerald::Key>(scancode);
+    script.NeedsPlayerTurn = BoundKeyNeedsPlayerTurn(GetInput(), key);
     if (DecideScriptedPress(script) == ScriptedPress::WaitForTurn) {
         if (m_Play.Trace)
             std::fprintf(stderr, "trace wait foe-turn\n");
         return;
     }
     ++m_KeyCursor;
-    // SDL_Event is a union. Value-initialization only has to clear the first member, so
-    // key.repeat can be leftover stack data. OnEvent drops a press when repeat is set,
-    // and the cursor has already moved, so the script would skip that key. Zero the
-    // whole event. libstdc++ happens to zero it; MSVC does not have to.
-    SDL_Event event;
-    SDL_zero(event);
-    event.type = SDL_EVENT_KEY_DOWN;
-    event.key.scancode = scancode;
-    event.key.down = true;
-    event.key.repeat = false;
+    // The script names scancodes. Emerald's keyboard never sees that event, so the
+    // press is the actions input.json bound to the key.
     m_ApplyingScript = true;
-    OnEvent(event);
+    const std::vector<std::string_view> actions = GetInput().FindActionsUsing(key);
+    for (const std::string_view action : actions)
+        HandleAction(action);
     m_ApplyingScript = false;
     if (m_KeyCursor < m_Play.Keys.size())
         return;
@@ -1815,7 +2195,10 @@ void AscensionApp::OnUpdate(f32 dt)
     MaybeSettle();
     PlayScriptedKey();
     MaybeSettle();
-    if (m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
+    const bool scripting = m_KeyCursor < m_Play.Keys.size();
+    if (!scripting && !m_Paused)
+        PollActions(dt);
+    if (!m_Paused && m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
         StepMap(dt);
     // Frame time is a float, and Windows file stamps are not stable the way this poll
     // expects. A reload between scripted keys rebuilds the fight on a different frame
@@ -1830,6 +2213,9 @@ void AscensionApp::OnUpdate(f32 dt)
     DataError error;
     m_Data.CheckForChanges(&error);
     if (m_Data.GetRevision() == revision)
+        return;
+    m_PromptSheets.clear();
+    if (!BindControls())
         return;
     if (m_OnMap && !SpawnFightOpen()) {
         AdoptMap();
@@ -2107,9 +2493,13 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
         Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(line), kDim, 1, width - 96.0f);
         logY += Emerald::DebugTextLineHeight(1) + 1.0f;
     }
-    Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f},
-                           "R FIGHT    N NEXT    I SHOP    F5 SAVE    ESC QUIT", kDim, 1,
-                           width - 96.0f);
+    std::vector<HintChip> hints;
+    AddHint(hints, kRetry, "FIGHT");
+    AddHint(hints, kNext, "NEXT");
+    AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
+    AddHint(hints, kSave, "SAVE");
+    AddHint(hints, kQuit, "QUIT");
+    DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
 
 void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
@@ -2124,12 +2514,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     if (m_OnMap && !SpawnFightOpen() && m_Data.IsLoaded() && m_StartError.empty()) {
         if (m_Talk && m_Hero.IsReady()) {
             DrawTalk(renderer, width, height);
-            renderer.End();
+            FinishFrame(renderer, width);
             return;
         }
         if (m_Camp && m_Hero.IsReady()) {
             DrawCamp(renderer, width, height);
-            renderer.End();
+            FinishFrame(renderer, width);
             return;
         }
         const PoolCaps caps = m_Hero.IsReady() && m_Inventory.IsReady()
@@ -2139,7 +2529,16 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
                       shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places, &m_Gallery,
                       &m_Glides);
-        renderer.End();
+        if (const char* word = MapInteractWord(m_Data, m_Walker)) {
+            const PromptRules& prompts = m_Data.GetPrompts();
+            const bool text = m_PromptFamily.empty() || m_PromptFamily == prompts.TextFamily;
+            std::vector<HintChip> hints;
+            AddHint(hints, text ? kInteract : kConfirm, word);
+            const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
+            const f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
+            DrawHints(renderer, 16.0f, promptY, width - 16.0f, hints, false);
+        }
+        FinishFrame(renderer, width);
         return;
     }
 
@@ -2153,12 +2552,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 
     if (m_Talk && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
         DrawTalk(renderer, width, height);
-        renderer.End();
+        FinishFrame(renderer, width);
         return;
     }
     if (m_Camp && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
         DrawCamp(renderer, width, height);
-        renderer.End();
+        FinishFrame(renderer, width);
         return;
     }
     if (!m_Data.IsLoaded() || !m_StartError.empty() || (m_Battle == nullptr && !BetweenFights())) {
@@ -2169,13 +2568,13 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             StartupFailureText(m_StartError, m_Data.GetLastError(), m_Hero.NextFightBlock());
         Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 80.0f}, Upper(message), kError,
                                2, leftSize.x - 48.0f);
-        renderer.End();
+        FinishFrame(renderer, width);
         return;
     }
 
     if (BetweenFights()) {
         DrawBetween(renderer, width, height);
-        renderer.End();
+        FinishFrame(renderer, width);
         return;
     }
 
@@ -2259,9 +2658,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             const std::vector<std::string> starters = m_Hero.StarterIds();
             for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
                 const ClassDef* starter = m_Data.FindClass(starters[i]);
-                const std::string name = std::to_string(static_cast<int>(i) + 1) + "  " +
+                const bool marked = static_cast<int>(i) == m_ChoiceRow;
+                const std::string name = std::string(marked ? "> " : "  ") +
+                                         std::to_string(static_cast<int>(i) + 1) + "  " +
                                          (starter != nullptr ? starter->Name : starters[i]);
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name),
+                                       marked ? kFrame : kInk, 2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
                 if (starter != nullptr) {
                     y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
@@ -2281,14 +2683,22 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             y += Emerald::DebugTextLineHeight(2) + 4.0f;
             for (usize index = 0; index < stats.size(); ++index) {
                 const StatDef& stat = stats[index];
-                const std::string line = std::to_string(static_cast<int>(index) + 1) + "  " +
+                const bool marked = static_cast<int>(index) == m_ChoiceRow;
+                const std::string line = std::string(marked ? "> " : "  ") +
+                                         std::to_string(static_cast<int>(index) + 1) + "  " +
                                          Upper(stat.Name) + "  " +
                                          std::to_string(attributes.Get(stat.Id));
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, kInk, 2);
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, marked ? kFrame : kInk,
+                                       2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
             }
-            if (m_Hero.ChoicePending()) {
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "6  RESET BUILD", kDim, 1);
+            if (m_Hero.ChoicePending() && stats.size() < static_cast<usize>(kMaxHotkeys)) {
+                const int resetRow = static_cast<int>(stats.size());
+                const bool marked = m_ChoiceRow == resetRow;
+                const std::string line = std::string(marked ? "> " : "  ") +
+                                         std::to_string(resetRow + 1) + "  RESET BUILD";
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, marked ? kFrame : kDim,
+                                       1);
             }
         } else if (pickingSkill) {
             const std::vector<std::string> options = m_Hero.PickOptions();
@@ -2297,8 +2707,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 const SkillDef* skill =
                     offered != nullptr ? &offered->Resolved : m_Data.FindSkill(options[i]);
                 const std::string name = SkillName(m_Data, options[i]);
-                const std::string line = std::to_string(static_cast<int>(i) + 1) + "  " + name;
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), kInk, 2);
+                const bool marked = static_cast<int>(i) == m_ChoiceRow;
+                const std::string line = std::string(marked ? "> " : "  ") +
+                                         std::to_string(static_cast<int>(i) + 1) + "  " + name;
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line),
+                                       marked ? kFrame : kInk, 2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
                 if (skill != nullptr) {
                     y = Emerald::DrawDebugText(
@@ -2321,9 +2734,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 const ClassDef* evolution = m_Data.FindClass(choices[i]);
                 if (evolution == nullptr)
                     continue;
-                const std::string name =
-                    std::to_string(static_cast<int>(i) + 1) + "  " + evolution->Name;
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name), kInk, 2);
+                const bool marked = static_cast<int>(i) == m_ChoiceRow;
+                const std::string name = std::string(marked ? "> " : "  ") +
+                                         std::to_string(static_cast<int>(i) + 1) + "  " +
+                                         evolution->Name;
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name),
+                                       marked ? kFrame : kInk, 2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
                 y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
                                            Upper(m_Data.Describe(*evolution)), kDim, 1,
@@ -2334,9 +2750,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 y += Emerald::DebugTextLineHeight(1) + 8.0f;
             }
             if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
-                const std::string resetName =
-                    std::to_string(static_cast<int>(choices.size()) + 1) + "  RESET BUILD";
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, resetName, kInk, 2);
+                const bool marked = m_ChoiceRow == static_cast<int>(choices.size());
+                const std::string resetName = std::string(marked ? "> " : "  ") +
+                                              std::to_string(static_cast<int>(choices.size()) + 1) +
+                                              "  RESET BUILD";
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, resetName,
+                                       marked ? kFrame : kInk, 2);
                 y += Emerald::DebugTextLineHeight(2) + 2.0f;
                 Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
                                        "CLEARS SKILL RANKS. CLASS POINTS RETURN TO THE POOL.", kDim,
@@ -2347,7 +2766,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "DRINKS", kFrame, 2);
         y += Emerald::DebugTextLineHeight(2) + 4.0f;
         Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                               "E DRINKS THE MARKED ROW. 1-8 DRINK THAT ROW.", kDim, 1,
+                               "DRINK THE MARKED ROW, OR ITS NUMBER.", kDim, 1,
                                leftSize.x - 56.0f);
         y += Emerald::DebugTextLineHeight(1) + 6.0f;
         const std::vector<i32> picked = m_Inventory.ConsumableSlots();
@@ -2388,8 +2807,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             const SkillDef& skill = grant.Skill;
             ++shownSkills;
             const bool ready = playerTurn && player.Focus >= skill.FocusCost;
-            const Emerald::Vec4 color = fightOver || ready ? kInk : kDim;
-            std::string line = std::to_string(static_cast<int>(shown) + 1) + "  " + skill.Name;
+            const bool cursor = !fightOver && !m_Picking;
+            const bool marked = cursor && static_cast<i32>(shown) == m_CommandRow;
+            const Emerald::Vec4 color = marked ? kFrame : (fightOver || ready ? kInk : kDim);
+            std::string line = cursor ? (marked ? "> " : "  ") : "";
+            line += std::to_string(static_cast<int>(shown) + 1) + "  " + skill.Name;
             line += " (" + std::to_string(m_Hero.RankOf(skill.Id)) + ")   ";
             line += std::to_string(skill.FocusCost) + " focus";
             line += SourceTag(m_Data, grant);
@@ -2418,8 +2840,26 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             y += Emerald::DebugTextLineHeight(2) + 4.0f;
         }
         if (shownDrinks < static_cast<int>(drinks.size())) {
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "C  EVERY DRINK", kFrame, 1);
+            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "EVERY DRINK IS ON THE LIST",
+                                   kFrame, 1);
             y += Emerald::DebugTextLineHeight(1) + 2.0f;
+        }
+        if (!fightOver && !m_Picking) {
+            int row = shownSkills;
+            const char* commands[3];
+            int commandCount = 0;
+            commands[commandCount++] = "WAIT";
+            if (!drinks.empty())
+                commands[commandCount++] = "ITEMS";
+            if (m_MapFight.Active && m_MapFight.AllowFlee)
+                commands[commandCount++] = "FLEE";
+            for (int index = 0; index < commandCount; ++index) {
+                const bool marked = m_CommandRow == row + index;
+                const std::string line = std::string(marked ? "> " : "  ") + commands[index];
+                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, marked ? kFrame : kInk,
+                                       2);
+                y += Emerald::DebugTextLineHeight(2) + 2.0f;
+            }
         }
         for (const HeroGrant& passiveGrant : grants) {
             if (passiveGrant.Skill.Kind != SkillKind::Passive)
@@ -2596,93 +3036,77 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(m_Data.GetLastError()),
                                kError, 1, width - 96.0f);
     } else {
-        std::string help;
+        const std::string_view slots[] = {kSlot1, kSlot2, kSlot3, kSlot4,
+                                          kSlot5, kSlot6, kSlot7, kSlot8};
+        std::vector<HintChip> hints;
         if (m_Picking && !choosing) {
-            help = "UP DOWN MOVE    1-8 DRINK    E DRINK    C CLOSE";
-        } else if (pickingClass) {
-            const std::vector<std::string> starters = m_Hero.StarterIds();
-            for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                const ClassDef* starter = m_Data.FindClass(starters[i]);
-                if (!help.empty())
-                    help += "    ";
-                help += std::to_string(static_cast<int>(i) + 1) + " ";
-                help += starter != nullptr ? starter->Name : starters[i];
+            AddHint(hints, kMoveNorth, "");
+            AddHint(hints, kMoveSouth, "MOVE");
+            AddHint(hints, kSlot1, "DRINK");
+            AddHint(hints, kConfirm, "DRINK");
+            AddHint(hints, kMenu, "CLOSE");
+        } else if (pickingClass || spending || pickingSkill || choosing) {
+            std::vector<std::string> names;
+            if (pickingClass) {
+                const std::vector<std::string> starters = m_Hero.StarterIds();
+                for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                    const ClassDef* starter = m_Data.FindClass(starters[i]);
+                    names.push_back(starter != nullptr ? starter->Name : starters[i]);
+                }
+            } else if (spending) {
+                for (const StatDef& stat : m_Data.GetStats()) {
+                    if (names.size() >= static_cast<usize>(kMaxHotkeys))
+                        break;
+                    names.push_back(stat.Name);
+                }
+                if (m_Hero.ChoicePending() && names.size() < static_cast<usize>(kMaxHotkeys))
+                    names.push_back("RESET BUILD");
+            } else if (pickingSkill) {
+                const std::vector<std::string> options = m_Hero.PickOptions();
+                for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
+                    names.push_back(SkillName(m_Data, options[i]));
+            } else {
+                const std::vector<std::string> choices = m_Hero.ChoiceIds();
+                for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                    const ClassDef* evolution = m_Data.FindClass(choices[i]);
+                    names.push_back(evolution != nullptr ? evolution->Name : choices[i]);
+                }
+                if (choices.size() < static_cast<usize>(kMaxHotkeys))
+                    names.push_back("RESET BUILD");
             }
-            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
-        } else if (spending) {
-            const std::span<const StatDef> stats = m_Data.GetStats();
-            for (usize index = 0; index < stats.size(); ++index) {
-                if (!help.empty())
-                    help += "    ";
-                help += std::to_string(static_cast<int>(index) + 1);
-                help += " ";
-                help += stats[index].Name;
-            }
-            if (m_Hero.ChoicePending()) {
-                help += "    ";
-                help += std::to_string(static_cast<int>(stats.size()) + 1);
-                help += " RESET BUILD";
-            }
-            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
-        } else if (pickingSkill) {
-            const std::vector<std::string> options = m_Hero.PickOptions();
-            for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                if (!help.empty())
-                    help += "    ";
-                help += std::to_string(static_cast<int>(i) + 1) + " ";
-                help += SkillName(m_Data, options[i]);
-            }
-            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
-        } else if (choosing) {
-            const std::vector<std::string> choices = m_Hero.ChoiceIds();
-            for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                const ClassDef* evolution = m_Data.FindClass(choices[i]);
-                if (!help.empty())
-                    help += "    ";
-                help += std::to_string(static_cast<int>(i) + 1) + " ";
-                help += evolution != nullptr ? evolution->Name : choices[i];
-            }
-            if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
-                help += "    ";
-                help += std::to_string(static_cast<int>(choices.size()) + 1);
-                help += " RESET BUILD";
-            }
-            help += "    I " + KeeperWord(m_Data.GetShop()) + "    ESC QUIT";
+            for (usize i = 0; i < names.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
+                AddHint(hints, slots[i], names[i]);
+            AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
+            AddHint(hints, kQuit, "QUIT");
         } else {
-            if (shownSkills == 1)
-                help = "1 SKILL    ";
-            else if (shownSkills > 1)
-                help = "1-" + std::to_string(shownSkills) + " SKILL    ";
+            if (shownSkills > 0)
+                AddHint(hints, kSlot1, shownSkills == 1 ? "SKILL" : "SKILLS");
             const int drinkKeys = static_cast<int>(m_Inventory.ConsumableSlots().size());
-            const int drinkFirst = shownSkills + 1;
-            const int drinkLast = shownSkills + drinkKeys;
-            if (drinkKeys > 0 && drinkFirst <= kMaxHotkeys) {
-                const int shownLast = drinkLast < kMaxHotkeys ? drinkLast : kMaxHotkeys;
-                if (drinkFirst == shownLast)
-                    help += std::to_string(drinkFirst) + " ITEM    ";
-                else
-                    help +=
-                        std::to_string(drinkFirst) + "-" + std::to_string(shownLast) + " ITEM    ";
+            const int drinkFirst = shownSkills;
+            if (drinkKeys > 0 && drinkFirst < kMaxHotkeys)
+                AddHint(hints, slots[drinkFirst], "ITEM");
+            if (!fightOver && packCount > 1) {
+                AddHint(hints, kMoveWest, "");
+                AddHint(hints, kMoveEast, "TARGET");
             }
-            if (!fightOver && packCount > 1)
-                help += "LEFT RIGHT TARGET    ";
             if (!fightOver)
-                help += "C ITEMS    ";
+                AddHint(hints, kMenu, "ITEMS");
             if (!fightOver && m_MapFight.Active && m_MapFight.AllowFlee)
-                help += "F FLEE    ";
-            help += "SPACE WAIT    ";
+                AddHint(hints, kFlee, "FLEE");
+            AddHint(hints, kWait, "WAIT");
             if (fightOver && !m_OnMap)
-                help += "I " + KeeperWord(m_Data.GetShop()) + "    ";
-            help += "R FIGHT    ";
+                AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
+            AddHint(hints, kRetry, "FIGHT");
             if (!m_OnMap)
-                help += "N NEXT FOE    ";
-            help += "F5 SAVE    ESC QUIT    REV " + std::to_string(m_Data.GetRevision());
+                AddHint(hints, kNext, "NEXT FOE");
+            AddHint(hints, kSave, "SAVE");
+            AddHint(hints, kQuit, "QUIT");
+            AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
         }
-        Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(help), kDim, 1,
-                               width - 96.0f);
+        DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
     }
 
-    renderer.End();
+    FinishFrame(renderer, width);
 }
 
 void AscensionApp::DrinkAt(i32 bagIndex)
@@ -2708,7 +3132,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
         m_Picking = false;
 }
 
-void AscensionApp::HandlePicker(SDL_Scancode scancode)
+void AscensionApp::HandlePicker(std::string_view action)
 {
     const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
     if (drinks.empty()) {
@@ -2721,26 +3145,25 @@ void AscensionApp::HandlePicker(SDL_Scancode scancode)
     if (m_PickRow >= static_cast<i32>(drinks.size()))
         m_PickRow = static_cast<i32>(drinks.size()) - 1;
 
-    if (scancode == kItemKey) {
+    if (action == kMenu || action == kCancel) {
         m_Picking = false;
         return;
     }
-    if (scancode == SDL_SCANCODE_UP) {
+    if (action == kMoveNorth || action == kCyclePrev) {
         if (m_PickRow > 0)
             --m_PickRow;
         return;
     }
-    if (scancode == SDL_SCANCODE_DOWN) {
+    if (action == kMoveSouth || action == kCycleNext) {
         if (m_PickRow + 1 < static_cast<i32>(drinks.size()))
             ++m_PickRow;
         return;
     }
 
-    const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
-    i32 pick = -1;
-    if (digit >= 0 && digit < kMaxHotkeys && digit < static_cast<int>(drinks.size()))
-        pick = digit;
-    if (scancode == SDL_SCANCODE_E || scancode == SDL_SCANCODE_RETURN)
+    int pick = SlotIndex(action);
+    if (pick >= static_cast<int>(drinks.size()))
+        pick = -1;
+    if (action == kConfirm)
         pick = m_PickRow;
     if (pick < 0)
         return;
@@ -2764,27 +3187,27 @@ void AscensionApp::ClampCamp()
         m_CampRow = 0;
 }
 
-void AscensionApp::HandleCamp(SDL_Scancode scancode)
+void AscensionApp::HandleCamp(std::string_view action)
 {
     ClampCamp();
     const ShopDef& shop = m_Data.GetShop();
-    if (scancode == SDL_SCANCODE_UP) {
+    if (action == kMoveNorth) {
         --m_CampRow;
         ClampCamp();
         return;
     }
-    if (scancode == SDL_SCANCODE_DOWN) {
+    if (action == kMoveSouth) {
         ++m_CampRow;
         ClampCamp();
         return;
     }
-    if (scancode == SDL_SCANCODE_LEFT || scancode == SDL_SCANCODE_RIGHT) {
+    if (action == kMoveWest || action == kMoveEast || action == kCyclePrev || action == kCycleNext) {
         m_CampColumn = m_CampColumn == 0 ? 1 : 0;
         ClampCamp();
         return;
     }
 
-    const bool confirm = scancode == SDL_SCANCODE_E || scancode == SDL_SCANCODE_RETURN;
+    const bool confirm = action == kConfirm;
     std::string why;
     if (m_CampColumn == 1 && confirm) {
         if (m_CampRow < 0 || m_CampRow >= static_cast<i32>(shop.Stock.size()))
@@ -2804,7 +3227,7 @@ void AscensionApp::HandleCamp(SDL_Scancode scancode)
     }
 
     if (m_CampColumn == 0 && m_CampRow >= 0 && m_CampRow < 4 &&
-        (confirm || scancode == SDL_SCANCODE_U)) {
+        (confirm || action == kUnequip || (action == kContext && m_CampColumn == 0))) {
         const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
                                       GearSlot::Accessory};
         const GearSlot slot = wornSlots[m_CampRow];
@@ -2825,7 +3248,7 @@ void AscensionApp::HandleCamp(SDL_Scancode scancode)
     const i32 bagIndex = m_CampRow - 4;
     const ItemStack stack = m_Inventory.BagAt(bagIndex);
     const ItemDef* held = stack.Empty() ? nullptr : m_Data.FindItem(stack.Id);
-    if (scancode == SDL_SCANCODE_X) {
+    if (action == kContext) {
         if (!m_Inventory.Sell(bagIndex, why)) {
             Note(why);
             return;
@@ -3133,20 +3556,25 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
         Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(note), kDim, 1, width - 96.0f);
         logY += Emerald::DebugTextLineHeight(1) + 1.0f;
     }
-    const char* help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
-                       "X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT    ESC QUIT";
-    if (m_OnMap) {
-        help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
-               "X SELL    U UNEQUIP    I CLOSE    ESC QUIT";
+    std::vector<HintChip> hints;
+    AddHint(hints, kMoveNorth, "");
+    AddHint(hints, kMoveSouth, "MOVE");
+    AddHint(hints, kMoveWest, "");
+    AddHint(hints, kMoveEast, "BAG OR STOCK");
+    AddHint(hints, kConfirm, "EQUIP OR BUY");
+    AddHint(hints, kContext, "SELL");
+    AddHint(hints, kUnequip, "UNEQUIP");
+    AddHint(hints, CloseAction(), "CLOSE");
+    if (m_Hero.ChoicePending())
+        AddHint(hints, "", "CHOOSE A PATH BEFORE THE NEXT FIGHT");
+    else if (m_Hero.PickPending())
+        AddHint(hints, "", "PICK A SKILL BEFORE THE NEXT FIGHT");
+    else if (!m_OnMap) {
+        AddHint(hints, kRetry, "FIGHT");
+        AddHint(hints, kNext, "NEXT");
     }
-    if (m_Hero.ChoicePending()) {
-        help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
-               "X SELL    U UNEQUIP    I CLOSE    CHOOSE A PATH BEFORE THE NEXT FIGHT    ESC QUIT";
-    } else if (m_Hero.PickPending()) {
-        help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
-               "X SELL    U UNEQUIP    I CLOSE    PICK A SKILL BEFORE THE NEXT FIGHT    ESC QUIT";
-    }
-    Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, help, kDim, 1, width - 96.0f);
+    AddHint(hints, kQuit, "QUIT");
+    DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
 
 void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height)
@@ -3201,10 +3629,16 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
         Emerald::DrawDebugText(renderer, {textX, y}, Upper(text), color, 2, textWrap);
         y += lineH + 2.0f;
     }
-    const char* help = "UP DOWN MOVE    E SPEAK    I CLOSE";
-    if (visible.empty())
-        help = "E CONTINUE    I CLOSE";
-    Emerald::DrawDebugText(renderer, {52.0f, height - 56.0f}, help, kDim, 1, width - 104.0f);
+    std::vector<HintChip> hints;
+    if (visible.empty()) {
+        AddHint(hints, kConfirm, "CONTINUE");
+    } else {
+        AddHint(hints, kMoveNorth, "");
+        AddHint(hints, kMoveSouth, "MOVE");
+        AddHint(hints, kConfirm, "SPEAK");
+    }
+    AddHint(hints, CloseAction(), "CLOSE");
+    DrawHints(renderer, 52.0f, height - 56.0f, width - 52.0f, hints, true);
 }
 
 } // namespace Ascension

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
@@ -15,10 +16,9 @@
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
 #include "Emerald/Core/Application.h"
+#include "Ascension/Input/Controls.h"
 #include "ArtGallery.h"
 #include "Playtest.h"
-
-#include <SDL3/SDL_gamepad.h>
 
 namespace Ascension {
 
@@ -27,17 +27,15 @@ namespace Ascension {
 // buys and sells. At an evolution level the next fight waits until the player picks a path,
 // and that screen is the only place a build reset clears skill ranks. A class may also offer
 // a skill pick at a later level; that screen uses the same number keys and has no reset.
-// Consumables in the bag are extra turn actions. C opens every stack; number keys still
-// cover the ones that fit. Eight number keys is the cap, so a full skill bar leaves drinks
-// on C only.
+// Consumables in the bag are extra turn actions. The menu action opens every stack; number
+// slots still cover the ones that fit. Eight slots is the cap, so a full skill bar leaves
+// drinks on the menu action only. Keys and buttons for every action live in input.json.
 class AscensionApp : public Emerald::Application {
 public:
     AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options);
-    ~AscensionApp() override;
 
 protected:
     void OnStart() override;
-    void OnEvent(const SDL_Event& event) override;
     void OnUpdate(f32 dt) override;
     void OnRender2D(Emerald::Renderer2D& renderer) override;
 
@@ -74,13 +72,10 @@ private:
     void NoteMarked(i32 previous);
     void FinishAction(const ActionResult& result, bool playerActed);
     void DrinkAt(i32 bagIndex);
-    void HandlePicker(SDL_Scancode scancode);
+    void HandlePicker(std::string_view action);
     void ClampCamp();
-    void HandleCamp(SDL_Scancode scancode);
+    void HandleCamp(std::string_view action);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
-    void OpenPads();
-    void OpenPad(SDL_JoystickID id);
-    void ClosePad(SDL_JoystickID id);
     // Lists the run already keeps. "found" is claimed drops. "defeated" is felled foes.
     // The talk matches those names from data. No item id is named here.
     void FillTalkFacts(TalkList lists[2], TalkFacts& facts) const;
@@ -94,7 +89,7 @@ private:
     // Stands on the saved tile, then `preferred` (--map), then the hub. False when
     // none of those maps can be entered.
     bool EnterOverland(std::string_view preferred);
-    void HandleTalk(SDL_Scancode scancode);
+    void HandleTalk(std::string_view action);
     void RunTalkAction(std::string_view action);
     void NoteTalk(const DialogueNode& node);
     void DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height);
@@ -115,20 +110,58 @@ private:
     // --choose, once the evolution choice is open, then --pick for each open skill pick.
     // Both wait until a fight is not underway. False when a pick failed and the run is stopping.
     bool TakeAutoPath();
-    // One scripted key per frame. The press goes through OnEvent, so the window
-    // does not need focus. The run ends after the last key unless --frames is longer.
-    // Window key-downs are ignored until the script ends.
+    // One scripted key per frame. The scancode is turned into the actions bound to it,
+    // then HandleAction. The window does not need focus. The run ends after the last
+    // key unless --frames is longer. Window key-downs are ignored until the script ends.
     void PlayScriptedKey();
-    // MoveNorth/East/South/West on the arrows, WASD, the d-pad, and the left stick.
-    // The fight screen does not read these actions.
-    void BindMapActions();
+    // Puts input.json onto Emerald's actions. False names the key or button in `error`
+    // via the log and m_StartError.
+    bool BindControls();
+    // One frame of actions. Menus and the battle command cursor repeat a held direction.
+    // The map's own step repeat reads the move actions in StepMap.
+    void PollActions(f32 dt);
+    void HandleAction(std::string_view action);
+    void HandleOverland(std::string_view action);
+    void HandleChoice(std::string_view action);
+    void HandleBattle(std::string_view action);
+    void ChooseHotkey(int digit);
+    void UseHotkey(int digit);
+    void UseCommand(int row);
+    [[nodiscard]] int ChoiceCount() const;
+    [[nodiscard]] int CommandCount() const;
+    [[nodiscard]] bool Choosing() const;
+    [[nodiscard]] bool CursorActive() const;
+    [[nodiscard]] bool Pressed(std::string_view action);
+    // Held directions repeat after the initial pause, then at the repeat pause.
+    struct NavHold {
+        f32 Elapsed = 0.0f;
+        bool Repeating = false;
+    };
+    // True on the press, then again after the pauses in input.json while it stays down.
+    bool NavStep(NavHold& hold, std::string_view action, f32 dt);
+    // The word drawn for an action: the pad label when a pad is connected, otherwise the
+    // first key. Empty when that action has neither.
+    [[nodiscard]] std::string ActionLabel(std::string_view action);
+    [[nodiscard]] std::string CloseLabel();
+    void FinishFrame(Emerald::Renderer2D& renderer, f32 width);
+    // The hint row already on this screen. Glyphs use prompts.json; missing art is the label.
+    // helpLine hides the row when the help action has toggled it off. The map tile
+    // prompt passes false: that line stays.
+    void DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 maxX,
+                   std::span<const HintChip> hints, bool helpLine);
+    void EnsurePromptSheets();
+    void NotePromptDevice();
+    // Interact on a keyboard, Cancel on a pad. Both close the talk and the camp.
+    [[nodiscard]] std::string_view CloseAction() const;
+    void InspectTile();
+    void InspectFoe();
     void StepMap(f32 dt);
     void AdoptMap();
     // Places for the map the hero is standing on. Cleared spawns are left out.
     void SyncPlaces();
     // One mover step. Idle does not change a tile, so a shipped map looks the same.
     void StepMovers();
-    [[nodiscard]] WalkDir DirectionOfKey(SDL_Scancode scancode);
+    [[nodiscard]] WalkDir DirectionOfAction(std::string_view action) const;
     [[nodiscard]] WalkInput ReadMapInput();
 
     // Declared before m_Data: the database is opened on this command's folder.
@@ -136,8 +169,8 @@ private:
     std::ofstream m_Transcript;
     usize m_KeyCursor = 0;
     usize m_PickCursor = 0;
-    // True while PlayScriptedKey is inside its own OnEvent. Other key-downs in that
-    // moment belong to the window, not the script.
+    // True while PlayScriptedKey is applying the actions bound to the scripted scancode.
+    // Other key-downs in that moment belong to the window, not the script.
     bool m_ApplyingScript = false;
 
     Database m_Data;
@@ -159,11 +192,6 @@ private:
     std::string m_TalkId;
     std::string m_TalkNode;
     std::vector<std::string> m_TalkFlags;
-    struct HeldPad {
-        SDL_JoystickID Id = 0;
-        SDL_Gamepad* Pad = nullptr;
-    };
-    std::vector<HeldPad> m_Pads;
     std::vector<std::string> m_Defeated;
     // Unique drops already claimed. R starts the fight over and does not clear this.
     std::vector<std::string> m_Found;
@@ -230,6 +258,22 @@ private:
     bool m_RestSeen = false;
     std::string m_RestMap;
     MapTile m_RestTile;
+    // Start pauses. Cancel or Start again resumes. The map and further actions wait.
+    bool m_Paused = false;
+    // Back/View and the help key hide the line at the bottom. The map's tile prompt stays.
+    bool m_ShowHelp = true;
+    // The highlighted battle command (skills, then wait, items, flee) and choice row.
+    i32 m_CommandRow = 0;
+    i32 m_ChoiceRow = 0;
+    // Held-direction repeat for the four moves and the two cycle actions, in that order.
+    NavHold m_Nav[6]{};
+    // Last device that pressed a key or a button. prompts.json's text family until a pad is used.
+    std::string m_PromptFamily;
+    struct PromptPicture {
+        std::string Family;
+        Emerald::AssetHandle<Emerald::Texture> Texture;
+    };
+    std::vector<PromptPicture> m_PromptSheets;
 };
 
 } // namespace Ascension

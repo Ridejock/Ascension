@@ -9,6 +9,8 @@
 
 #include "Ascension/Data/Map.h"
 #include "Ascension/Data/Types.h"
+#include "Ascension/Input/Controls.h"
+#include "Ascension/Input/Prompts.h"
 
 namespace Ascension {
 
@@ -38,7 +40,7 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
-// encounters, items, rarities, shop, combat, progress, tiles, walk, movers), every
+// encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input, prompts), every
 // data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
 // assets/icons, checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file
@@ -92,6 +94,10 @@ public:
     [[nodiscard]] const CombatRules& GetRules() const { return m_Rules; }
     [[nodiscard]] const ProgressRules& GetProgress() const { return m_Progress; }
     [[nodiscard]] const WalkRules& GetWalk() const { return m_Walk; }
+    // Keyboard and gamepad bindings. The game applies these onto Emerald's actions.
+    [[nodiscard]] const ControlRules& GetControls() const { return m_Controls; }
+    // Glyph sheets and the scales hint text uses beside them.
+    [[nodiscard]] const PromptRules& GetPrompts() const { return m_Prompts; }
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
@@ -184,6 +190,8 @@ private:
     CombatRules m_Rules;
     ProgressRules m_Progress;
     WalkRules m_Walk;
+    ControlRules m_Controls;
+    PromptRules m_Prompts;
     // Field names from effects.json "better". The merge reads these; it does not decide
     // higher or lower from the field's name.
     std::vector<std::string> m_HigherFields;

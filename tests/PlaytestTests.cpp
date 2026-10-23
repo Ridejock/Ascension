@@ -15,7 +15,6 @@
 #include "Check.h"
 #include "FightSim.h"
 #include "Playtest.h"
-#include "TalkInput.h"
 
 namespace {
 
@@ -661,12 +660,6 @@ void TestNextFightAndScriptedKeys()
     nextFight.FightOngoing = false;
     Check(DecideScriptedPress(nextFight) == ScriptedPress::Play, "N plays once the fight is over");
 
-    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_2), "a skill key needs the player's turn");
-    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_RIGHT), "aiming needs the player's turn");
-    Check(KeyNeedsPlayerTurn(SDL_SCANCODE_SPACE), "waiting needs the player's turn");
-    Check(!KeyNeedsPlayerTurn(SDL_SCANCODE_N), "N is not a combat key");
-    Check(!KeyNeedsPlayerTurn(SDL_SCANCODE_R), "restart is not a combat key");
-
     ScriptedPressQuery idle;
     Check(DecideScriptedPress(idle) == ScriptedPress::Play, "with no script, a window key plays");
 }
@@ -814,18 +807,6 @@ void TestPellRumorKeys()
         }
         Check(same, "the keys strike, talk, take the rumor, and leave");
     }
-
-    Check(TalkCommandFromKey(SDL_SCANCODE_UP) == TalkCommand::Up, "Up moves the talk menu");
-    Check(TalkCommandFromKey(SDL_SCANCODE_E) == TalkCommand::Confirm, "E speaks");
-    Check(TalkCommandFromKey(SDL_SCANCODE_RETURN) == TalkCommand::Confirm, "Enter speaks");
-    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_UP) == TalkCommand::Up,
-          "the d-pad moves the menu");
-    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_DPAD_DOWN) == TalkCommand::Down,
-          "the d-pad moves down");
-    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_SOUTH) == TalkCommand::Confirm,
-          "the south button speaks");
-    Check(TalkCommandFromPad(SDL_GAMEPAD_BUTTON_EAST) == TalkCommand::None,
-          "the other face buttons are not the menu");
 }
 
 const SimRateRow* FindRate(const std::vector<SimRateRow>& rows, std::string_view build,
