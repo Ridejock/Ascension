@@ -29,7 +29,7 @@ The pack root holds `manifest.json`. Every picture is a PNG inside the pack. Pat
 
 Each list can be omitted. An empty file replaces nothing. A foe row can name one picture and leave the other out; the one left out stays on the CC0 art. The same is true of an NPC and of a marker.
 
-On the map, a spawn draws the overland picture of the first enemy id in that spawn's encounter. A talk point draws the sprite for its dialogue id. A shop point draws the sprite for the dialogue id in `shop.json` when that sprite is in the pack, and otherwise the shop marker. A portrait is drawn beside that conversation. The hero marker, the rest marker, and the exit marker replace those squares. A marker the pack leaves out keeps the square the game already draws.
+On the map, a spawn draws the overland picture of the first enemy id in that spawn's encounter. A talk point draws the sprite for its dialogue id. A shop point draws the sprite for the dialogue id in `shop.json` when that sprite is in the pack and no talk point on the same map already uses that id. A shop whose keeper is already standing, or whose dialogue is empty or has no sprite, draws the shop marker. A portrait is drawn beside that conversation. The hero marker, the rest marker, and the exit marker replace those squares. A marker the pack leaves out keeps the square the game already draws.
 
 The map draws each cell from its tile id. It does not know which neighbouring cells are walls, so the manifest has no neighbour piece set for walls.
 

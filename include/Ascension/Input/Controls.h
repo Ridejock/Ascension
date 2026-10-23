@@ -95,6 +95,41 @@ inline constexpr std::array<std::string_view, 28> kControlActions = {
     return SlotIndex(action) >= 0;
 }
 
+// Scripted keys are applied by the script, so that frame does not also read the
+// devices. Pause is not a reason to skip: WasActionPressed is only true on the
+// frame the button goes down, and Start / East are how pause ends.
+[[nodiscard]] inline bool ReadActionEdges(bool scripting, bool paused)
+{
+    if (scripting)
+        return false;
+    if (paused)
+        return true;
+    return true;
+}
+
+// Pause toggles. While paused, Cancel resumes. Any other action leaves the flag.
+[[nodiscard]] inline bool PauseAfter(bool paused, std::string_view action)
+{
+    if (action == kPause)
+        return !paused;
+    if (paused && action == kCancel)
+        return false;
+    return paused;
+}
+
+// One frame of pause edges. Pause wins over Cancel when both are down, so a
+// resume button on the same frame as Start does not also run as a close.
+[[nodiscard]] inline bool StepPause(const Emerald::Input& input, bool paused, bool scripting)
+{
+    if (!ReadActionEdges(scripting, paused))
+        return paused;
+    if (input.WasActionPressed(kPause))
+        return PauseAfter(paused, kPause);
+    if (input.WasActionPressed(kCancel))
+        return PauseAfter(paused, kCancel);
+    return paused;
+}
+
 // True when a key's bound actions aim or spend the player's turn. A key with no action does not.
 [[nodiscard]] bool BoundKeyNeedsPlayerTurn(const Emerald::Input& input, Emerald::Key key);
 

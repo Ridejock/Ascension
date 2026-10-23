@@ -2935,6 +2935,20 @@ void CheckCampaignMaps(const char* dir)
           "the hub talk point is Pell's existing dialogue");
     Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 3 && shop->Tile.Y == 4,
           "the hub shop point opens the shop");
+    const std::string& keeper = data.GetShop().Dialogue;
+    i32 keepers = 0;
+    for (const MapPoint& point : hub->Points) {
+        const PointPicture picture = PictureForPoint(*hub, point, keeper);
+        if (point.Kind == MapPointKind::Talk)
+            Check(picture.Art == PointArt::Npc && picture.Dialogue == keeper,
+                  "the hub talk point draws the shop's keeper");
+        if (point.Kind == MapPointKind::Shop)
+            Check(picture.Art == PointArt::Shop && picture.Dialogue.empty(),
+                  "the hub shop draws the shop marker, not a second keeper");
+        if (picture.Art == PointArt::Npc && picture.Dialogue == keeper)
+            ++keepers;
+    }
+    Check(keeper == "pell" && keepers == 1, "Pell is drawn once");
 
     const char* rooms[] = {"barrow_1", "barrow_2", "barrow_3", "barrow_4",
                            "barrow_5", "barrow_6", "barrow_7", "barrow_side"};
@@ -2979,10 +2993,41 @@ void CheckCampaignMaps(const char* dir)
     Check(data.GetRules().MaxFoes == 3, "a shipped fight seats 3 foes");
 }
 
+void TestShopPicture()
+{
+    MapDef map;
+    MapPoint shop;
+    shop.Kind = MapPointKind::Shop;
+    shop.Tile = {1, 1};
+    map.Points.push_back(shop);
+    const PointPicture keeper = PictureForPoint(map, map.Points[0], "pell");
+    Check(keeper.Art == PointArt::Npc && keeper.Dialogue == "pell",
+          "a shop with no talk point draws the keeper");
+    const PointPicture none = PictureForPoint(map, map.Points[0], "");
+    Check(none.Art == PointArt::Shop && none.Dialogue.empty(),
+          "a shop with no dialogue draws the shop marker");
+
+    MapPoint talk;
+    talk.Kind = MapPointKind::Talk;
+    talk.Tile = {2, 1};
+    talk.Dialogue = "pell";
+    map.Points.push_back(talk);
+    const PointPicture standing = PictureForPoint(map, map.Points[0], "pell");
+    Check(standing.Art == PointArt::Shop,
+          "a keeper already standing is not drawn again at the shop");
+    const PointPicture other = PictureForPoint(map, map.Points[0], "other");
+    Check(other.Art == PointArt::Npc && other.Dialogue == "other",
+          "a keeper who is not already on the map is drawn at the shop");
+    const PointPicture walked = PictureForPoint(map, map.Points[1], "pell");
+    Check(walked.Art == PointArt::Npc && walked.Dialogue == "pell",
+          "the talk point still draws that keeper");
+}
+
 void TestMaps()
 {
     CheckFixtureMaps(ASCENSION_DATA_DIR, "sample maps load");
     CheckCampaignMaps(ASCENSION_SHIPPED_DATA_DIR);
+    TestShopPicture();
     TestMapReload();
     TestMapValidation();
 }

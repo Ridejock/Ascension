@@ -229,6 +229,84 @@ void TestMapping()
     Check(!fresh.WasActionPressed(kConfirm), "a failed apply leaves the actions unbound");
 }
 
+void TestPauseResume()
+{
+    Database data(kSample);
+    DataError error;
+    Check(data.Load(&error), "pause test loads input");
+    if (!data.IsLoaded())
+        return;
+
+    Emerald::Keyboard keyboard;
+    Emerald::Gamepads pads;
+    pads.AddPad(1, nullptr, "Test Pad", SDL_GAMEPAD_TYPE_XBOXONE);
+    Emerald::Input input(keyboard, pads);
+    std::string why;
+    Check(ApplyControls(input, data.GetControls(), why), "pause bindings apply");
+
+    Check(ReadActionEdges(false, true), "a paused frame still samples action edges");
+    Check(ReadActionEdges(false, false), "play samples action edges");
+    Check(!ReadActionEdges(true, true), "a script does not also sample the window");
+
+    bool paused = false;
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    keyboard.OnKeyDown(SDL_SCANCODE_P);
+    Check(input.WasActionPressed(kPause), "P is the pause action");
+    paused = StepPause(input, paused, false);
+    Check(paused, "P pauses");
+
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    Check(!input.WasActionPressed(kPause), "a held P is not a second edge");
+    paused = StepPause(input, paused, false);
+    Check(paused, "holding P stays paused");
+
+    keyboard.OnKeyUp(SDL_SCANCODE_P);
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    keyboard.OnKeyDown(SDL_SCANCODE_P);
+    paused = StepPause(input, paused, false);
+    Check(!paused, "P resumes and play returns");
+
+    keyboard.OnKeyUp(SDL_SCANCODE_P);
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    pads.OnButton(1, Emerald::GamepadButton::Start, true);
+    Check(input.WasActionPressed(kPause), "Start is the pause action");
+    paused = StepPause(input, paused, false);
+    Check(paused, "Start pauses");
+
+    pads.OnButton(1, Emerald::GamepadButton::Start, false);
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    Check(!input.WasActionPressed(kPause), "a released Start does not resume by itself");
+    paused = StepPause(input, paused, false);
+    Check(paused, "pause waits for an edge");
+
+    pads.OnButton(1, Emerald::GamepadButton::East, true);
+    Check(input.WasActionPressed(kCancel) && !input.WasActionPressed(kPause),
+          "East is cancel, the resume action");
+    paused = StepPause(input, paused, false);
+    Check(!paused, "East resumes and play returns");
+
+    pads.OnButton(1, Emerald::GamepadButton::East, false);
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    pads.OnButton(1, Emerald::GamepadButton::Start, true);
+    paused = StepPause(input, paused, false);
+    Check(paused, "Start pauses again");
+    pads.OnButton(1, Emerald::GamepadButton::Start, false);
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    pads.OnButton(1, Emerald::GamepadButton::DPadUp, true);
+    Check(input.WasActionPressed(kMoveNorth), "a direction is still an edge while paused");
+    paused = StepPause(input, paused, true);
+    Check(paused, "a scripted frame does not leave pause");
+    paused = StepPause(input, paused, false);
+    Check(paused, "a direction does not resume");
+}
+
 void TestRejectedData()
 {
     {
@@ -278,6 +356,7 @@ int main()
     if (shipped.IsLoaded())
         TestShippedControls(shipped);
     TestMapping();
+    TestPauseResume();
     TestRejectedData();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     SDL_Quit();
