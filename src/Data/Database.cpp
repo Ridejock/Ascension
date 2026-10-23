@@ -2625,17 +2625,30 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"stepMilliseconds", "tilePixels", "heroInsetPercent", "heroColor", "linkColor",
-                    "spawnColor", "restColor", "talkColor", "shopColor"},
+                   {"moveMilliseconds", "settleMilliseconds", "easing", "tilePixels",
+                    "heroInsetPercent", "heroColor", "linkColor", "spawnColor", "restColor",
+                    "talkColor", "shopColor"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
     WalkRules rules;
-    if (!RequireInt(*body, "stepMilliseconds", 1, 2000, rules.StepMilliseconds, error) ||
+    if (!RequireInt(*body, "moveMilliseconds", 1, 2000, rules.MoveMilliseconds, error) ||
+        !RequireInt(*body, "settleMilliseconds", 1, 2000, rules.SettleMilliseconds, error) ||
         !RequireInt(*body, "tilePixels", 8, 256, rules.TilePixels, error) ||
         !RequireInt(*body, "heroInsetPercent", 0, 45, rules.HeroInsetPercent, error))
         return false;
+    std::string easing;
+    if (!RequireString(*body, "easing", easing, error))
+        return false;
+    if (easing == "linear")
+        rules.Easing = WalkEase::Linear;
+    else if (easing == "smooth")
+        rules.Easing = WalkEase::Smooth;
+    else {
+        error = "easing must be linear or smooth";
+        return false;
+    }
     std::string heroColor;
     std::string linkColor;
     std::string spawnColor;

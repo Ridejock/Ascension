@@ -1,5 +1,5 @@
-// Tile steps, walls, exits, the camera clamp, and a reload that keeps or moves
-// the hero. No window and no drawing.
+// Tile steps, the glide between them, walls, exits, the camera clamp, and a
+// reload that keeps or moves the hero. No window and no drawing.
 
 #include <chrono>
 #include <filesystem>
@@ -96,7 +96,9 @@ WalkStep Press(Walker& walker, const Database& data, WalkDir direction)
     WalkInput input;
     input.Direction = direction;
     input.Fresh = true;
-    return walker.Advance(data, data.GetWalk(), input, 0.0f);
+    const i32 milliseconds = data.GetWalk().MoveMilliseconds;
+    const f32 step = static_cast<f32>(milliseconds < 1 ? 1 : milliseconds) / 1000.0f;
+    return walker.Advance(data, data.GetWalk(), input, step);
 }
 
 bool At(const Walker& walker, std::string_view map, i32 x, i32 y)
@@ -108,7 +110,9 @@ bool At(const Walker& walker, std::string_view map, i32 x, i32 y)
 void CheckRules(const Database& data, const char* what)
 {
     const WalkRules& rules = data.GetWalk();
-    Check(rules.StepMilliseconds == 180 && rules.TilePixels == 64 && rules.HeroInsetPercent == 22,
+    Check(rules.MoveMilliseconds == 180 && rules.SettleMilliseconds == 180 &&
+              rules.Easing == WalkEase::Linear && rules.TilePixels == 64 &&
+              rules.HeroInsetPercent == 22,
           what);
     Check(rules.HeroRed == 223 && rules.HeroGreen == 213 && rules.HeroBlue == 188,
           "the hero square uses palette wstone2");
@@ -125,9 +129,9 @@ void CheckRules(const Database& data, const char* what)
 void TestRules()
 {
     CheckRules(Loaded(ASCENSION_DATA_DIR, "sample walk rules load"),
-               "sample walk.json sets the step, the tile, and the inset");
+               "sample walk.json sets the move, the settle, and the tile");
     CheckRules(Loaded(ASCENSION_SHIPPED_DATA_DIR, "shipped walk rules load"),
-               "shipped walk.json sets the step, the tile, and the inset");
+               "shipped walk.json sets the move, the settle, and the tile");
 }
 
 void TestPlace()
@@ -163,7 +167,7 @@ void TestSteps()
     if (!data.IsLoaded())
         return;
     const WalkRules& rules = data.GetWalk();
-    const f32 step = static_cast<f32>(rules.StepMilliseconds) / 1000.0f;
+    const f32 step = static_cast<f32>(rules.MoveMilliseconds) / 1000.0f;
 
     Walker walker;
     Check(!walker.Enter(data, "no_such_map") && !walker.Placed(), "an unknown map is not entered");
@@ -181,29 +185,18 @@ void TestSteps()
     Check(west.Kind == WalkStepKind::Blocked && At(walker, "fixture_a", 1, 1),
           "the west wall blocks");
 
-    WalkInput east;
-    east.Direction = WalkDir::East;
-    east.Fresh = true;
-    const WalkStep first = walker.Advance(data, rules, east, step * 5.0f);
-    Check(first.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 2, 1),
-          "a long frame still takes one step");
-    east.Fresh = false;
-    const WalkStep waiting = walker.Advance(data, rules, east, step * 0.5f);
-    Check(waiting.Kind == WalkStepKind::None && At(walker, "fixture_a", 2, 1),
-          "a held direction waits out the step time");
-    const WalkStep repeated = walker.Advance(data, rules, east, step * 0.5f);
-    Check(repeated.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 3, 1),
-          "the rest of the step time takes the next tile");
-    const WalkStep burst = walker.Advance(data, rules, east, step * 5.0f);
-    Check(burst.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 4, 1),
-          "a held direction still moves one tile when the frame is long");
-
-    WalkInput south;
-    south.Direction = WalkDir::South;
-    south.Fresh = false;
-    const WalkStep turned = walker.Advance(data, rules, south, 0.0f);
+    Check(Press(walker, data, WalkDir::East).Kind == WalkStepKind::Moved &&
+              At(walker, "fixture_a", 2, 1),
+          "east enters the next tile");
+    Check(Press(walker, data, WalkDir::East).Kind == WalkStepKind::Moved &&
+              At(walker, "fixture_a", 3, 1),
+          "a second east continues");
+    Check(Press(walker, data, WalkDir::East).Kind == WalkStepKind::Moved &&
+              At(walker, "fixture_a", 4, 1),
+          "a third east stands on the exit's column");
+    const WalkStep turned = Press(walker, data, WalkDir::South);
     Check(turned.Kind == WalkStepKind::Exited && At(walker, "fixture_b", 1, 2),
-          "turning steps at once, and the exit lands on fixture_b");
+          "south takes the exit and lands on fixture_b");
     Check(turned.Arrival.MapId == "fixture_b" && turned.Arrival.Tile.X == 1 &&
               turned.Arrival.Tile.Y == 2,
           "the exit reports the arrival tile");
@@ -472,6 +465,276 @@ void TestEdge()
           "a step off the bottom of a one-row map is blocked");
 }
 
+f32 MoveSeconds(const WalkRules& rules)
+{
+    return static_cast<f32>(rules.MoveMilliseconds) / 1000.0f;
+}
+
+f32 SettleSeconds(const WalkRules& rules)
+{
+    return static_cast<f32>(rules.SettleMilliseconds) / 1000.0f;
+}
+
+WalkStep Hold(Walker& walker, const Database& data, const WalkRules& rules, WalkDir direction,
+              f32 dt, bool fresh)
+{
+    WalkInput input;
+    input.Direction = direction;
+    input.Fresh = fresh;
+    return walker.Advance(data, rules, input, dt);
+}
+
+WalkStep Release(Walker& walker, const Database& data, const WalkRules& rules, f32 dt)
+{
+    WalkInput input;
+    return walker.Advance(data, rules, input, dt);
+}
+
+void TestGlideTiming()
+{
+    Database data = Loaded(kSample, "fixture maps load for glide timing");
+    if (!data.IsLoaded())
+        return;
+    WalkRules rules = data.GetWalk();
+    rules.MoveMilliseconds = 1000;
+    rules.SettleMilliseconds = 1000;
+    rules.Easing = WalkEase::Linear;
+    const f32 move = MoveSeconds(rules);
+
+    Walker walker;
+    Check(walker.Enter(data, "fixture_a") && At(walker, "fixture_a", 1, 1),
+          "glide timing starts at 1,1");
+    const WalkStep partial = Hold(walker, data, rules, WalkDir::East, move * 0.5f, true);
+    Check(partial.Kind == WalkStepKind::None && At(walker, "fixture_a", 1, 1),
+          "half a tile does not commit");
+    Check(Near(walker.DrawTile().X, 1.5f) && Near(walker.DrawTile().Y, 1.0f) && walker.Moving(),
+          "the drawn point is halfway to the next tile");
+
+    const WalkStep arrived = Hold(walker, data, rules, WalkDir::East, move * 0.5f, false);
+    Check(arrived.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 2, 1),
+          "the rest of the tile commits when the boundary is reached");
+    Check(Near(walker.DrawTile().X, 2.0f) && walker.Moving(),
+          "holding past the boundary stays in motion on that tile");
+
+    const WalkStep onward = Hold(walker, data, rules, WalkDir::East, move * 0.25f, false);
+    Check(onward.Kind == WalkStepKind::None && At(walker, "fixture_a", 2, 1) &&
+              walker.DrawTile().X > 2.2f,
+          "a held direction leaves the tile immediately, with no pause");
+
+    Walker burst;
+    Check(burst.Enter(data, "fixture_a"), "the long frame starts on fixture_a");
+    const WalkStep once = Hold(burst, data, rules, WalkDir::East, move * 5.0f, true);
+    Check(once.Kind == WalkStepKind::Moved && At(burst, "fixture_a", 2, 1) &&
+              Near(burst.DrawTile().X, 2.0f),
+          "a long frame still commits one tile");
+
+    Walker splitA;
+    Walker splitB;
+    Check(splitA.Enter(data, "fixture_a") && splitB.Enter(data, "fixture_a"),
+          "both frame splits start together");
+    for (i32 i = 0; i < 4; ++i)
+        Hold(splitA, data, rules, WalkDir::East, move / 4.0f, i == 0);
+    Hold(splitB, data, rules, WalkDir::East, move / 2.0f, true);
+    Hold(splitB, data, rules, WalkDir::East, move / 2.0f, false);
+    Check(At(splitA, "fixture_a", 2, 1) && At(splitB, "fixture_a", 2, 1) &&
+              Near(splitA.DrawTile().X, splitB.DrawTile().X) &&
+              Near(splitA.DrawTile().Y, splitB.DrawTile().Y),
+          "the same travel time lands on the same point however the frames split");
+}
+
+void TestNearBoundary()
+{
+    Database data = Loaded(kSample, "fixture maps load for a near boundary");
+    if (!data.IsLoaded())
+        return;
+    WalkRules rules = data.GetWalk();
+    rules.MoveMilliseconds = 1000;
+    rules.SettleMilliseconds = 1000;
+    rules.Easing = WalkEase::Linear;
+    const f32 move = MoveSeconds(rules);
+
+    Walker east;
+    Check(east.Enter(data, "fixture_a"), "the near boundary starts on fixture_a");
+    const WalkStep shortEast = Hold(east, data, rules, WalkDir::East, move * 0.999f, true);
+    Check(shortEast.Kind == WalkStepKind::None && At(east, "fixture_a", 1, 1) &&
+              east.DrawTile().X > 1.99f && east.DrawTile().X < 2.0f,
+          "just short of the next tile has not committed it");
+    const WalkStep eastTile = Hold(east, data, rules, WalkDir::East, move * 0.5f, false);
+    Check(eastTile.Kind == WalkStepKind::Moved && At(east, "fixture_a", 2, 1) &&
+              Near(east.DrawTile().X, 2.0f),
+          "crossing that boundary commits the tile in front, not the one after");
+
+    Walker west;
+    Check(west.Enter(data, "fixture_a"), "the west boundary starts on fixture_a");
+    MapTile column;
+    column.X = 4;
+    column.Y = 1;
+    Check(west.Place(data, "fixture_a", column), "the west boundary stands on 4,1");
+    const WalkStep shortWest = Hold(west, data, rules, WalkDir::West, move * 0.999f, true);
+    Check(shortWest.Kind == WalkStepKind::None && At(west, "fixture_a", 4, 1) &&
+              west.DrawTile().X < 3.02f && west.DrawTile().X > 3.0f,
+          "just short of the western tile has not committed it");
+    const WalkStep westTile = Hold(west, data, rules, WalkDir::West, move * 0.5f, false);
+    Check(westTile.Kind == WalkStepKind::Moved && At(west, "fixture_a", 3, 1) &&
+              Near(west.DrawTile().X, 3.0f),
+          "crossing westward commits the tile in front, not the one after");
+}
+
+void TestSettle()
+{
+    Database data = Loaded(kSample, "fixture maps load for settling");
+    if (!data.IsLoaded())
+        return;
+    WalkRules rules = data.GetWalk();
+    rules.MoveMilliseconds = 1000;
+    rules.SettleMilliseconds = 1000;
+    rules.Easing = WalkEase::Linear;
+    const f32 move = MoveSeconds(rules);
+    const f32 settle = SettleSeconds(rules);
+
+    Walker walker;
+    Check(walker.Enter(data, "fixture_a"), "settle starts on fixture_a");
+    Check(Hold(walker, data, rules, WalkDir::East, move * 0.35f, true).Kind == WalkStepKind::None,
+          "the release test leaves the hero between tiles");
+    const WalkPoint mid = walker.DrawTile();
+    Check(Release(walker, data, rules, 0.0f).Kind == WalkStepKind::None &&
+              Near(walker.DrawTile().X, mid.X) && Near(walker.DrawTile().Y, mid.Y) &&
+              At(walker, "fixture_a", 1, 1),
+          "releasing does not pop the drawn point or the tile");
+    const WalkStep landed = Release(walker, data, rules, settle);
+    Check(landed.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 2, 1) &&
+              Near(walker.DrawTile().X, 2.0f) && !walker.Moving(),
+          "a release glides forward to the next tile and then stops");
+
+    Walker aligned;
+    Check(aligned.Enter(data, "fixture_a"), "an aligned release starts on fixture_a");
+    Check(Hold(aligned, data, rules, WalkDir::East, move, true).Kind == WalkStepKind::Moved &&
+              At(aligned, "fixture_a", 2, 1),
+          "a full tile is the committed place");
+    Check(Release(aligned, data, rules, settle).Kind == WalkStepKind::None &&
+              At(aligned, "fixture_a", 2, 1),
+          "releasing on a tile does not take another");
+
+    Walker stopped;
+    Check(stopped.Enter(data, "fixture_a"), "halt starts on fixture_a");
+    Hold(stopped, data, rules, WalkDir::East, move * 0.4f, true);
+    stopped.Halt();
+    Check(!stopped.Moving() && At(stopped, "fixture_a", 1, 1) && Near(stopped.DrawTile().X, 1.0f),
+          "halt stands on the committed tile");
+}
+
+void TestBuffer()
+{
+    Database data = Loaded(kSample, "fixture maps load for a buffered turn");
+    if (!data.IsLoaded())
+        return;
+    WalkRules rules = data.GetWalk();
+    rules.MoveMilliseconds = 1000;
+    rules.SettleMilliseconds = 1000;
+    rules.Easing = WalkEase::Linear;
+    const f32 move = MoveSeconds(rules);
+    const f32 settle = SettleSeconds(rules);
+
+    Walker walker;
+    Check(walker.Enter(data, "fixture_a"), "the buffer starts on fixture_a");
+    MapTile column;
+    column.X = 4;
+    column.Y = 1;
+    Check(walker.Place(data, "fixture_a", column), "the buffer stands on 4,1");
+
+    Check(Hold(walker, data, rules, WalkDir::West, move * 0.4f, true).Kind == WalkStepKind::None &&
+              At(walker, "fixture_a", 4, 1),
+          "west has not reached the next tile yet");
+    const WalkPoint beforeTurn = walker.DrawTile();
+    const WalkStep arrived =
+        Hold(walker, data, rules, WalkDir::South, move, true);
+    Check(arrived.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 3, 1) &&
+              Near(walker.DrawTile().Y, beforeTurn.Y),
+          "a press during travel is kept until the tile is reached");
+
+    const WalkStep turned = Release(walker, data, rules, settle);
+    Check(turned.Kind == WalkStepKind::Moved && At(walker, "fixture_a", 3, 2) &&
+              Near(walker.DrawTile().X, 3.0f) && Near(walker.DrawTile().Y, 2.0f),
+          "the buffered direction glides one tile after the release");
+
+    Walker reverse;
+    Check(reverse.Enter(data, "fixture_a"), "reverse starts on fixture_a");
+    Check(reverse.Place(data, "fixture_a", column), "reverse stands on 4,1");
+    Hold(reverse, data, rules, WalkDir::West, move * 0.5f, true);
+    const WalkPoint mid = reverse.DrawTile();
+    Hold(reverse, data, rules, WalkDir::East, move * 0.2f, true);
+    Check(At(reverse, "fixture_a", 4, 1) && reverse.DrawTile().X > mid.X,
+          "the opposite direction reverses immediately");
+}
+
+void TestEasing()
+{
+    Database data = Loaded(kSample, "fixture maps load for easing");
+    if (!data.IsLoaded())
+        return;
+    WalkRules linear = data.GetWalk();
+    linear.MoveMilliseconds = 1000;
+    linear.SettleMilliseconds = 1000;
+    linear.Easing = WalkEase::Linear;
+    WalkRules smooth = linear;
+    smooth.Easing = WalkEase::Smooth;
+    const f32 move = MoveSeconds(linear);
+    const f32 slice = 0.75f * SettleSeconds(linear) * 0.25f;
+
+    Walker straight;
+    Walker curved;
+    Check(straight.Enter(data, "fixture_a") && curved.Enter(data, "fixture_a"),
+          "easing starts on fixture_a");
+    Hold(straight, data, linear, WalkDir::East, move * 0.25f, true);
+    Hold(curved, data, smooth, WalkDir::East, move * 0.25f, true);
+    Release(straight, data, linear, 0.0f);
+    Release(curved, data, smooth, 0.0f);
+    Release(straight, data, linear, slice);
+    Release(curved, data, smooth, slice);
+    Check(Near(straight.DrawTile().X, 1.4375f), "linear settle covers a quarter of the gap");
+    Check(Near(curved.DrawTile().X, 1.3671875f), "smooth settle is behind linear at that time");
+}
+
+void TestSpawnGlide()
+{
+    SpawnPlace wolf;
+    wolf.Id = "wolf";
+    wolf.Tile.X = 1;
+    wolf.Tile.Y = 1;
+    SpawnPlace stand;
+    stand.Id = "stand";
+    stand.Tile.X = 4;
+    stand.Tile.Y = 1;
+    std::vector<SpawnPlace> places;
+    places.push_back(wolf);
+    places.push_back(stand);
+
+    SpawnGlides glides;
+    glides.Snap(places);
+    const WalkPoint snapped = glides.Sample("wolf", wolf.Tile);
+    Check(Near(snapped.X, 1.0f) && Near(snapped.Y, 1.0f), "a snap stands on the tile");
+
+    places[0].Tile.X = 2;
+    const f32 move = 0.18f;
+    glides.Advance(places, 0.0f, move);
+    Check(Near(glides.Sample("wolf", wolf.Tile).X, 1.0f),
+          "retargeting does not pop the drawn point");
+    glides.Advance(places, move * 0.5f, move);
+    const WalkPoint half = glides.Sample("wolf", wolf.Tile);
+    const WalkPoint other = glides.Sample("stand", stand.Tile);
+    Check(Near(half.X, 1.5f) && Near(half.Y, 1.0f), "a mover glides across the tile at move speed");
+    Check(Near(other.X, 4.0f) && Near(other.Y, 1.0f), "a spawn that stayed put is not dragged");
+    glides.Advance(places, move * 0.5f, move);
+    Check(Near(glides.Sample("wolf", wolf.Tile).X, 2.0f), "the mover arrives on the new tile");
+
+    places[0].Tile.X = 4;
+    glides.Advance(places, 0.0f, move);
+    Check(Near(glides.Sample("wolf", wolf.Tile).X, 2.0f), "a second retarget keeps the current point");
+    glides.Advance(places, move * 0.5f, move);
+    Check(Near(glides.Sample("wolf", wolf.Tile).X, 2.5f),
+          "the glide continues from the current point toward the new tile");
+}
+
 void TestBadWalkFile()
 {
     {
@@ -485,13 +748,30 @@ void TestBadWalkFile()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "walk.json", "\"stepMilliseconds\": 180",
-                      "\"stepMilliseconds\": 0");
+        ReplaceInFile(copy.Path / "walk.json", "\"moveMilliseconds\": 180",
+                      "\"moveMilliseconds\": 0");
         Database data(copy.Path);
         DataError loadError;
-        Check(!data.Load(&loadError), "a zero step time fails");
-        CheckHas(loadError.Message, "walk.json", "the step error names the file");
-        CheckHas(loadError.Message, "stepMilliseconds", "the step error names the field");
+        Check(!data.Load(&loadError), "a zero move time fails");
+        CheckHas(loadError.Message, "walk.json", "the move error names the file");
+        CheckHas(loadError.Message, "moveMilliseconds", "the move error names the field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "walk.json", "\"settleMilliseconds\": 180",
+                      "\"settleMilliseconds\": 0");
+        Database data(copy.Path);
+        DataError loadError;
+        Check(!data.Load(&loadError), "a zero settle time fails");
+        CheckHas(loadError.Message, "settleMilliseconds", "the settle error names the field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "walk.json", "\"easing\": \"linear\"", "\"easing\": \"bounce\"");
+        Database data(copy.Path);
+        DataError loadError;
+        Check(!data.Load(&loadError), "an unknown easing fails");
+        CheckHas(loadError.Message, "easing", "the easing error names the field");
     }
     {
         TempCopy copy;
@@ -511,6 +791,12 @@ int main()
     TestRules();
     TestPlace();
     TestSteps();
+    TestGlideTiming();
+    TestNearBoundary();
+    TestSettle();
+    TestBuffer();
+    TestEasing();
+    TestSpawnGlide();
     TestScriptPath();
     TestIdleSteps();
     TestCamera();

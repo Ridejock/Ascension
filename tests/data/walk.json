@@ -1,6 +1,8 @@
 {
   "walk": {
-    "stepMilliseconds": 180,
+    "moveMilliseconds": 180,
+    "settleMilliseconds": 180,
+    "easing": "linear",
     "tilePixels": 64,
     "heroInsetPercent": 22,
     "heroColor": "#DFD5BC",

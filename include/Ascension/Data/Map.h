@@ -118,8 +118,14 @@ struct MapSpawnRef {
     const MapSpawn* Spawn = nullptr;
 };
 
-// How a hero steps, from walk.json. The first press of a direction steps at once.
-// StepMilliseconds is the pause before another step while that direction stays held.
+// How a released glide eases onto its tile. Linear holds a constant settle speed.
+// Smooth is smoothstep. Held movement does not use this: that speed stays flat,
+// so a held direction does not slow down at each tile.
+enum class WalkEase : u8 { Linear, Smooth };
+
+// How the hero moves, from walk.json. MoveMilliseconds is the time to cross one
+// tile while a direction is held. SettleMilliseconds is the time to glide one tile
+// after that direction is released; a shorter gap takes the same fraction of it.
 // TilePixels is the drawn size of one cell. HeroInsetPercent is the empty margin on
 // each side of the hero square, so 0 fills the cell. The three colors are palette
 // rectangles: the hero, the inner square on an exit, and the inner square on a
@@ -127,7 +133,9 @@ struct MapSpawnRef {
 // match data/walk.json; the file is what a load uses. A file that omits a point
 // color keeps the number below.
 struct WalkRules {
-    i32 StepMilliseconds = 180;
+    i32 MoveMilliseconds = 180;
+    i32 SettleMilliseconds = 180;
+    WalkEase Easing = WalkEase::Linear;
     i32 TilePixels = 64;
     i32 HeroInsetPercent = 22;
     u8 HeroRed = 223;
