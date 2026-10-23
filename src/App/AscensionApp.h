@@ -259,6 +259,7 @@ private:
     std::string m_RestMap;
     MapTile m_RestTile;
     // Start pauses. Cancel or Start again resumes. The map and further actions wait.
+    // Edges are still read while this is set: the resume press lasts one frame.
     bool m_Paused = false;
     // Back/View and the help key hide the line at the bottom. The map's tile prompt stays.
     bool m_ShowHelp = true;

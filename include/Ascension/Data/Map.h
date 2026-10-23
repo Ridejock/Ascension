@@ -198,4 +198,53 @@ inline const char* ToString(MoverKind)
     return "idle";
 }
 
+// What a packed map asks for on a point. Square is the palette rectangle.
+// Npc names a dialogue id. Shop and Rest are markers, not content ids.
+enum class PointArt : u8 { Square, Npc, Shop, Rest };
+
+struct PointPicture {
+    PointArt Art = PointArt::Square;
+    std::string_view Dialogue;
+};
+
+// True when a talk point on this map already stands for `dialogue`.
+[[nodiscard]] inline bool MapTalks(const MapDef& map, std::string_view dialogue)
+{
+    if (dialogue.empty())
+        return false;
+    for (const MapPoint& point : map.Points) {
+        if (point.Kind == MapPointKind::Talk && point.Dialogue == dialogue)
+            return true;
+    }
+    return false;
+}
+
+// A talk point is that dialogue's sprite. A rest point is the rest marker.
+// A shop point is the shop's dialogue sprite only when that id is set and no
+// talk point on this map already uses it. Otherwise it is the shop marker,
+// including a shop whose dialogue is empty.
+[[nodiscard]] inline PointPicture PictureForPoint(const MapDef& map, const MapPoint& point,
+                                                  std::string_view shopDialogue)
+{
+    PointPicture picture;
+    if (point.Kind == MapPointKind::Talk) {
+        picture.Art = PointArt::Npc;
+        picture.Dialogue = point.Dialogue;
+        return picture;
+    }
+    if (point.Kind == MapPointKind::Rest) {
+        picture.Art = PointArt::Rest;
+        return picture;
+    }
+    if (point.Kind == MapPointKind::Shop) {
+        if (!shopDialogue.empty() && !MapTalks(map, shopDialogue)) {
+            picture.Art = PointArt::Npc;
+            picture.Dialogue = shopDialogue;
+            return picture;
+        }
+        picture.Art = PointArt::Shop;
+    }
+    return picture;
+}
+
 } // namespace Ascension

@@ -1562,28 +1562,29 @@ void AscensionApp::PollActions(f32 dt)
     if (!m_Data.IsLoaded())
         return;
     NotePromptDevice();
-    if (m_Paused) {
-        if (Pressed(kQuit))
-            HandleAction(kQuit);
-        if (Pressed(kSave))
-            HandleAction(kSave);
-        if (Pressed(kHelp))
-            HandleAction(kHelp);
-        if (Pressed(kPause))
-            HandleAction(kPause);
-        if (Pressed(kCancel))
-            HandleAction(kCancel);
-        return;
-    }
+    // Quit still wins, including while paused. Save and help are read before the
+    // pause edge so a resume on the same frame still writes the run.
     if (Pressed(kQuit)) {
         HandleAction(kQuit);
         return;
     }
-    if (Pressed(kPause)) {
-        HandleAction(kPause);
-        if (m_Paused)
-            return;
+    if (m_Paused) {
+        if (Pressed(kSave))
+            HandleAction(kSave);
+        if (Pressed(kHelp))
+            HandleAction(kHelp);
     }
+    // OnUpdate only calls this when ReadActionEdges is true, so this is a live
+    // frame. StepPause, not HandleAction, owns the edge: calling both would
+    // toggle twice on the same press and leave the game paused.
+    const bool wasPaused = m_Paused;
+    m_Paused = StepPause(GetInput(), m_Paused, false);
+    if (m_Paused != wasPaused) {
+        Note(m_Paused ? "Paused." : "Resumed.");
+        return;
+    }
+    if (m_Paused)
+        return;
     if (Pressed(kSave))
         HandleAction(kSave);
     if (Pressed(kHelp))
@@ -1955,18 +1956,17 @@ void AscensionApp::HandleAction(std::string_view action)
         m_ShowHelp = !m_ShowHelp;
         return;
     }
-    if (action == kPause) {
-        m_Paused = !m_Paused;
-        Note(m_Paused ? "Paused." : "Resumed.");
+    // Scripted keys arrive here, not through StepPause. A live frame already
+    // applied the edge in PollActions and must not reach this branch.
+    if (action == kPause || (m_Paused && action == kCancel)) {
+        const bool next = PauseAfter(m_Paused, action);
+        if (next != m_Paused)
+            Note(next ? "Paused." : "Resumed.");
+        m_Paused = next;
         return;
     }
-    if (m_Paused) {
-        if (action == kCancel) {
-            m_Paused = false;
-            Note("Resumed.");
-        }
+    if (m_Paused)
         return;
-    }
     ScriptedPressQuery window;
     window.ScriptRunning = m_KeyCursor < m_Play.Keys.size();
     window.FromScript = m_ApplyingScript;
@@ -2235,7 +2235,8 @@ void AscensionApp::OnUpdate(f32 dt)
     PlayScriptedKey();
     MaybeSettle();
     const bool scripting = m_KeyCursor < m_Play.Keys.size();
-    if (!scripting && !m_Paused)
+    // Pause does not skip this. The resume edge is only true on its own frame.
+    if (ReadActionEdges(scripting, m_Paused))
         PollActions(dt);
     if (!m_Paused && m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
         StepMap(dt);

@@ -158,17 +158,22 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                 continue;
             const f32 left = (static_cast<f32>(point.Tile.X) - frame.OriginX) * tile + inset;
             const f32 top = (static_cast<f32>(point.Tile.Y) - frame.OriginY) * tile + inset;
+            // PictureForPoint is the only choice. A keeper already standing as a
+            // talk point is not drawn again on the shop. A missing sprite, or a
+            // shop with no dialogue, still falls through to the shop marker.
+            const PointPicture picture =
+                PictureForPoint(*map, point, data.GetShop().Dialogue);
             bool drewNpc = false;
-            if (packed && point.Kind == MapPointKind::Talk)
-                drewNpc = DrawArt(renderer, art, ArtSlot::NpcSprite, point.Dialogue, {left, top},
+            if (packed && picture.Art == PointArt::Npc) {
+                drewNpc = DrawArt(renderer, art, ArtSlot::NpcSprite, picture.Dialogue, {left, top},
                                   {inner, inner}, white);
-            else if (packed && point.Kind == MapPointKind::Shop) {
-                drewNpc = DrawArt(renderer, art, ArtSlot::NpcSprite, data.GetShop().Dialogue,
-                                  {left, top}, {inner, inner}, white);
-                if (!drewNpc)
+                if (!drewNpc && point.Kind == MapPointKind::Shop)
                     drewNpc = DrawArt(renderer, art, ArtSlot::ShopMarker, "", {left, top},
                                       {inner, inner}, white);
-            } else if (packed && point.Kind == MapPointKind::Rest)
+            } else if (packed && picture.Art == PointArt::Shop)
+                drewNpc = DrawArt(renderer, art, ArtSlot::ShopMarker, "", {left, top},
+                                  {inner, inner}, white);
+            else if (packed && picture.Art == PointArt::Rest)
                 drewNpc = DrawArt(renderer, art, ArtSlot::RestMarker, "", {left, top},
                                   {inner, inner}, white);
             if (!drewNpc) {
