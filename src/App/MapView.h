@@ -14,6 +14,7 @@ namespace Ascension {
 // `cleared` is the spawn ids a win already removed. Those tiles are not drawn.
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
-                   i32 focus, i32 maxFocus, std::span<const std::string> cleared);
+                   i32 focus, i32 maxFocus, std::span<const std::string> cleared,
+                   std::span<const SpawnPlace> places = {});
 
 } // namespace Ascension

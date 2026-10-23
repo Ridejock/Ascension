@@ -247,8 +247,17 @@ void ApplySnap(CombatantState& who, const CombatantSnapshot& shot, bool hero)
     who.SkillUseCounts = shot.SkillUseCounts;
 }
 
-// A fight draws at most this many enemies. A corpse does not hold one of these seats.
-constexpr i32 kMaxCombatants = 3;
+// How many foes this fight seats. combat.json maxFoes, which is 3 in the shipped file.
+// A corpse does not hold one of these seats. A missing database keeps that 3.
+i32 FightCap(const Database* data)
+{
+    if (data == nullptr)
+        return 3;
+    const i32 cap = data->GetRules().MaxFoes;
+    if (cap < 1)
+        return 1;
+    return cap;
+}
 
 // The first copy of a repeated name stays as it is. Later copies gain " 2", " 3", and so on.
 // Call NameCombatants so every name is the enemy's own name before this runs.
@@ -543,7 +552,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
             error = "encounter '" + m_EncounterId + "' does not exist";
             return false;
         }
-        ids = encounter->Enemies;
+        ids = m_Roster.empty() ? encounter->Enemies : m_Roster;
         encounterName = encounter->Name;
     } else if (!m_FallbackEnemy.empty()) {
         if (m_Data->FindEnemy(m_FallbackEnemy) == nullptr) {
@@ -580,6 +589,11 @@ bool Battle::Build(std::string& error, bool keepWounds)
 
     const std::vector<CombatantState> previous = m_Enemies;
     const i32 previousBase = m_BaseCount;
+    if (static_cast<i32>(ids.size()) > FightCap(m_Data)) {
+        error = "the fight cannot seat more than " + std::to_string(FightCap(m_Data)) + " foes";
+        return false;
+    }
+
     std::vector<CombatantState> foes;
     foes.reserve(ids.size() + 2);
     for (usize slot = 0; slot < ids.size(); ++slot) {
@@ -596,7 +610,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     }
     if (keepWounds) {
         for (i32 extra = previousBase; extra < static_cast<i32>(previous.size()); ++extra) {
-            if (foes.size() >= static_cast<usize>(kMaxCombatants))
+            if (foes.size() >= static_cast<usize>(FightCap(m_Data)))
                 break;
             const CombatantState& older = previous[static_cast<usize>(extra)];
             const EnemyDef* def = m_Data->FindEnemy(older.Id);
@@ -632,13 +646,30 @@ bool Battle::Build(std::string& error, bool keepWounds)
 bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId,
                    std::string& error)
 {
+    m_Roster.clear();
     return StartFight(classId, level, enemyId, false, 0, 0, error);
 }
 
 bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId,
                    OpeningPools pools, std::string& error)
 {
+    m_Roster.clear();
     return StartFight(classId, level, enemyId, true, pools.Hp, pools.Focus, error);
+}
+
+bool Battle::Start(std::string_view classId, i32 level, std::string_view encounterId,
+                   std::span<const std::string> foeIds, OpeningPools pools, std::string& error)
+{
+    if (foeIds.empty()) {
+        error = "the fight has no foes";
+        return false;
+    }
+    m_Roster.assign(foeIds.begin(), foeIds.end());
+    if (!StartFight(classId, level, encounterId, true, pools.Hp, pools.Focus, error)) {
+        m_Roster.clear();
+        return false;
+    }
+    return true;
 }
 
 bool Battle::StartFight(std::string_view classId, i32 level, std::string_view enemyId,
@@ -1424,7 +1455,7 @@ bool Battle::ImportFight(const FightSnapshot& shot, std::string& error)
         }
     }
     for (i32 index = built; index < static_cast<i32>(shot.Foes.size()); ++index) {
-        if (m_Enemies.size() >= static_cast<usize>(kMaxCombatants)) {
+        if (m_Enemies.size() >= static_cast<usize>(FightCap(m_Data))) {
             error = "the save has too many foes";
             return false;
         }
@@ -1478,6 +1509,26 @@ bool Battle::Inflict(CombatantSide side, std::string_view statusId, std::string&
         }
         Afflict(m_Enemies[static_cast<usize>(m_Target)], *status);
     }
+    error.clear();
+    return true;
+}
+
+bool Battle::GrantStatus(i32 foeIndex, std::string_view statusId, std::string& error)
+{
+    if (!m_Started || m_Data == nullptr) {
+        error = "there is no fight";
+        return false;
+    }
+    if (foeIndex < 0 || foeIndex >= static_cast<i32>(m_Enemies.size())) {
+        error = "there is no enemy to afflict";
+        return false;
+    }
+    const StatusDef* status = m_Data->FindStatus(statusId);
+    if (status == nullptr) {
+        error = "status '" + std::string(statusId) + "' does not exist";
+        return false;
+    }
+    Afflict(m_Enemies[static_cast<usize>(foeIndex)], *status);
     error.clear();
     return true;
 }
@@ -1970,7 +2021,7 @@ Battle::SummonSpot Battle::FindSummonSpot(i32 index) const
 bool Battle::SummonTakesTurn(i32 index) const
 {
     const SummonSpot spot = FindSummonSpot(index);
-    if (spot.Add != nullptr && !spot.Already && spot.Living < kMaxCombatants)
+    if (spot.Add != nullptr && !spot.Already && spot.Living < FightCap(m_Data))
         return true;
     const i32 count = static_cast<i32>(m_Enemies.size());
     const EnemyDef* host = m_Data != nullptr && index >= 0 && index < count
@@ -1989,15 +2040,16 @@ ActionResult Battle::ResolveSummon(i32 index)
     const SummonSpot spot = FindSummonSpot(index);
     result.SkillId = spot.Add != nullptr ? spot.Add->Id : "";
     const i32 count = static_cast<i32>(m_Enemies.size());
+    const i32 cap = FightCap(m_Data);
     if (spot.Add == nullptr) {
         result.Text = spot.HostName + " calls, and nothing answers.";
-    } else if (spot.Already || spot.Living >= kMaxCombatants) {
+    } else if (spot.Already || spot.Living >= cap) {
         result.Text = spot.Add->Name + " is already in the fight.";
     } else {
         CombatantState added;
         MakeFoe(*spot.Add, added);
         i32 joined = spot.OpenSlot;
-        if (count >= kMaxCombatants && spot.OpenSlot >= 0) {
+        if (count >= cap && spot.OpenSlot >= 0) {
             m_Enemies[static_cast<usize>(spot.OpenSlot)] = std::move(added);
         } else {
             m_Enemies.push_back(std::move(added));

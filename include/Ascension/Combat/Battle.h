@@ -223,6 +223,13 @@ public:
     bool Start(std::string_view classId, i32 level, std::string_view enemyId, OpeningPools pools,
                std::string& error);
 
+    // The same encounter name and rules, seating `foeIds` instead of the encounter's
+    // whole list. The map passes the ids a contact seated. When that list is the
+    // encounter's own list, the other Start is the same fight. Empty fails and leaves
+    // the current fight alone.
+    bool Start(std::string_view classId, i32 level, std::string_view encounterId,
+               std::span<const std::string> foeIds, OpeningPools pools, std::string& error);
+
     // A successful reload of the JSON. Keeps the wound, the spent focus and whose action it
     // is. If the class or the enemy is gone, the fight is left unchanged.
     bool ApplyData(std::string& error);
@@ -294,6 +301,12 @@ public:
 
     // Applies a status from statuses.json. Tests place one before a blow.
     bool Inflict(CombatantSide side, std::string_view statusId, std::string& error);
+
+    // Applies a status to that enemy seat. The map calls it after Start, before anyone
+    // acts, with the statuses sampled when the fight was offered. A status the foe
+    // resists does not land, and that is still success. An unknown id or an index
+    // outside the pack fails and does not change the fight.
+    bool GrantStatus(i32 foeIndex, std::string_view statusId, std::string& error);
 
     ActionResult UseSkill(std::string_view skillId);
     ActionResult Wait();
@@ -393,6 +406,9 @@ private:
     std::unique_ptr<TurnModel> m_Turns;
     std::string m_ClassId;
     std::string m_EncounterId;
+    // When set, Build seats these ids instead of the encounter's list. Empty means
+    // the encounter's own list, which is every fight that did not come from a queue.
+    std::vector<std::string> m_Roster;
     std::string m_EncounterName;
     std::string m_FallbackEnemy;
     i32 m_Level = 1;

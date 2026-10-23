@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "Ascension/Map/Movers.h"
 #include "Ascension/Map/Walk.h"
 #include "Check.h"
 
@@ -246,6 +247,82 @@ void TestScriptPath()
           "right right right down walks from the start through the exit");
 }
 
+struct StepMark {
+    i32 X = 0;
+    i32 Y = 0;
+};
+
+void TraceStand(const Database& data, i32 hp, i32 maxHp, std::vector<StepMark>& out)
+{
+    out.clear();
+    const MapDef* map = data.FindMap("fixture_b");
+    if (map == nullptr)
+        return;
+    Walker walker;
+    if (!walker.Enter(data, "fixture_b"))
+        return;
+    MapMemory memory;
+    std::vector<SpawnPlace> places;
+    PlaceSpawns(*map, memory, places);
+    const WalkDir keys[] = {WalkDir::North, WalkDir::South, WalkDir::North, WalkDir::South,
+                            WalkDir::East};
+    for (const WalkDir direction : keys) {
+        const WalkStep step = Press(walker, data, direction);
+        if (step.Kind != WalkStepKind::Moved)
+            continue;
+        MoverContext context;
+        context.Hero = walker.Place().Tile;
+        context.HeroHp = hp;
+        context.HeroMaxHp = maxHp;
+        StepSpawnMovers(data, *map, memory, context, places);
+        if (places.empty())
+            continue;
+        StepMark mark;
+        mark.X = places[0].Tile.X;
+        mark.Y = places[0].Tile.Y;
+        out.push_back(mark);
+    }
+}
+
+void TestIdleSteps()
+{
+    Database data = Loaded(kSample, "fixture maps load for a mover step");
+    if (!data.IsLoaded())
+        return;
+    const MapDef* map = data.FindMap("fixture_b");
+    Check(map != nullptr && map->Spawns.size() == 1 && map->Spawns[0].Mover.Behavior == "stand",
+          "fixture_b names the stand behavior");
+    if (map == nullptr)
+        return;
+    std::vector<StepMark> full;
+    std::vector<StepMark> wounded;
+    std::vector<StepMark> again;
+    TraceStand(data, 100, 100, full);
+    TraceStand(data, 10, 100, wounded);
+    TraceStand(data, 100, 100, again);
+    Check(full.size() == 4 && wounded.size() == 4 && again.size() == 4,
+          "four open steps record the mover");
+    bool stayed = full.size() == wounded.size() && full.size() == again.size();
+    for (usize index = 0; stayed && index < full.size(); ++index) {
+        const bool home = full[index].X == 1 && full[index].Y == 1;
+        const bool same = full[index].X == wounded[index].X && full[index].Y == wounded[index].Y &&
+                          full[index].X == again[index].X && full[index].Y == again[index].Y;
+        if (!home || !same)
+            stayed = false;
+    }
+    Check(stayed, "stand stays on its tile at full health and at a wound, both runs");
+
+    MapMemory memory;
+    std::vector<SpawnPlace> places;
+    PlaceSpawns(*map, memory, places);
+    Check(places.size() == 1 && places[0].Home.X == 1 && places[0].Home.Y == 1 &&
+              places[0].Tile.X == 1 && places[0].Tile.Y == 1,
+          "a fresh place stands on the file tile");
+    RememberClear(memory, "fixture_hold", true);
+    PlaceSpawns(*map, memory, places);
+    Check(places.empty(), "a cleared spawn is not stepped");
+}
+
 void TestCamera()
 {
     Database data = Loaded(kSample, "camera fixture loads");
@@ -435,6 +512,7 @@ int main()
     TestPlace();
     TestSteps();
     TestScriptPath();
+    TestIdleSteps();
     TestCamera();
     TestAdopt();
     TestEdge();

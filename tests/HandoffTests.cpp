@@ -11,6 +11,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Map/Handoff.h"
+#include "Ascension/Map/Movers.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
@@ -167,7 +168,8 @@ void TestOfferAndReturns()
     const MapFightRequest wolf = OfferSpawn(data, *home, approach, memory);
     Check(wolf.Active && wolf.SpawnId == "fixture_spawn" && wolf.EncounterId == "wolf" &&
               wolf.Once && wolf.AllowFlee && wolf.Foes.size() == 1 && wolf.Foes[0] == "wolf" &&
-              wolf.StartStatuses.empty() && TileIs(wolf.SpawnTile, 4, 1) &&
+              wolf.StartStatuses.empty() && wolf.Queue.empty() && wolf.Seats.size() == 1 &&
+              wolf.Seats[0].Statuses.empty() && TileIs(wolf.SpawnTile, 4, 1) &&
               TileIs(wolf.ReturnTile, 3, 1),
           "stepping onto the wolf offers that fight and a step back");
 
@@ -383,6 +385,173 @@ void TestFangOnce()
     Check(second.empty() && found.size() == 1, "a later dire wolf does not drop the fang again");
 }
 
+bool HasStatus(const PartyFoe& foe, std::string_view id)
+{
+    for (const std::string& status : foe.Statuses) {
+        if (status == id)
+            return true;
+    }
+    return false;
+}
+
+const char* kPartyMap =
+    "{\n"
+    "  \"map\": {\n"
+    "    \"id\": \"fixture_party\",\n"
+    "    \"rows\": [\".......\", \".......\", \".......\"],\n"
+    "    \"legend\": { \".\": \"floor\" },\n"
+    "    \"start\": { \"x\": 0, \"y\": 0 },\n"
+    "    \"spawns\": [\n"
+    "      { \"id\": \"seat_a\", \"tile\": { \"x\": 1, \"y\": 1 }, \"encounter\": \"wolf\" },\n"
+    "      { \"id\": \"seat_b\", \"tile\": { \"x\": 2, \"y\": 1 }, \"encounter\": \"wolf\",\n"
+    "        \"aura\": { \"radius\": 1, \"status\": \"exposed\" } },\n"
+    "      { \"id\": \"seat_c\", \"tile\": { \"x\": 3, \"y\": 1 }, \"encounter\": \"wolf\" },\n"
+    "      { \"id\": \"seat_d\", \"tile\": { \"x\": 4, \"y\": 1 }, \"encounter\": \"wolf\" },\n"
+    "      { \"id\": \"seat_e\", \"tile\": { \"x\": 6, \"y\": 1 }, \"encounter\": \"bandit\" }\n"
+    "    ]\n"
+    "  }\n"
+    "}\n";
+
+void TestPartyAndAuras()
+{
+    TempCopy copy;
+    WriteFile(copy.Path / "maps" / "fixture_party.json", kPartyMap);
+    Database data = Loaded(copy.Path, "the party fixture loads");
+    if (!data.IsLoaded())
+        return;
+    const MapDef* map = data.FindMap("fixture_party");
+    Check(map != nullptr && data.GetRules().MaxFoes == 3, "the fixture map and the cap of 3 load");
+    if (map == nullptr)
+        return;
+
+    MapMemory memory;
+    ContactQuery query;
+    query.Tile.X = 1;
+    query.Tile.Y = 1;
+    query.HasFrom = true;
+    query.From.X = 1;
+    query.From.Y = 0;
+    query.Joining.push_back("seat_c");
+    query.Joining.push_back("seat_d");
+    query.Joining.push_back("seat_e");
+    query.Joining.push_back("seat_b");
+    query.Joining.push_back("seat_a");
+    const MapFightRequest fight = OfferSpawn(data, *map, query, memory);
+    Check(fight.Active && fight.SpawnId == "seat_a" && fight.Foes.size() == 3 &&
+              fight.Seats.size() == 3 && fight.Queue.size() == 2,
+          "five foes seat three and queue two");
+    Check(fight.Seats[0].SpawnId == "seat_a" && fight.Seats[0].Id == "wolf" &&
+              fight.Seats[1].SpawnId == "seat_c" && fight.Seats[2].SpawnId == "seat_d" &&
+              fight.Queue[0].SpawnId == "seat_e" && fight.Queue[0].Id == "bandit" &&
+              fight.Queue[1].SpawnId == "seat_b",
+          "the tile's spawn is seated first, then the join order");
+    Check(HasStatus(fight.Seats[0], "exposed") && HasStatus(fight.Seats[1], "exposed") &&
+              fight.Seats[2].Statuses.empty() && fight.Queue[0].Statuses.empty() &&
+              fight.StartStatuses.size() == 1 && fight.StartStatuses[0] == "exposed",
+          "a foe inside another spawn's radius carries that status");
+
+    const PartySplit follow = SplitParty(fight.Queue, data.GetRules().MaxFoes);
+    Check(follow.Seated.size() == 2 && follow.Queued.empty() &&
+              follow.Seated[0].SpawnId == "seat_e" && follow.Seated[1].SpawnId == "seat_b",
+          "the queue is the next fight, in the same order");
+    std::vector<PartyFoe> second = follow.Seated;
+    ApplyMapAuras(data, *map, memory, {}, second);
+    Check(second[0].Statuses.empty() && second[1].Statuses.empty(),
+          "the follow-up samples auras again, and a spawn's own aura does not count");
+
+    ContactQuery holder;
+    holder.Tile.X = 2;
+    holder.Tile.Y = 1;
+    const MapFightRequest own = OfferSpawn(data, *map, holder, memory);
+    Check(own.Active && own.Foes.size() == 1 && own.StartStatuses.empty(),
+          "the aura holder does not buff itself");
+
+    ContactQuery far;
+    far.Tile.X = 6;
+    far.Tile.Y = 1;
+    const MapFightRequest bandit = OfferSpawn(data, *map, far, memory);
+    Check(bandit.Active && bandit.Foes.size() == 1 && bandit.Foes[0] == "bandit" &&
+              bandit.StartStatuses.empty() && bandit.Queue.empty(),
+          "a foe outside the radius carries no status");
+
+    std::vector<SpawnPlace> places;
+    PlaceSpawns(*map, memory, places);
+    for (SpawnPlace& place : places) {
+        if (place.Id != "seat_a")
+            continue;
+        place.Tile.X = 6;
+        place.Tile.Y = 2;
+    }
+    std::vector<PartyFoe> walked;
+    PartyFoe away;
+    away.SpawnId = "seat_a";
+    away.Id = "wolf";
+    walked.push_back(away);
+    ApplyMapAuras(data, *map, memory, places, walked);
+    Check(walked[0].Statuses.empty(), "walking out of the radius drops the status");
+    for (SpawnPlace& place : places) {
+        if (place.Id != "seat_a")
+            continue;
+        place.Tile.X = 1;
+        place.Tile.Y = 1;
+    }
+    ApplyMapAuras(data, *map, memory, places, walked);
+    Check(HasStatus(walked[0], "exposed"), "standing back inside the radius grants it again");
+
+    RememberClear(memory, "seat_b", true);
+    ApplyMapAuras(data, *map, memory, places, walked);
+    Check(walked[0].Statuses.empty(), "a cleared aura no longer grants");
+
+    ReplaceInFile(copy.Path / "combat.json", "\"maxFoes\": 3", "\"maxFoes\": 4");
+    Database wider = Loaded(copy.Path, "maxFoes 4 reloads the party fixture");
+    const MapDef* again = wider.FindMap("fixture_party");
+    Check(wider.IsLoaded() && again != nullptr && wider.GetRules().MaxFoes == 4,
+          "the cap can be raised from the file");
+    if (again == nullptr)
+        return;
+    MapMemory fresh;
+    const MapFightRequest widerFight = OfferSpawn(wider, *again, query, fresh);
+    Check(widerFight.Foes.size() == 4 && widerFight.Queue.size() == 1 &&
+              widerFight.Queue[0].SpawnId == "seat_b",
+          "a cap of 4 seats four and queues the last");
+}
+
+void TestRosterStart()
+{
+    Database data = Loaded(kSample, "roster data loads");
+    if (!data.IsLoaded())
+        return;
+    std::string error;
+    Battle pack(data, std::make_unique<AgilityRoundModel>());
+    Check(pack.Start("fighter", 1, "wolf_pack", error), "the pack still starts whole");
+    Check(pack.Enemies().size() == 3 && pack.EncounterName() == "Wolf Pack",
+          "a list fight still seats the encounter");
+
+    std::vector<std::string> one;
+    one.push_back("wolf");
+    OpeningPools pools;
+    pools.Hp = 40;
+    pools.Focus = 2;
+    Battle seated(data, std::make_unique<AgilityRoundModel>());
+    Check(seated.Start("fighter", 1, "wolf_pack", one, pools, error), "a seated list starts");
+    Check(seated.Enemies().size() == 1 && seated.Enemies()[0].Id == "wolf" &&
+              seated.EncounterName() == "Wolf Pack" && seated.Player().Hp == 40 &&
+              seated.Player().Focus == 2,
+          "the roster seats the ids it was given and keeps the carried pools");
+    Check(seated.GrantStatus(0, "exposed", error) && seated.Enemies()[0].Statuses.size() == 1 &&
+              seated.Enemies()[0].Statuses[0].Id == "exposed" && seated.Enemies()[0].Hp == seated.Enemies()[0].MaxHp,
+          "an opening status lands on that seat and does not change its health");
+    Check(!seated.GrantStatus(2, "exposed", error), "a seat outside the pack is refused");
+    Check(!seated.GrantStatus(0, "no_such", error), "an unknown status is refused");
+    Check(seated.Enemies()[0].Statuses.size() == 1, "a refused status does not add another");
+
+    std::vector<std::string> none;
+    Check(!seated.Start("fighter", 1, "wolf_pack", none, pools, error),
+          "an empty roster does not start");
+    Check(seated.Enemies().size() == 1 && seated.Enemies()[0].Id == "wolf",
+          "the refused roster leaves the fight that was already up");
+}
+
 void TestFleeKeepsTheWound()
 {
     Check(RunSave::kVersion == 4, "the save version records the map");
@@ -402,6 +571,8 @@ int main()
     TestBossCannotFlee();
     TestFoeWoundRoundTrip();
     TestFangOnce();
+    TestPartyAndAuras();
+    TestRosterStart();
     TestFleeKeepsTheWound();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
