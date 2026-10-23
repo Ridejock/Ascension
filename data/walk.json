@@ -5,6 +5,9 @@
     "heroInsetPercent": 22,
     "heroColor": "#DFD5BC",
     "linkColor": "#D09A2A",
-    "spawnColor": "#8AA6BE"
+    "spawnColor": "#8AA6BE",
+    "restColor": "#3A8A3E",
+    "talkColor": "#D08A68",
+    "shopColor": "#B07A44"
   }
 }

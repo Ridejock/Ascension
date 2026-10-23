@@ -1,0 +1,5 @@
+# Headless map route. Level 6, rusty sword, oak shield, the same kit as --chain.
+# One table: every harness build, main (skip the optional room) and fang (take it).
+# A rest on the map refills before the next fight. A win carries HP. Nothing is rebalanced.
+
+./build/debug/bin/Ascension --sim --route

@@ -1,0 +1,31 @@
+{
+  "map": {
+    "id": "barrow_side",
+    "rows": [
+      "############",
+      "#..........#",
+      "#..........#",
+      "#..........#",
+      "############"
+    ],
+    "legend": {
+      "#": "wall",
+      ".": "floor"
+    },
+    "start": { "x": 1, "y": 2 },
+    "spawns": [
+      {
+        "id": "barrow_wolf_pack",
+        "tile": { "x": 5, "y": 2 },
+        "encounter": "wolf_pack"
+      }
+    ],
+    "links": [
+      {
+        "tile": { "x": 10, "y": 2 },
+        "map": "barrow_4",
+        "arrival": { "x": 10, "y": 1 }
+      }
+    ]
+  }
+}

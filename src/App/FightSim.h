@@ -78,6 +78,52 @@ struct ChainQuery {
 
 [[nodiscard]] std::string FormatChain(const std::vector<ChainRow>& rows);
 
+// One step of the walk from the hub to the boss. Fight names an encounter. Rest
+// refills both pools and has an empty encounter id. Side is the optional room:
+// the main route skips it, and the fang route takes it. The order is the order
+// a hero meets them, derived from the maps. Nothing here names a room.
+enum class RouteStepKind : u8 { Fight, Rest };
+
+struct RouteStep {
+    RouteStepKind Kind = RouteStepKind::Fight;
+    bool Side = false;
+    std::string EncounterId;
+    std::string MapId;
+};
+
+// Empty when the maps have a hub, a linked boss (a noFlee spawn, or else the
+// roster boss), and a walk that reaches that boss. Error names what is missing.
+struct MapRoute {
+    std::vector<RouteStep> Steps;
+    std::string Error;
+};
+
+[[nodiscard]] MapRoute CollectMapRoute(const Database& data);
+
+// One fight on that route. FangRoute is the run that takes the side room. Fang
+// is true when a drop from an earlier win on this run is worn. The kit is the
+// chain kit. A rest, and a loss, start the next fight full.
+struct RouteRow {
+    std::string Encounter;
+    std::string Build;
+    bool FangRoute = false;
+    bool Fang = false;
+    i32 StartHp = 0;
+    i32 MaxHp = 0;
+    bool Won = false;
+    i32 HpLeft = 0;
+    i32 FocusLeft = 0;
+    bool Ok = false;
+    std::string Error;
+};
+
+// `query` filters builds the same way the chain does. Both routes are played
+// for each build: the main path, then the path that takes every side step.
+[[nodiscard]] std::vector<RouteRow> SimulateRoute(const Database& data, const ChainQuery& query,
+                                                  std::string& error);
+
+[[nodiscard]] std::string FormatRoute(const std::vector<RouteRow>& rows);
+
 // --sim. No --class prints the rate table for --enemy. A class or a focus plays that
 // one row. 0 when every row was built. Losses are still 0: the table is the result.
 [[nodiscard]] int RunPlaytestSim(const PlaytestOptions& options);

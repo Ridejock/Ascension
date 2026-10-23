@@ -78,7 +78,16 @@ private:
     // Lists the run already keeps. "found" is claimed drops. "defeated" is felled foes.
     // The talk matches those names from data. No item id is named here.
     void FillTalkFacts(TalkList lists[2], TalkFacts& facts) const;
-    bool OpenTalk();
+    // `dialogueId` is a file under data/dialogue/. The fight screen passes the shop's
+    // keeper. A map talk point passes that point's id.
+    bool OpenTalk(std::string_view dialogueId);
+    // The tile under the hero. A talk point opens its dialogue. A shop point opens
+    // the shop. A rest point, and an empty tile, do nothing: rest already ran on
+    // the step. False when there is nothing to open.
+    bool UseMapPoint();
+    // Stands on the saved tile, then `preferred` (--map), then the hub. False when
+    // none of those maps can be entered.
+    bool EnterOverland(std::string_view preferred);
     void HandleTalk(SDL_Scancode scancode);
     void RunTalkAction(std::string_view action);
     void NoteTalk(const DialogueNode& node);
@@ -137,6 +146,7 @@ private:
     i32 m_CampRow = 0;
     bool m_Talk = false;
     i32 m_TalkRow = 0;
+    std::string m_TalkId;
     std::string m_TalkNode;
     std::vector<std::string> m_TalkFlags;
     struct HeldPad {
@@ -157,7 +167,8 @@ private:
     i32 m_PickRow = 0;
     Emerald::AssetHandle<Emerald::TextureAtlas> m_Icons;
     Emerald::AssetHandle<Emerald::Texture> m_Accents;
-    // Set only for --map. The fight screen stays the path when this is false.
+    // The hero is walking a map. A launch with no --enemy opens the hub (or --map
+    // when that was passed). --enemy stays on the fight screen.
     bool m_OnMap = false;
     Walker m_Walker;
     // A scripted key does not reach Emerald's keyboard, so the map records it here

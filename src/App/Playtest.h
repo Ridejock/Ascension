@@ -48,8 +48,8 @@ struct PlaytestOptions {
     std::optional<i32> Level;
     std::string ClassId;
     FightRequest Fight;
-    // --map. Empty stays on the fight screen. A set id opens that map. A spawn
-    // starts its fight; until then no fight is up.
+    // --map. Empty opens the hub. A set id opens that map. A spawn starts its
+    // fight; until then no fight is up. --enemy stays on the fight screen instead.
     std::string MapId;
     std::optional<i32> Gold;
     std::vector<PlaytestItem> Give;
@@ -78,6 +78,14 @@ struct PlaytestOptions {
     // --chain, with --sim. Walks encounters.json in order and carries HP and focus.
     // No --enemy. The single-fight table is unchanged.
     bool Chain = false;
+    // --route, with --sim. Walks the hub's map order, rests where the maps rest,
+    // and prints that route with and without the optional side room. No --enemy.
+    // --chain is the encounter list and is unchanged.
+    bool Route = false;
+
+    // True when this launch walks a map. --enemy stays on the fight screen. --sim
+    // never opens a window. No --map still walks: the hub is the default room.
+    [[nodiscard]] bool OpensOverland() const { return !Sim && Fight.Id.empty(); }
 
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
