@@ -38,8 +38,9 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
-// encounters, items, rarities, shop, combat, progress, tiles, walk), every data/dialogue/*.json
-// file, every data/maps/*.json file, plus the icon sheet under assets/icons, checked
+// encounters, items, rarities, shop, combat, progress, tiles, walk, movers), every
+// data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
+// assets/icons, checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file
 // that changed, and then stayed unchanged for one more check, is read again. A new or
 // removed file under dialogue/ or maps/ is the same kind of change. A failed read keeps
@@ -83,6 +84,8 @@ public:
     // Tile kinds in file order, and maps in file-name order.
     [[nodiscard]] std::span<const TileDef> GetTiles() const { return m_Tiles; }
     [[nodiscard]] std::span<const MapDef> GetMaps() const { return m_Maps; }
+    // Named map steps, in file order. A spawn's mover names one of these.
+    [[nodiscard]] std::span<const MoverDef> GetMovers() const { return m_Movers; }
     // icons_sheet.json. The accent sheet is icons_accent_sheet.png beside it. Dev builds use the
     // source assets/ when that file is present, and a packaged build uses assets/ next to data/.
     [[nodiscard]] const std::filesystem::path& GetIconSheet() const { return m_IconSheet; }
@@ -104,6 +107,7 @@ public:
     [[nodiscard]] const MapDef* FindMap(std::string_view id) const;
     // The map is the one that holds the spawn. Both pointers are null when the id is absent.
     [[nodiscard]] MapSpawnRef FindSpawn(std::string_view id) const;
+    [[nodiscard]] const MoverDef* FindMover(std::string_view id) const;
 
     // Evolutions whose EvolvesFrom is `baseId`, in file order.
     [[nodiscard]] std::vector<const ClassDef*> EvolutionsOf(std::string_view baseId) const;
@@ -176,6 +180,7 @@ private:
     std::vector<DialogueDef> m_Dialogues;
     std::vector<TileDef> m_Tiles;
     std::vector<MapDef> m_Maps;
+    std::vector<MoverDef> m_Movers;
     CombatRules m_Rules;
     ProgressRules m_Progress;
     WalkRules m_Walk;

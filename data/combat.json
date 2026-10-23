@@ -8,6 +8,7 @@
     "defenseDenominator": 2,
     "focusBase": 4,
     "focusPerTurn": 1,
-    "focusOnWait": 2
+    "focusOnWait": 2,
+    "maxFoes": 3
   }
 }

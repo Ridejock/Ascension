@@ -32,6 +32,17 @@ constexpr SDL_Scancode kFleeKey = SDL_SCANCODE_F;
 // the next key, and it still happens on that key's frame.
 constexpr i32 kScriptPumpPasses = 4;
 
+bool SameIds(const std::vector<std::string>& left, const std::vector<std::string>& right)
+{
+    if (left.size() != right.size())
+        return false;
+    for (usize index = 0; index < left.size(); ++index) {
+        if (left[index] != right[index])
+            return false;
+    }
+    return true;
+}
+
 // One row is one direction. BindMapActions and the readers below share it, so a
 // new key cannot be bound without also being read.
 struct MoveBinding {
@@ -552,6 +563,85 @@ bool AscensionApp::OpenBattle(std::string_view fightId, std::string& error)
     return m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, opening, error);
 }
 
+bool AscensionApp::OpenRoster(std::span<const std::string> foeIds, std::string& error)
+{
+    const PoolPair pools = PoolsFrom(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
+    OpeningPools opening;
+    opening.Hp = pools.Hp;
+    opening.Focus = pools.Focus;
+    return m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), m_MapFight.EncounterId, foeIds,
+                           opening, error);
+}
+
+void AscensionApp::ApplyOpeningStatuses()
+{
+    if (m_Battle == nullptr)
+        return;
+    const i32 seats = static_cast<i32>(m_MapFight.Seats.size());
+    for (i32 index = 0; index < seats; ++index) {
+        const PartyFoe& seat = m_MapFight.Seats[static_cast<usize>(index)];
+        for (const std::string& status : seat.Statuses) {
+            std::string error;
+            if (m_Battle->GrantStatus(index, status, error))
+                continue;
+            if (!error.empty())
+                Note(error);
+        }
+    }
+}
+
+void AscensionApp::SyncPlaces()
+{
+    m_Places.clear();
+    m_PlacesMap.clear();
+    if (!m_Walker.Placed())
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    PlaceSpawns(*map, m_MapMemory, m_Places);
+    m_PlacesMap = map->Id;
+}
+
+void AscensionApp::StepMovers()
+{
+    if (!m_Walker.Placed())
+        return;
+    if (m_PlacesMap != m_Walker.Place().MapId)
+        SyncPlaces();
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const std::vector<SpawnPlace> before = m_Places;
+    MoverContext context;
+    context.Hero = m_Walker.Place().Tile;
+    if (m_Hero.IsReady() && m_Inventory.IsReady()) {
+        const PoolCaps caps = HeroPools(m_Data, m_Hero, m_Inventory);
+        const PoolPair pools = PoolsFrom(m_Vitals, caps);
+        context.HeroHp = pools.Hp;
+        context.HeroMaxHp = caps.MaxHp;
+    }
+    if (!StepSpawnMovers(m_Data, *map, m_MapMemory, context, m_Places) || SpawnFightOpen())
+        return;
+    for (const SpawnPlace& place : m_Places) {
+        const SpawnPlace* older = nullptr;
+        for (const SpawnPlace& prior : before) {
+            if (prior.Id == place.Id)
+                older = &prior;
+        }
+        if (older == nullptr)
+            continue;
+        if (older->Tile.X == place.Tile.X && older->Tile.Y == place.Tile.Y)
+            continue;
+        if (place.Tile.X != context.Hero.X || place.Tile.Y != context.Hero.Y)
+            continue;
+        ContactQuery query;
+        query.Tile = context.Hero;
+        TouchSpawn(query);
+        return;
+    }
+}
+
 void AscensionApp::RememberDefeat()
 {
     if (m_VitalsSettled || m_Battle == nullptr)
@@ -591,7 +681,7 @@ void AscensionApp::TouchSpawn(const ContactQuery& query)
     const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
     if (map == nullptr)
         return;
-    const MapFightRequest request = OfferSpawn(m_Data, *map, query, m_MapMemory);
+    const MapFightRequest request = OfferSpawn(m_Data, *map, query, m_MapMemory, m_Places);
     if (!request.Active)
         return;
     m_MapFight.Active = true;
@@ -602,6 +692,8 @@ void AscensionApp::TouchSpawn(const ContactQuery& query)
     m_MapFight.ReturnTile = request.ReturnTile;
     m_MapFight.Once = request.Once;
     m_MapFight.AllowFlee = request.AllowFlee;
+    m_MapFight.Foes = request.Foes;
+    m_MapFight.Seats = request.Seats;
     BeginSpawnFight();
 }
 
@@ -633,7 +725,13 @@ void AscensionApp::BeginSpawnFight()
     m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
     std::string error;
-    if (!OpenBattle(m_MapFight.EncounterId, error)) {
+    const EncounterDef* encounter = m_Data.FindEncounter(m_MapFight.EncounterId);
+    const bool listed = encounter != nullptr && !m_MapFight.Foes.empty() &&
+                        SameIds(m_MapFight.Foes, encounter->Enemies);
+    const bool opened = listed || m_MapFight.Foes.empty()
+                            ? OpenBattle(m_MapFight.EncounterId, error)
+                            : OpenRoster(m_MapFight.Foes, error);
+    if (!opened) {
         m_StartError = error;
         Note(error);
         m_Battle.reset();
@@ -655,6 +753,7 @@ void AscensionApp::BeginSpawnFight()
             return;
         }
     }
+    ApplyOpeningStatuses();
     if (const FledWounds* wounds = WoundsOf(m_MapMemory, m_MapFight.SpawnId))
         ApplyFoeWounds(*m_Battle, *wounds);
     m_Standing = RunStanding::Ongoing;
@@ -741,6 +840,7 @@ void AscensionApp::MaybeSettle()
 
     m_Battle.reset();
     m_MapFight = {};
+    SyncPlaces();
     if (result == BattleResult::Victory)
         m_Standing = RunStanding::Victory;
     else if (result == BattleResult::Defeat)
@@ -1107,6 +1207,7 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     }
     if (!SpawnFightOpen())
         NoteRest();
+    SyncPlaces();
     return true;
 }
 
@@ -1577,6 +1678,8 @@ void AscensionApp::StepMap(f32 dt)
         Note("Exit to " + m_Walker.Place().MapId + ".");
     else if (step.Kind == WalkStepKind::Blocked && input.Fresh)
         Note("Blocked.");
+    if (step.Kind == WalkStepKind::Exited || m_PlacesMap != m_Walker.Place().MapId)
+        SyncPlaces();
     if (step.Kind == WalkStepKind::Moved || step.Kind == WalkStepKind::Exited) {
         ContactQuery contact;
         contact.Tile = m_Walker.Place().Tile;
@@ -1586,6 +1689,8 @@ void AscensionApp::StepMap(f32 dt)
         }
         TouchSpawn(contact);
     }
+    if (step.Kind == WalkStepKind::Moved && !SpawnFightOpen())
+        StepMovers();
     if (!SpawnFightOpen())
         NoteRest();
 }
@@ -1603,6 +1708,7 @@ void AscensionApp::AdoptMap()
         Note("Back to the start.");
     else
         Note("Data reloaded.");
+    SyncPlaces();
     NoteRest();
 }
 
@@ -1982,7 +2088,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
-                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared);
+                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places);
         renderer.End();
         return;
     }

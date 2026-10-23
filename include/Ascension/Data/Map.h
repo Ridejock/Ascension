@@ -27,10 +27,39 @@ struct TileDef {
     std::string Sheet;
 };
 
-// Present when a spawn lists `mover`. This slice accepts only an empty object.
-// A later step names the step (idle first) on this struct.
+// One named step from movers.json. Idle stands on its tile. The load rejects any
+// other kind, so chase, kite, and forage are a later name plus a branch in the step,
+// not a behavior this file already runs.
+enum class MoverKind : u8 { Idle };
+
+struct MoverDef {
+    std::string Id;
+    MoverKind Kind = MoverKind::Idle;
+};
+
+// Where a spawn is standing. Home is the tile in the map file. Tile is where the
+// last step left it. Idle never moves Tile off Home. The save does not record Tile:
+// only idle ships, so a load still matches the file.
+struct SpawnPlace {
+    std::string Id;
+    MapTile Tile;
+    MapTile Home;
+};
+
+// Present when a spawn lists `mover`. Behavior is an id in movers.json.
 struct SpawnMover {
     bool Listed = false;
+    std::string Behavior;
+};
+
+// A status other spawns carry into a fight when they stand within Radius of this
+// one. Radius is in tiles: the greater of the east-west gap and the north-south gap,
+// so 1 is the eight neighbors. This spawn does not grant the status to itself. A
+// cleared spawn does not grant it. The check runs when the fight is offered.
+struct SpawnAura {
+    bool Listed = false;
+    i32 Radius = 0;
+    std::string Status;
 };
 
 // A foe standing on one tile. Id is unique across every map, so a save can
@@ -44,6 +73,7 @@ struct MapSpawn {
     bool Once = true;
     bool NoFlee = false;
     SpawnMover Mover;
+    SpawnAura Aura;
 };
 
 // A tile that leaves this map. Arrival is a walkable tile on Map.
@@ -122,6 +152,7 @@ struct WalkRules {
 };
 
 [[nodiscard]] const char* ToString(MapPointKind kind);
+[[nodiscard]] const char* ToString(MoverKind kind);
 
 inline bool MapDef::InBounds(i32 x, i32 y) const
 {
@@ -152,6 +183,11 @@ inline const char* ToString(MapPointKind kind)
     if (kind == MapPointKind::Shop)
         return "shop";
     return "rest";
+}
+
+inline const char* ToString(MoverKind)
+{
+    return "idle";
 }
 
 } // namespace Ascension

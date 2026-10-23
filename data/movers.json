@@ -1,0 +1,5 @@
+{
+  "movers": [
+    { "id": "stand", "kind": "idle" }
+  ]
+}
