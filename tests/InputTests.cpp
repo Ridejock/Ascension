@@ -70,9 +70,22 @@ void TestShippedControls(const Database& data)
     const ControlRules& rules = data.GetControls();
     Check(rules.NavInitialMilliseconds == 280, "nav initial pause is 280ms");
     Check(rules.NavRepeatMilliseconds == 120, "nav repeat is 120ms");
+    Check(rules.DebugConfirmMilliseconds == 1500, "new game confirm window is 1500ms");
+    Check(rules.DebugRespawned == "Foes returned." && rules.DebugRespawnBusy == "Finish the fight." &&
+              rules.DebugNewGameArmed == "Press again to start a new game." &&
+              rules.DebugNewGame == "New game.",
+          "debug notes come from input.json");
     Check(rules.Actions.size() == kControlActions.size(), "every control action is listed once");
     for (const std::string_view action : kControlActions)
         Check(FindControl(rules, action) != nullptr, "a required action is present");
+    const ControlBind* respawn = FindControl(rules, kDebugRespawnFoes);
+    const ControlBind* restart = FindControl(rules, kDebugNewGame);
+    Check(respawn != nullptr && respawn->Keys.size() == 1 && respawn->Keys[0] == "F6" &&
+              respawn->Buttons.empty(),
+          "respawn is F6 and has no pad button");
+    Check(restart != nullptr && restart->Keys.size() == 1 && restart->Keys[0] == "F9" &&
+              restart->Buttons.empty(),
+          "new game is F9 and has no pad button");
 
     const PromptRules& prompts = data.GetPrompts();
     Check(prompts.IconScale == 1 && prompts.TextScale == 2, "prompt scales come from prompts.json");
@@ -195,6 +208,29 @@ void TestMapping()
           "restart is not a combat key");
     Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_E)),
           "confirm is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_F6)),
+          "respawn is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_F9)),
+          "new game is not a combat key");
+
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    keyboard.OnKeyDown(SDL_SCANCODE_F6);
+    Check(input.WasActionPressed(kDebugRespawnFoes), "F6 is respawn");
+    Check(!input.WasActionPressed(kSave), "F6 is not save");
+    keyboard.OnKeyUp(SDL_SCANCODE_F6);
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    keyboard.OnKeyDown(SDL_SCANCODE_F9);
+    Check(input.WasActionPressed(kDebugNewGame) && !input.WasActionPressed(kDebugRespawnFoes),
+          "F9 is new game");
+    keyboard.OnKeyUp(SDL_SCANCODE_F9);
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    pads.OnButton(1, Emerald::GamepadButton::South, true);
+    Check(!input.WasActionPressed(kDebugRespawnFoes) && !input.WasActionPressed(kDebugNewGame),
+          "a face button does not respawn or start over");
+    pads.OnButton(1, Emerald::GamepadButton::South, false);
 
     const std::vector<std::string_view> up =
         input.FindActionsUsing(static_cast<Emerald::Key>(SDL_SCANCODE_UP));
@@ -307,6 +343,27 @@ void TestPauseResume()
     Check(paused, "a direction does not resume");
 }
 
+void TestNewGameConfirm()
+{
+    ConfirmWindow window;
+    Check(TapConfirmWindow(window) == ConfirmTap::Armed && window.Armed, "the first press arms");
+    AdvanceConfirmWindow(window, 1.4f, 1500);
+    Check(window.Armed, "1400ms is still inside a 1500ms window");
+    Check(TapConfirmWindow(window) == ConfirmTap::Accepted && !window.Armed,
+          "the second press inside the window accepts");
+
+    Check(TapConfirmWindow(window) == ConfirmTap::Armed, "a later press arms again");
+    AdvanceConfirmWindow(window, 1.5f, 1500);
+    Check(!window.Armed, "the window closes at its data limit");
+    Check(TapConfirmWindow(window) == ConfirmTap::Armed && window.Armed,
+          "a press after the window arms instead of starting over");
+
+    AdvanceConfirmWindow(window, 0.0f, 1500);
+    Check(window.Armed, "a zero step does not spend the window");
+    AdvanceConfirmWindow(window, -1.0f, 1500);
+    Check(window.Armed, "a backward step does not close the window");
+}
+
 void TestRejectedData()
 {
     {
@@ -338,6 +395,15 @@ void TestRejectedData()
         Check(!data.Load(&error), "a missing glyph tile fails the load");
         Check(error.Message.find("nope") != std::string::npos, "the error names the tile");
     }
+    {
+        TempCopy copy;
+        ReplaceIn(copy.Path / "input.json", "\"debugConfirmMilliseconds\": 1500,\n", "");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "a missing confirm window fails the load");
+        Check(error.Message.find("debugConfirmMilliseconds") != std::string::npos,
+              "the error names the confirm window");
+    }
 }
 
 } // namespace
@@ -357,6 +423,7 @@ int main()
         TestShippedControls(shipped);
     TestMapping();
     TestPauseResume();
+    TestNewGameConfirm();
     TestRejectedData();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     SDL_Quit();

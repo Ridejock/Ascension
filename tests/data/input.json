@@ -2,6 +2,11 @@
   "controls": {
     "navInitialMilliseconds": 280,
     "navRepeatMilliseconds": 120,
+    "debugConfirmMilliseconds": 1500,
+    "debugRespawned": "Foes returned.",
+    "debugRespawnBusy": "Finish the fight.",
+    "debugNewGameArmed": "Press again to start a new game.",
+    "debugNewGame": "New game.",
     "actions": [
       { "name": "MoveNorth", "keys": ["W", "Up"], "buttons": ["DPadUp", "LeftStickUp"] },
       { "name": "MoveSouth", "keys": ["S", "Down"], "buttons": ["DPadDown", "LeftStickDown"] },
@@ -30,7 +35,9 @@
       { "name": "Slot5", "keys": ["5"], "buttons": [] },
       { "name": "Slot6", "keys": ["6"], "buttons": [] },
       { "name": "Slot7", "keys": ["7"], "buttons": [] },
-      { "name": "Slot8", "keys": ["8"], "buttons": [] }
+      { "name": "Slot8", "keys": ["8"], "buttons": [] },
+      { "name": "DebugRespawnFoes", "keys": ["F6"], "buttons": [] },
+      { "name": "DebugNewGame", "keys": ["F9"], "buttons": [] }
     ]
   }
 }

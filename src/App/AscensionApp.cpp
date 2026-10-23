@@ -1562,12 +1562,18 @@ void AscensionApp::PollActions(f32 dt)
     if (!m_Data.IsLoaded())
         return;
     NotePromptDevice();
-    // Quit still wins, including while paused. Save and help are read before the
-    // pause edge so a resume on the same frame still writes the run.
+    // Quit still wins, including while paused. Save, help, and the debug actions
+    // are read before the pause edge so a resume on the same frame still writes
+    // the run. Each debug action is handled once: WasActionPressed stays true
+    // for the whole frame, and a second call would tap the new-game window twice.
     if (Pressed(kQuit)) {
         HandleAction(kQuit);
         return;
     }
+    if (Pressed(kDebugRespawnFoes))
+        HandleAction(kDebugRespawnFoes);
+    if (Pressed(kDebugNewGame))
+        HandleAction(kDebugNewGame);
     if (m_Paused) {
         if (Pressed(kSave))
             HandleAction(kSave);
@@ -1938,6 +1944,93 @@ void AscensionApp::HandleBattle(std::string_view action)
         UseHotkey(digit);
 }
 
+void AscensionApp::DebugRespawnFoes()
+{
+    // Ongoing, or a map fight still on screen after the blow (a path is open, so
+    // the spawn is not cleared yet). Clearing the lists there would bring the foe
+    // back and the settle would remove them again.
+    const bool busy = m_Battle != nullptr &&
+                      (m_Battle->Result() == BattleResult::Ongoing || m_MapFight.Active);
+    RunState run;
+    run.Defeated = m_Defeated;
+    run.Cleared = m_MapMemory.Cleared;
+    const ControlRules& rules = m_Data.GetControls();
+    if (RespawnFoes(run, busy) != FoeRespawn::Returned) {
+        Note(rules.DebugRespawnBusy);
+        return;
+    }
+    m_Defeated = std::move(run.Defeated);
+    m_MapMemory.Cleared = std::move(run.Cleared);
+    if (m_Inventory.IsReady())
+        m_Inventory.SetDefeated(m_Defeated);
+    if (m_OnMap && m_Walker.Placed())
+        SyncPlaces();
+    Note(rules.DebugRespawned);
+}
+
+void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
+{
+    m_Battle.reset();
+    m_MapFight = {};
+    m_MapMemory = {};
+    m_Defeated = fresh.Run.Defeated;
+    m_Found = fresh.Run.Found;
+    m_TalkFlags = fresh.Run.Flags;
+    if (m_Inventory.IsReady())
+        m_Inventory.SetDefeated(m_Defeated);
+    m_DirectEnemy.clear();
+    m_EnemyIndex = 0;
+    m_Standing = RunStanding::None;
+    m_ResumeResources = false;
+    m_AnnounceResume = false;
+    m_ResumeHp = 0;
+    m_ResumeFocus = 0;
+    m_ResumeFight = {};
+    m_ResumeSpawn.clear();
+    m_Vitals = fresh.Pools;
+    m_VitalsSettled = false;
+    m_XpAwarded = false;
+    m_Camp = false;
+    m_CampColumn = 0;
+    m_CampRow = 0;
+    m_Talk = false;
+    m_TalkRow = 0;
+    m_TalkId.clear();
+    m_TalkNode.clear();
+    m_Picking = false;
+    m_PickRow = 0;
+    m_CommandRow = 0;
+    m_ChoiceRow = 0;
+    m_Paused = false;
+    m_RestSeen = false;
+    m_RestMap.clear();
+    m_ScriptDir = WalkDir::None;
+    m_StartError.clear();
+    m_HasPlace = !fresh.Run.MapId.empty();
+    m_PlaceMap = fresh.Run.MapId;
+    m_PlaceTile = fresh.Run.Tile;
+    m_OnMap = false;
+    if (!EnterOverland(""))
+        Note("no hub map");
+}
+
+void AscensionApp::DebugNewGame()
+{
+    const ControlRules& rules = m_Data.GetControls();
+    if (TapConfirmWindow(m_NewGameConfirm) == ConfirmTap::Armed) {
+        Note(rules.DebugNewGameArmed);
+        return;
+    }
+    FreshStart fresh;
+    std::string error;
+    if (!BeginNewGame(m_Data, m_Hero, m_Inventory, fresh, error)) {
+        Note(error.empty() ? "Could not start a new game." : error);
+        return;
+    }
+    ApplyFreshRun(fresh);
+    Note(rules.DebugNewGame);
+}
+
 void AscensionApp::HandleAction(std::string_view action)
 {
     if (action == kQuit) {
@@ -1950,6 +2043,14 @@ void AscensionApp::HandleAction(std::string_view action)
     if (action == kSave) {
         if (WriteSave())
             Note("Saved.");
+        return;
+    }
+    if (action == kDebugRespawnFoes) {
+        DebugRespawnFoes();
+        return;
+    }
+    if (action == kDebugNewGame) {
+        DebugNewGame();
         return;
     }
     if (action == kHelp) {
@@ -2229,6 +2330,10 @@ void AscensionApp::PlayScriptedKey()
 void AscensionApp::OnUpdate(f32 dt)
 {
     m_Gallery.Advance(dt);
+    if (m_Data.IsLoaded()) {
+        AdvanceConfirmWindow(m_NewGameConfirm, dt,
+                             m_Data.GetControls().DebugConfirmMilliseconds);
+    }
     if (!TakeAutoPath())
         return;
     MaybeSettle();
@@ -2538,6 +2643,8 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
     AddHint(hints, kNext, "NEXT");
     AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
     AddHint(hints, kSave, "SAVE");
+    AddHint(hints, kDebugRespawnFoes, "FOES");
+    AddHint(hints, kDebugNewGame, "NEW");
     AddHint(hints, kQuit, "QUIT");
     DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
@@ -2569,15 +2676,20 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
                       shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places, &m_Gallery,
                       &m_Glides);
+        const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
+        f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
         if (const char* word = MapInteractWord(m_Data, m_Walker)) {
             const PromptRules& prompts = m_Data.GetPrompts();
             const bool text = m_PromptFamily.empty() || m_PromptFamily == prompts.TextFamily;
             std::vector<HintChip> hints;
             AddHint(hints, text ? kInteract : kConfirm, word);
-            const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
-            const f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
             DrawHints(renderer, 16.0f, promptY, width - 16.0f, hints, false);
+            promptY += Emerald::DebugTextLineHeight(prompts.TextScale) + 4.0f;
         }
+        std::vector<HintChip> debugHints;
+        AddHint(debugHints, kDebugRespawnFoes, "FOES");
+        AddHint(debugHints, kDebugNewGame, "NEW");
+        DrawHints(renderer, 16.0f, promptY, width - 16.0f, debugHints, true);
         FinishFrame(renderer, width);
         return;
     }
@@ -3140,6 +3252,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
             if (!m_OnMap)
                 AddHint(hints, kNext, "NEXT FOE");
             AddHint(hints, kSave, "SAVE");
+            AddHint(hints, kDebugRespawnFoes, "FOES");
+            AddHint(hints, kDebugNewGame, "NEW");
             AddHint(hints, kQuit, "QUIT");
             AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
         }
