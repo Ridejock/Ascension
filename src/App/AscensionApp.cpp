@@ -937,11 +937,11 @@ void AscensionApp::FillTalkFacts(TalkList lists[2], TalkFacts& facts) const
     facts.Lists = std::span<const TalkList>(lists, 2);
 }
 
-bool AscensionApp::OpenTalk()
+bool AscensionApp::OpenTalk(std::string_view dialogueId)
 {
-    const std::string& id = m_Data.GetShop().Dialogue;
-    if (id.empty())
+    if (dialogueId.empty())
         return false;
+    const std::string id(dialogueId);
     const DialogueDef* talk = m_Data.FindDialogue(id);
     if (talk == nullptr)
         return false;
@@ -953,6 +953,7 @@ bool AscensionApp::OpenTalk()
         return false;
     TalkApplySets(node->Sets, m_TalkFlags);
     m_Talk = true;
+    m_TalkId = id;
     m_TalkNode = node->Id;
     m_TalkRow = 0;
     m_Camp = false;
@@ -987,7 +988,7 @@ void AscensionApp::HandleTalk(SDL_Scancode scancode)
         m_Talk = false;
         return;
     }
-    const DialogueDef* talk = m_Data.FindDialogue(m_Data.GetShop().Dialogue);
+    const DialogueDef* talk = m_Data.FindDialogue(m_TalkId);
     const DialogueNode* node = talk != nullptr ? talk->FindNode(m_TalkNode) : nullptr;
     if (talk == nullptr || node == nullptr) {
         m_Talk = false;
@@ -1045,6 +1046,70 @@ void AscensionApp::HandleTalk(SDL_Scancode scancode)
     NoteTalk(*next);
 }
 
+bool AscensionApp::UseMapPoint()
+{
+    if (!m_Walker.Placed())
+        return false;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return false;
+    const MapTile tile = m_Walker.Place().Tile;
+    const MapPoint* point = nullptr;
+    for (const MapPoint& candidate : map->Points) {
+        if (candidate.Tile.X == tile.X && candidate.Tile.Y == tile.Y)
+            point = &candidate;
+    }
+    if (point == nullptr || point->Kind == MapPointKind::Rest)
+        return false;
+    if (point->Kind == MapPointKind::Talk)
+        return OpenTalk(point->Dialogue);
+    m_Camp = true;
+    m_CampColumn = 0;
+    m_CampRow = 0;
+    m_Picking = false;
+    m_Talk = false;
+    return true;
+}
+
+bool AscensionApp::EnterOverland(std::string_view preferred)
+{
+    bool stood = false;
+    if (m_HasPlace)
+        stood = m_Walker.Place(m_Data, m_PlaceMap, m_PlaceTile);
+    if (!stood && m_HasPlace)
+        stood = m_Walker.Enter(m_Data, m_PlaceMap);
+    if (!stood && !preferred.empty())
+        stood = m_Walker.Enter(m_Data, preferred);
+    // --map names the room on its own. The hub is only the default launch, and
+    // the stand-in when a saved map id is no longer in the data.
+    if (!stood && (preferred.empty() || m_HasPlace)) {
+        for (const MapDef& map : m_Data.GetMaps()) {
+            if (!map.Hub)
+                continue;
+            stood = m_Walker.Enter(m_Data, map.Id);
+            break;
+        }
+    }
+    if (!stood)
+        return false;
+    m_OnMap = true;
+    m_HasPlace = true;
+    m_PlaceMap = m_Walker.Place().MapId;
+    m_PlaceTile = m_Walker.Place().Tile;
+    Note("Map " + m_Walker.Place().MapId + ".");
+    if (!m_ResumeSpawn.empty() && (m_ResumeFight.Known || m_Standing == RunStanding::Ongoing))
+        OpenResumedSpawn();
+    else if (m_Standing == RunStanding::Ongoing) {
+        // A version 3 fight was the encounter list. It names no spawn, so the
+        // map does not open it.
+        m_ResumeFight = {};
+        m_Standing = RunStanding::None;
+    }
+    if (!SpawnFightOpen())
+        NoteRest();
+    return true;
+}
+
 void AscensionApp::OnStart()
 {
     if (!m_Play.Transcript.empty()) {
@@ -1090,37 +1155,18 @@ void AscensionApp::OnStart()
     OpenPads();
     EnsureIcons();
     BindMapActions();
-    if (!m_Play.MapId.empty()) {
-        bool stood = false;
-        if (m_HasPlace)
-            stood = m_Walker.Place(m_Data, m_PlaceMap, m_PlaceTile);
-        if (!stood && m_HasPlace)
-            stood = m_Walker.Enter(m_Data, m_PlaceMap);
-        if (!stood)
-            stood = m_Walker.Enter(m_Data, m_Play.MapId);
-        if (!stood) {
-            m_StartError = "map '" + m_Play.MapId + "' does not exist";
+    // --enemy is the fight screen, including N to the next list row. Anything else
+    // walks. No --map means the hub, and the per-user save when this command did
+    // not build a hero.
+    if (m_Play.Fight.Id.empty()) {
+        if (!EnterOverland(m_Play.MapId)) {
+            m_StartError = m_Play.MapId.empty() ? "no hub map"
+                                                : "map '" + m_Play.MapId + "' does not exist";
             std::fprintf(stderr, "%s\n", m_StartError.c_str());
             Note(m_StartError);
             Quit();
             return;
         }
-        m_OnMap = true;
-        m_HasPlace = true;
-        m_PlaceMap = m_Walker.Place().MapId;
-        m_PlaceTile = m_Walker.Place().Tile;
-        Note("Map " + m_Walker.Place().MapId + ".");
-        if (!m_ResumeSpawn.empty() &&
-            (m_ResumeFight.Known || m_Standing == RunStanding::Ongoing))
-            OpenResumedSpawn();
-        else if (m_Standing == RunStanding::Ongoing) {
-            // A version 3 fight was the encounter list. It names no spawn, so the
-            // map does not open it.
-            m_ResumeFight = {};
-            m_Standing = RunStanding::None;
-        }
-        if (!SpawnFightOpen())
-            NoteRest();
         return;
     }
     if (resumed && (m_Standing == RunStanding::Victory || m_Standing == RunStanding::Defeat)) {
@@ -1186,6 +1232,23 @@ void AscensionApp::OnEvent(const SDL_Event& event)
         return;
     }
     if (m_OnMap && !SpawnFightOpen()) {
+        if (m_Talk) {
+            HandleTalk(event.key.scancode);
+            return;
+        }
+        if (m_Camp) {
+            if (event.key.scancode == SDL_SCANCODE_I) {
+                m_Camp = false;
+                return;
+            }
+            HandleCamp(event.key.scancode);
+            return;
+        }
+        if (event.key.scancode == SDL_SCANCODE_I) {
+            if (!UseMapPoint())
+                Note("Nothing here.");
+            return;
+        }
         // A real key already reached Emerald's keyboard. Only a scripted press,
         // which is injected here and nowhere else, has to be recorded.
         if (m_ApplyingScript)
@@ -1238,7 +1301,7 @@ void AscensionApp::OnEvent(const SDL_Event& event)
             m_Camp = false;
             return;
         }
-        if (OpenTalk())
+        if (OpenTalk(m_Data.GetShop().Dialogue))
             return;
         m_Camp = true;
         m_CampColumn = 0;
@@ -1597,7 +1660,7 @@ void AscensionApp::OnUpdate(f32 dt)
     MaybeSettle();
     PlayScriptedKey();
     MaybeSettle();
-    if (m_OnMap && !SpawnFightOpen())
+    if (m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
         StepMap(dt);
     // Frame time is a float, and Windows file stamps are not stable the way this poll
     // expects. A reload between scripted keys rebuilds the fight on a different frame
@@ -1904,6 +1967,16 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     renderer.Begin(Emerald::Mat4::OrthoPixelSpace(width, height));
 
     if (m_OnMap && !SpawnFightOpen() && m_Data.IsLoaded() && m_StartError.empty()) {
+        if (m_Talk && m_Hero.IsReady()) {
+            DrawTalk(renderer, width, height);
+            renderer.End();
+            return;
+        }
+        if (m_Camp && m_Hero.IsReady()) {
+            DrawCamp(renderer, width, height);
+            renderer.End();
+            return;
+        }
         const PoolCaps caps = m_Hero.IsReady() && m_Inventory.IsReady()
                                   ? HeroPools(m_Data, m_Hero, m_Inventory)
                                   : PoolCaps{};
@@ -2901,6 +2974,10 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     }
     const char* help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
                        "X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT    ESC QUIT";
+    if (m_OnMap) {
+        help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
+               "X SELL    U UNEQUIP    I CLOSE    ESC QUIT";
+    }
     if (m_Hero.ChoicePending()) {
         help = "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    "
                "X SELL    U UNEQUIP    I CLOSE    CHOOSE A PATH BEFORE THE NEXT FIGHT    ESC QUIT";
@@ -2913,7 +2990,7 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
 
 void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
-    const DialogueDef* talk = m_Data.FindDialogue(m_Data.GetShop().Dialogue);
+    const DialogueDef* talk = m_Data.FindDialogue(m_TalkId);
     const DialogueNode* node = talk != nullptr ? talk->FindNode(m_TalkNode) : nullptr;
     if (talk == nullptr || node == nullptr) {
         m_Talk = false;

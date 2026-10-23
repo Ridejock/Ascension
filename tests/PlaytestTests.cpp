@@ -1030,6 +1030,189 @@ void TestChainCarry()
           "the chain table names the win rate and the build");
 }
 
+struct RouteExpect {
+    RouteStepKind Kind;
+    const char* Encounter;
+    bool Side;
+    const char* Map;
+};
+
+const RouteRow* FindRoute(const std::vector<RouteRow>& rows, bool fangRoute, std::string_view encounter)
+{
+    for (const RouteRow& row : rows) {
+        if (row.FangRoute == fangRoute && row.Encounter == encounter)
+            return &row;
+    }
+    return nullptr;
+}
+
+void CheckCarry(const RouteRow* previous, const RouteRow* next, const char* what)
+{
+    if (previous == nullptr || next == nullptr || !previous->Ok || !next->Ok)
+        return;
+    if (previous->Won)
+        Check(next->StartHp == previous->HpLeft, what);
+    else
+        Check(next->StartHp == next->MaxHp, what);
+}
+
+void TestRoute()
+{
+    std::string error;
+    PlaytestOptions route;
+    Check(Parse({"--sim", "--route"}, route, error), "--sim --route parses");
+    Check(route.Sim && route.Route && !route.Chain && route.Fight.Id.empty() && !route.OpensOverland(),
+          "route walks the maps and does not open a window");
+
+    PlaytestOptions launch;
+    Check(Parse({}, launch, error), "a launch with no flags parses");
+    Check(launch.OpensOverland() && launch.LoadsSave() && !launch.DefinesRun() &&
+              launch.MapId.empty() && launch.Fight.Id.empty(),
+          "no flags walks the hub and reads the per-user save");
+
+    PlaytestOptions enemy;
+    Check(Parse({"--enemy", "wolf"}, enemy, error), "--enemy parses");
+    Check(!enemy.OpensOverland() && !enemy.LoadsSave() && enemy.DefinesRun(),
+          "--enemy stays on the fight screen and does not load a save");
+
+    PlaytestOptions alone;
+    Check(!Parse({"--route"}, alone, error), "--route without --sim fails");
+    Check(error.find("--route") != std::string::npos, "the message names --route");
+    Check(!Parse({"--sim", "--route", "--enemy", "wolf"}, alone, error),
+          "--route and --enemy together fail");
+    Check(!Parse({"--sim", "--route", "--chain"}, alone, error), "--route and --chain together fail");
+    Check(!Parse({"--sim", "--route", "--map", "hub"}, alone, error), "--route and --map together fail");
+    Check(!Parse({"--sim", "--route", "--focus", "wolf"}, alone, error),
+          "--route and --focus together fail");
+    Check(!Parse({"--sim"}, alone, error), "--sim without --enemy still fails");
+
+    const fs::path commandsPath = fs::path(ASCENSION_SOURCE_DIR) / "playtest/route/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn && commands.find("--sim --route") != std::string::npos,
+          "the route command file names the harness");
+
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for the route");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    const MapRoute walked = CollectMapRoute(data);
+    if (!walked.Error.empty())
+        std::printf("    %s\n", walked.Error.c_str());
+    const RouteExpect expect[] = {
+        {RouteStepKind::Rest, "", false, "hub"},
+        {RouteStepKind::Fight, "wolf", false, "barrow_1"},
+        {RouteStepKind::Fight, "bandit", false, "barrow_1"},
+        {RouteStepKind::Fight, "tomb_moth", false, "barrow_2"},
+        {RouteStepKind::Fight, "bone_archer", false, "barrow_2"},
+        {RouteStepKind::Rest, "", false, "barrow_2"},
+        {RouteStepKind::Fight, "barrow_sentry", false, "barrow_3"},
+        {RouteStepKind::Fight, "bear", false, "barrow_4"},
+        {RouteStepKind::Fight, "wolf_pack", true, "barrow_side"},
+        {RouteStepKind::Rest, "", false, "barrow_4"},
+        {RouteStepKind::Fight, "oathkeeper_varn", false, "barrow_5"},
+        {RouteStepKind::Fight, "cairn_warden", false, "barrow_6"},
+        {RouteStepKind::Rest, "", false, "barrow_7"},
+        {RouteStepKind::Fight, "barrow_brute", false, "barrow_7"},
+    };
+    Check(walked.Error.empty() && walked.Steps.size() == std::size(expect),
+          "the route is the hub, the rooms, the rests, and the optional pack");
+    const i32 steps = static_cast<i32>(walked.Steps.size());
+    const i32 expectedCount = static_cast<i32>(std::size(expect));
+    const i32 compared = steps < expectedCount ? steps : expectedCount;
+    for (i32 index = 0; index < compared; ++index) {
+        const RouteStep& step = walked.Steps[static_cast<usize>(index)];
+        const RouteExpect& want = expect[index];
+        const bool match = step.Kind == want.Kind && step.Side == want.Side &&
+                           step.EncounterId == want.Encounter && step.MapId == want.Map;
+        if (!match) {
+            std::printf("    step %d was %s on %s (side %d), wanted %s on %s\n", index,
+                        step.EncounterId.c_str(), step.MapId.c_str(), step.Side ? 1 : 0,
+                        want.Encounter, want.Map);
+        }
+        Check(match, "the route step is the next room in map order");
+    }
+
+    ChainQuery query;
+    query.ClassId = "fighter";
+    const std::vector<RouteRow> rows = SimulateRoute(data, query, error);
+    Check(error.empty() && !rows.empty(), "the fighter route builds");
+    const char* mainOrder[] = {"Wolf", "Bandit", "Tomb Moth", "Bone Archer", "Barrow Sentry",
+                               "Bear", "Oathkeeper Varn", "Cairn Warden", "Barrow Brute"};
+    const char* fangOrder[] = {"Wolf", "Bandit", "Tomb Moth", "Bone Archer", "Barrow Sentry",
+                               "Bear", "Wolf Pack", "Oathkeeper Varn", "Cairn Warden",
+                               "Barrow Brute"};
+    i32 mainCount = 0;
+    i32 fangCount = 0;
+    for (const RouteRow& row : rows) {
+        Check(row.Ok && row.Build == "Fighter", "each fighter row was played");
+        if (row.FangRoute)
+            ++fangCount;
+        else
+            ++mainCount;
+    }
+    Check(mainCount == static_cast<i32>(std::size(mainOrder)) &&
+              fangCount == static_cast<i32>(std::size(fangOrder)),
+          "main skips the pack room and fang takes it");
+    for (i32 index = 0; index < mainCount && index < static_cast<i32>(std::size(mainOrder)); ++index) {
+        i32 seen = 0;
+        const RouteRow* row = nullptr;
+        for (const RouteRow& candidate : rows) {
+            if (candidate.FangRoute)
+                continue;
+            if (seen == index)
+                row = &candidate;
+            ++seen;
+        }
+        Check(row != nullptr && row->Encounter == mainOrder[index], "main fights follow the rooms");
+    }
+    for (i32 index = 0; index < fangCount && index < static_cast<i32>(std::size(fangOrder)); ++index) {
+        i32 seen = 0;
+        const RouteRow* row = nullptr;
+        for (const RouteRow& candidate : rows) {
+            if (!candidate.FangRoute)
+                continue;
+            if (seen == index)
+                row = &candidate;
+            ++seen;
+        }
+        Check(row != nullptr && row->Encounter == fangOrder[index], "fang fights take the side room");
+    }
+
+    const RouteRow* wolf = FindRoute(rows, false, "Wolf");
+    const RouteRow* bandit = FindRoute(rows, false, "Bandit");
+    const RouteRow* sentry = FindRoute(rows, false, "Barrow Sentry");
+    const RouteRow* bear = FindRoute(rows, true, "Bear");
+    const RouteRow* pack = FindRoute(rows, true, "Wolf Pack");
+    const RouteRow* varn = FindRoute(rows, false, "Oathkeeper Varn");
+    const RouteRow* fangVarn = FindRoute(rows, true, "Oathkeeper Varn");
+    const RouteRow* brute = FindRoute(rows, false, "Barrow Brute");
+    Check(wolf != nullptr && wolf->StartHp == wolf->MaxHp, "the first fight starts full");
+    CheckCarry(wolf, bandit, "a win's HP is the next fight's start");
+    Check(sentry != nullptr && sentry->StartHp == sentry->MaxHp, "the rest before the sentry refills");
+    Check(varn != nullptr && varn->StartHp == varn->MaxHp && fangVarn != nullptr &&
+              fangVarn->StartHp == fangVarn->MaxHp,
+          "both routes rest before Varn");
+    Check(brute != nullptr && brute->StartHp == brute->MaxHp, "the rest before the brute refills");
+    CheckCarry(bear, pack, "the pack is fought on the HP the bear left");
+    Check(pack != nullptr && !pack->Fang, "the pack is fought before the fang is worn");
+    if (pack != nullptr && pack->Won && fangVarn != nullptr)
+        Check(fangVarn->Fang, "a pack win wears the fang for the later fights");
+    if (pack != nullptr && !pack->Won && fangVarn != nullptr)
+        Check(!fangVarn->Fang, "a pack loss does not wear the fang");
+    Check(varn != nullptr && !varn->Fang, "the main route never wears the fang");
+
+    const std::string table = FormatRoute(rows);
+    Check(table.find("Win%") != std::string::npos && table.find("fang") != std::string::npos &&
+              table.find("main") != std::string::npos,
+          "the route table names both walks and the win rate");
+}
+
 } // namespace
 
 int main()
@@ -1047,6 +1230,7 @@ int main()
     TestPellRumorKeys();
     TestSimRates();
     TestChainCarry();
+    TestRoute();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

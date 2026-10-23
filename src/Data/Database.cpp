@@ -2597,6 +2597,25 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+// Missing key keeps the color already in `red`. A present key has to be #RRGGBB.
+bool ReadColorField(const Json& body, const char* key, u8& red, u8& green, u8& blue,
+                    std::string& error)
+{
+    if (!body.contains(key))
+        return true;
+    const Json& value = body[key];
+    if (!value.is_string()) {
+        error = std::string(key) + " must be #RRGGBB";
+        return false;
+    }
+    std::string why;
+    if (!ParseColor(value.get<std::string>(), red, green, blue, why)) {
+        error = std::string(key) + " " + why;
+        return false;
+    }
+    return true;
+}
+
 bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto body = root.find("walk");
@@ -2607,7 +2626,7 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
     std::string unknown;
     if (!AllowKeys(*body,
                    {"stepMilliseconds", "tilePixels", "heroInsetPercent", "heroColor", "linkColor",
-                    "spawnColor"},
+                    "spawnColor", "restColor", "talkColor", "shopColor"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2637,6 +2656,10 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
         error = "spawnColor " + why;
         return false;
     }
+    if (!ReadColorField(*body, "restColor", rules.RestRed, rules.RestGreen, rules.RestBlue, error) ||
+        !ReadColorField(*body, "talkColor", rules.TalkRed, rules.TalkGreen, rules.TalkBlue, error) ||
+        !ReadColorField(*body, "shopColor", rules.ShopRed, rules.ShopGreen, rules.ShopBlue, error))
+        return false;
     parsed.Walk = rules;
     return true;
 }

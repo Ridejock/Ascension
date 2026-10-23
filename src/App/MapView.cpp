@@ -113,6 +113,25 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     }
 
     if (inner > 0.0f) {
+        const Emerald::Vec4 restColor = ByteColor(rules.RestRed, rules.RestGreen, rules.RestBlue);
+        const Emerald::Vec4 talkColor = ByteColor(rules.TalkRed, rules.TalkGreen, rules.TalkBlue);
+        const Emerald::Vec4 shopColor = ByteColor(rules.ShopRed, rules.ShopGreen, rules.ShopBlue);
+        for (const MapPoint& point : map->Points) {
+            if (point.Tile.X < firstX || point.Tile.X >= lastX || point.Tile.Y < firstY ||
+                point.Tile.Y >= lastY)
+                continue;
+            const Emerald::Vec4* color = &restColor;
+            if (point.Kind == MapPointKind::Talk)
+                color = &talkColor;
+            else if (point.Kind == MapPointKind::Shop)
+                color = &shopColor;
+            const f32 left = (static_cast<f32>(point.Tile.X) - frame.OriginX) * tile + inset;
+            const f32 top = (static_cast<f32>(point.Tile.Y) - frame.OriginY) * tile + inset;
+            DrawCell(renderer, left, top, inner, *color);
+        }
+    }
+
+    if (inner > 0.0f) {
         const Emerald::Vec4 spawnColor =
             ByteColor(rules.SpawnRed, rules.SpawnGreen, rules.SpawnBlue);
         for (const MapSpawn& spawn : map->Spawns) {
@@ -141,6 +160,20 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                               "   FOCUS " + std::to_string(focus) + "/" + std::to_string(maxFocus);
     const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
     Emerald::DrawDebugText(renderer, {16.0f, poolsY}, Upper(pools), label, 2);
+    const MapTile heroTile = walker.Place().Tile;
+    const char* prompt = nullptr;
+    for (const MapPoint& point : map->Points) {
+        if (point.Tile.X != heroTile.X || point.Tile.Y != heroTile.Y)
+            continue;
+        if (point.Kind == MapPointKind::Talk)
+            prompt = "I TALK";
+        else if (point.Kind == MapPointKind::Shop)
+            prompt = "I SHOP";
+    }
+    if (prompt != nullptr) {
+        const f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
+        Emerald::DrawDebugText(renderer, {16.0f, promptY}, prompt, label, 2);
+    }
     const usize shown = std::min(log.size(), static_cast<usize>(4));
     const f32 lineStep = Emerald::DebugTextLineHeight(1) + 2.0f;
     f32 logY = height - 16.0f - static_cast<f32>(shown) * lineStep;

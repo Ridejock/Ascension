@@ -115,6 +115,10 @@ void CheckRules(const Database& data, const char* what)
           "the exit square uses palette gold1");
     Check(rules.SpawnRed == 138 && rules.SpawnGreen == 166 && rules.SpawnBlue == 190,
           "the spawn square uses palette bg2");
+    Check(rules.RestRed == 58 && rules.RestGreen == 138 && rules.RestBlue == 62 &&
+              rules.TalkRed == 208 && rules.TalkGreen == 138 && rules.TalkBlue == 104 &&
+              rules.ShopRed == 176 && rules.ShopGreen == 122 && rules.ShopBlue == 68,
+          "rest, talk, and shop squares use fol1, skinA1, and leath2");
 }
 
 void TestRules()

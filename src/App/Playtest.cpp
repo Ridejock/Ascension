@@ -587,6 +587,16 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
                 return false;
             }
             options.Chain = true;
+        } else if (flag == "--route") {
+            if (attached.has_value()) {
+                error = "--route does not take a value";
+                return false;
+            }
+            if (options.Route) {
+                error = "--route was already set";
+                return false;
+            }
+            options.Route = true;
         } else if (flag == "--runs") {
             if (AlreadySet(sawRuns, flag, error) ||
                 !TakeValue(args, index, attached, flag, value, error))
@@ -629,7 +639,15 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
         error = "--chain is only used with --sim";
         return false;
     }
-    if (options.Sim && !options.Chain && options.Fight.Id.empty()) {
+    if (options.Route && !options.Sim) {
+        error = "--route is only used with --sim";
+        return false;
+    }
+    if (options.Chain && options.Route) {
+        error = "pass --chain or --route, not both";
+        return false;
+    }
+    if (options.Sim && !options.Chain && !options.Route && options.Fight.Id.empty()) {
         error = "--sim needs --enemy";
         return false;
     }
@@ -637,12 +655,28 @@ bool ParsePlaytestOptions(std::span<const std::string_view> args, PlaytestOption
         error = "pass --chain or --enemy, not both";
         return false;
     }
+    if (options.Route && !options.Fight.Id.empty()) {
+        error = "pass --route or --enemy, not both";
+        return false;
+    }
     if (options.Chain && !options.FocusId.empty()) {
         error = "--chain does not take --focus";
         return false;
     }
+    if (options.Route && !options.FocusId.empty()) {
+        error = "--route does not take --focus";
+        return false;
+    }
     if (options.Chain && (sawRuns || sawSeed || sawSlip)) {
         error = "--chain does not take --runs, --seed, or --slip";
+        return false;
+    }
+    if (options.Route && (sawRuns || sawSeed || sawSlip)) {
+        error = "--route does not take --runs, --seed, or --slip";
+        return false;
+    }
+    if (options.Route && !options.MapId.empty()) {
+        error = "pass --route or --map, not both";
         return false;
     }
     if (!options.MapId.empty() && options.Sim) {

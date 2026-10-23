@@ -93,7 +93,9 @@ struct MapSpawnRef {
 // TilePixels is the drawn size of one cell. HeroInsetPercent is the empty margin on
 // each side of the hero square, so 0 fills the cell. The three colors are palette
 // rectangles: the hero, the inner square on an exit, and the inner square on a
-// spawn. The numbers here match data/walk.json; the file is what a load uses.
+// spawn, and the inner squares on a rest, a talk, and a shop. The numbers here
+// match data/walk.json; the file is what a load uses. A file that omits a point
+// color keeps the number below.
 struct WalkRules {
     i32 StepMilliseconds = 180;
     i32 TilePixels = 64;
@@ -107,6 +109,16 @@ struct WalkRules {
     u8 SpawnRed = 138;
     u8 SpawnGreen = 166;
     u8 SpawnBlue = 190;
+    // fol1, skinA1, and leath2 on the project palette.
+    u8 RestRed = 58;
+    u8 RestGreen = 138;
+    u8 RestBlue = 62;
+    u8 TalkRed = 208;
+    u8 TalkGreen = 138;
+    u8 TalkBlue = 104;
+    u8 ShopRed = 176;
+    u8 ShopGreen = 122;
+    u8 ShopBlue = 68;
 };
 
 [[nodiscard]] const char* ToString(MapPointKind kind);

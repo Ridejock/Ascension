@@ -476,6 +476,9 @@ struct RunSpec {
     bool UsePools = false;
     i32 StartHp = 0;
     i32 StartFocus = 0;
+    // Worn on top of the sword, the shield, and the fang flag. Null wears nothing
+    // extra. The route passes drops claimed on earlier wins of that same run.
+    const std::vector<std::string>* Gear = nullptr;
 };
 
 // xorshift32. State 0 is stuck, so a zero result is replaced.
@@ -539,7 +542,8 @@ i32 ChooseSeat(const Battle& battle, const RunSpec& spec, u32& state)
 }
 
 bool PrepareHero(const Database& data, const BuildSpec& build, bool fang,
-                 std::string_view encounterId, Hero& hero, Inventory& inventory, std::string& error)
+                 std::string_view encounterId, const std::vector<std::string>* specGear, Hero& hero,
+                 Inventory& inventory, std::string& error)
 {
     PlaytestOptions options;
     options.Level = kHarnessLevel;
@@ -549,6 +553,10 @@ bool PrepareHero(const Database& data, const BuildSpec& build, bool fang,
     options.Equip.emplace_back("oak_shield");
     if (fang)
         options.Equip.emplace_back("alphas_fang");
+    if (specGear != nullptr) {
+        for (const std::string& id : *specGear)
+            options.Equip.emplace_back(id);
+    }
     if (build.Pick != nullptr)
         options.PickIds.emplace_back(build.Pick);
     PlaytestSetup setup;
@@ -579,7 +587,8 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
 
     Hero hero;
     Inventory inventory;
-    if (!PrepareHero(data, *spec.Build, spec.Fang, spec.EncounterId, hero, inventory, row.Error))
+    if (!PrepareHero(data, *spec.Build, spec.Fang, spec.EncounterId, spec.Gear, hero, inventory,
+                     row.Error))
         return row;
 
     const ClassDef* klass = data.FindClass(hero.ClassId());
@@ -796,6 +805,333 @@ std::string OneDecimal(i64 tenths)
     return text;
 }
 
+struct Reach {
+    std::string Id;
+    std::string From;
+    i32 Dist = 0;
+};
+
+const Reach* FindReach(const std::vector<Reach>& reached, std::string_view id)
+{
+    for (const Reach& row : reached) {
+        if (row.Id == id)
+            return &row;
+    }
+    return nullptr;
+}
+
+const MapDef* RouteHub(const Database& data)
+{
+    for (const MapDef& map : data.GetMaps()) {
+        if (map.Hub)
+            return &map;
+    }
+    return nullptr;
+}
+
+bool RouteTileOpen(const Database& data, const MapDef& map, i32 x, i32 y)
+{
+    const std::string* cell = map.Cell(x, y);
+    if (cell == nullptr)
+        return false;
+    const TileDef* tile = data.FindTile(*cell);
+    return tile != nullptr && !tile->Solid;
+}
+
+void ReachFromHub(const Database& data, const std::string& hubId, std::vector<Reach>& out)
+{
+    Reach start;
+    start.Id = hubId;
+    out.push_back(start);
+    std::vector<std::string> queue;
+    queue.push_back(hubId);
+    usize cursor = 0;
+    while (cursor < queue.size()) {
+        const std::string id = queue[cursor];
+        ++cursor;
+        const Reach* here = FindReach(out, id);
+        const MapDef* map = data.FindMap(id);
+        if (here == nullptr || map == nullptr)
+            continue;
+        const i32 dist = here->Dist;
+        for (const MapLink& link : map->Links) {
+            if (FindReach(out, link.Map) != nullptr || data.FindMap(link.Map) == nullptr)
+                continue;
+            Reach next;
+            next.Id = link.Map;
+            next.From = id;
+            next.Dist = dist + 1;
+            out.push_back(std::move(next));
+            queue.push_back(link.Map);
+        }
+    }
+}
+
+struct BossSeat {
+    const MapDef* Map = nullptr;
+    const MapSpawn* Spawn = nullptr;
+    i32 Dist = -1;
+};
+
+// A noFlee spawn is the boss room. With none, the spawn that lists the roster
+// boss is the stand-in. The further room wins, so a nearer boss flag does not
+// cut the walk short.
+BossSeat FindBossRoom(const Database& data, const std::vector<Reach>& reached)
+{
+    BossSeat marked;
+    BossSeat roster;
+    for (const MapDef& map : data.GetMaps()) {
+        const Reach* hop = FindReach(reached, map.Id);
+        if (hop == nullptr)
+            continue;
+        for (const MapSpawn& spawn : map.Spawns) {
+            if (spawn.NoFlee && hop->Dist >= marked.Dist) {
+                marked.Map = &map;
+                marked.Spawn = &spawn;
+                marked.Dist = hop->Dist;
+            }
+            const EncounterDef* encounter = data.FindEncounter(spawn.Encounter);
+            if (encounter == nullptr)
+                continue;
+            for (const std::string& enemyId : encounter->Enemies) {
+                const EnemyDef* enemy = data.FindEnemy(enemyId);
+                if (enemy != nullptr && enemy->Boss && hop->Dist >= roster.Dist) {
+                    roster.Map = &map;
+                    roster.Spawn = &spawn;
+                    roster.Dist = hop->Dist;
+                }
+            }
+        }
+    }
+    if (marked.Spawn != nullptr)
+        return marked;
+    return roster;
+}
+
+bool ChainToBoss(const std::vector<Reach>& reached, const std::string& hubId,
+                 const std::string& bossId, std::vector<std::string>& chain, std::string& error)
+{
+    std::string at = bossId;
+    for (i32 guard = 0; guard < 64 && !at.empty(); ++guard) {
+        chain.push_back(at);
+        if (at == hubId)
+            break;
+        const Reach* hop = FindReach(reached, at);
+        if (hop == nullptr || hop->From.empty()) {
+            error = "the boss room is not linked from the hub";
+            return false;
+        }
+        at = hop->From;
+    }
+    if (chain.empty() || chain.back() != hubId) {
+        error = "the boss room is not linked from the hub";
+        return false;
+    }
+    std::reverse(chain.begin(), chain.end());
+    return true;
+}
+
+std::string NextOnRoute(const std::vector<std::string>& chain, std::string_view id)
+{
+    for (usize index = 0; index + 1 < chain.size(); ++index) {
+        if (chain[index] == id)
+            return chain[index + 1];
+    }
+    return {};
+}
+
+struct RouteWalk {
+    const Database* Data = nullptr;
+    const std::vector<std::string>* Main = nullptr;
+    std::vector<std::string> Visited;
+    std::vector<RouteStep> Steps;
+    std::string Error;
+
+    bool Walk(const std::string& mapId, MapTile entrance, const std::string& cameFrom, bool side);
+};
+
+bool RouteWalk::Walk(const std::string& mapId, MapTile entrance, const std::string& cameFrom,
+                     bool side)
+{
+    if (SeenId(Visited, mapId))
+        return true;
+    Visited.push_back(mapId);
+    const MapDef* map = Data->FindMap(mapId);
+    if (map == nullptr) {
+        Error = "map '" + mapId + "' does not exist";
+        return false;
+    }
+    if (!RouteTileOpen(*Data, *map, entrance.X, entrance.Y)) {
+        Error = "map '" + mapId + "' entrance is blocked";
+        return false;
+    }
+
+    const i32 width = map->Width;
+    const i32 height = map->Height;
+    std::vector<u8> seen(static_cast<usize>(width) * static_cast<usize>(height), 0);
+    struct Node {
+        i32 X = 0;
+        i32 Y = 0;
+    };
+    std::vector<Node> queue;
+    Node first;
+    first.X = entrance.X;
+    first.Y = entrance.Y;
+    queue.push_back(first);
+    seen[static_cast<usize>(entrance.Y) * static_cast<usize>(width) +
+         static_cast<usize>(entrance.X)] = 1;
+
+    std::string follow;
+    MapTile followAt;
+    const std::string next = side || Main == nullptr ? std::string() : NextOnRoute(*Main, mapId);
+    usize cursor = 0;
+    while (cursor < queue.size()) {
+        const Node node = queue[cursor];
+        ++cursor;
+        for (const MapPoint& point : map->Points) {
+            if (point.Kind != MapPointKind::Rest || point.Tile.X != node.X || point.Tile.Y != node.Y)
+                continue;
+            RouteStep step;
+            step.Kind = RouteStepKind::Rest;
+            step.Side = side;
+            step.MapId = mapId;
+            Steps.push_back(step);
+        }
+        for (const MapSpawn& spawn : map->Spawns) {
+            if (spawn.Tile.X != node.X || spawn.Tile.Y != node.Y)
+                continue;
+            RouteStep step;
+            step.Kind = RouteStepKind::Fight;
+            step.Side = side;
+            step.EncounterId = spawn.Encounter;
+            step.MapId = mapId;
+            Steps.push_back(step);
+        }
+        for (const MapLink& link : map->Links) {
+            if (link.Tile.X != node.X || link.Tile.Y != node.Y)
+                continue;
+            if (link.Map == cameFrom || SeenId(Visited, link.Map))
+                continue;
+            if (!next.empty() && link.Map == next) {
+                follow = link.Map;
+                followAt = link.Arrival;
+                continue;
+            }
+            if (!Walk(link.Map, link.Arrival, mapId, true))
+                return false;
+        }
+
+        const i32 stepX[] = {0, 1, 0, -1};
+        const i32 stepY[] = {-1, 0, 1, 0};
+        for (i32 dir = 0; dir < 4; ++dir) {
+            const i32 x = node.X + stepX[dir];
+            const i32 y = node.Y + stepY[dir];
+            if (!RouteTileOpen(*Data, *map, x, y))
+                continue;
+            const usize index =
+                static_cast<usize>(y) * static_cast<usize>(width) + static_cast<usize>(x);
+            if (seen[index] != 0)
+                continue;
+            seen[index] = 1;
+            Node further;
+            further.X = x;
+            further.Y = y;
+            queue.push_back(further);
+        }
+    }
+
+    if (!next.empty() && follow.empty()) {
+        Error = "map '" + mapId + "' does not reach '" + next + "'";
+        return false;
+    }
+    if (!follow.empty())
+        return Walk(follow, followAt, mapId, side);
+    return true;
+}
+
+void RememberDrops(const Database& data, std::string_view encounterId, std::vector<std::string>& gear)
+{
+    const EncounterDef* encounter = data.FindEncounter(encounterId);
+    if (encounter == nullptr)
+        return;
+    for (const std::string& enemyId : encounter->Enemies) {
+        const EnemyDef* enemy = data.FindEnemy(enemyId);
+        if (enemy == nullptr)
+            continue;
+        for (const DropDef& drop : enemy->Drops) {
+            if (drop.Item.empty() || SeenId(gear, drop.Item))
+                continue;
+            gear.push_back(drop.Item);
+        }
+    }
+}
+
+bool PlayOneRoute(const Database& data, const BuildSpec& build, const MapRoute& route,
+                  bool fangRoute, std::vector<RouteRow>& rows, std::string& error)
+{
+    bool full = true;
+    i32 hp = 0;
+    i32 focus = 0;
+    std::vector<std::string> gear;
+    for (const RouteStep& step : route.Steps) {
+        if (!fangRoute && step.Side)
+            continue;
+        if (step.Kind == RouteStepKind::Rest) {
+            full = true;
+            continue;
+        }
+        const EncounterDef* encounter = data.FindEncounter(step.EncounterId);
+        if (encounter == nullptr) {
+            error = "no encounter '" + step.EncounterId + "'";
+            return false;
+        }
+        const std::vector<FocusOrder> orders = OrdersFor(*encounter);
+        FocusOrder order;
+        if (!orders.empty())
+            order = orders.front();
+        RunSpec spec;
+        spec.Build = &build;
+        spec.EncounterId = encounter->Id;
+        spec.FocusId = order.First;
+        spec.ThenId = order.Then;
+        spec.RandomFocus = order.Random;
+        spec.RngState = 1;
+        spec.UsePools = !full;
+        spec.StartHp = hp;
+        spec.StartFocus = focus;
+        spec.Gear = gear.empty() ? nullptr : &gear;
+        const SimRun run = SimulateBuild(data, spec);
+
+        RouteRow row;
+        row.Encounter = encounter->Name;
+        row.Build = build.Label;
+        row.FangRoute = fangRoute;
+        row.Fang = SeenId(gear, "alphas_fang");
+        row.Ok = run.Ok;
+        row.Error = run.Error;
+        if (!run.Ok) {
+            rows.push_back(std::move(row));
+            error = run.Error.empty() ? "the route could not start a fight" : run.Error;
+            return false;
+        }
+        row.StartHp = run.StartHp;
+        row.MaxHp = run.MaxHp;
+        row.Won = run.Victory && !run.TimedOut;
+        row.HpLeft = row.Won ? run.Hp : 0;
+        row.FocusLeft = row.Won ? run.Focus : 0;
+        if (row.Won) {
+            full = false;
+            hp = run.Hp;
+            focus = run.Focus;
+            RememberDrops(data, encounter->Id, gear);
+        } else {
+            full = true;
+        }
+        rows.push_back(std::move(row));
+    }
+    return true;
+}
+
 } // namespace
 
 std::vector<SimRateRow> SimulateEncounterRates(const Database& data, const SimRateQuery& query,
@@ -996,6 +1332,110 @@ std::string FormatChain(const std::vector<ChainRow>& rows)
     return text;
 }
 
+MapRoute CollectMapRoute(const Database& data)
+{
+    MapRoute route;
+    const MapDef* hub = RouteHub(data);
+    if (hub == nullptr) {
+        route.Error = "no hub map";
+        return route;
+    }
+    std::vector<Reach> reached;
+    ReachFromHub(data, hub->Id, reached);
+    const BossSeat boss = FindBossRoom(data, reached);
+    if (boss.Map == nullptr || boss.Spawn == nullptr) {
+        route.Error = "no boss room linked from the hub";
+        return route;
+    }
+    std::vector<std::string> chain;
+    if (!ChainToBoss(reached, hub->Id, boss.Map->Id, chain, route.Error))
+        return route;
+
+    RouteWalk walk;
+    walk.Data = &data;
+    walk.Main = &chain;
+    if (!walk.Walk(hub->Id, hub->Start, "", false)) {
+        route.Error = walk.Error.empty() ? "the route could not be walked" : walk.Error;
+        return route;
+    }
+    bool found = false;
+    for (const RouteStep& step : walk.Steps) {
+        if (step.Kind == RouteStepKind::Fight && step.EncounterId == boss.Spawn->Encounter)
+            found = true;
+    }
+    if (!found) {
+        route.Error = "the boss is not on the route";
+        return route;
+    }
+    route.Steps = std::move(walk.Steps);
+    return route;
+}
+
+std::vector<RouteRow> SimulateRoute(const Database& data, const ChainQuery& query, std::string& error)
+{
+    error.clear();
+    std::vector<RouteRow> rows;
+    const MapRoute route = CollectMapRoute(data);
+    if (!route.Error.empty()) {
+        error = route.Error;
+        return rows;
+    }
+    bool any = false;
+    for (const BuildSpec& build : kBuilds) {
+        if (WantedBuild(build, query))
+            any = true;
+    }
+    if (!any) {
+        error = "no harness build matches that class";
+        return rows;
+    }
+    for (const BuildSpec& build : kBuilds) {
+        if (!WantedBuild(build, query))
+            continue;
+        if (!PlayOneRoute(data, build, route, false, rows, error))
+            return rows;
+        if (!PlayOneRoute(data, build, route, true, rows, error))
+            return rows;
+    }
+    return rows;
+}
+
+std::string FormatRoute(const std::vector<RouteRow>& rows)
+{
+    std::string text;
+    text += "Route at level 6 with a rusty sword and an oak shield.\n";
+    text += "Main skips the optional room. Fang takes it, and a win there wears that fight's drops.\n";
+    text += "Fights follow the maps from the hub. A rest on the way refills HP and focus.\n";
+    text += "A win carries both. A loss restores both, and the next fight starts full.\n";
+    text += "The pack kills the dire wolf first. HP left and focus left are 0 on a loss or a timeout.\n";
+    text += Pad("Route", 8);
+    text += Pad("Encounter", 18);
+    text += Pad("Build", 22);
+    text += Pad("Fang", 6);
+    text += Pad("Start HP", 10);
+    text += Pad("Win%", 8);
+    text += Pad("HP left", 10);
+    text += "Focus\n";
+    for (const RouteRow& row : rows) {
+        text += Pad(row.FangRoute ? "fang" : "main", 8);
+        text += Pad(row.Encounter, 18);
+        text += Pad(row.Build, 22);
+        if (!row.Ok) {
+            text += "setup failed: ";
+            text += row.Error;
+            text += "\n";
+            continue;
+        }
+        text += Pad(row.Fang ? "yes" : "no", 6);
+        text += Pad(std::to_string(row.StartHp), 10);
+        text += Pad(row.Won ? "100.0" : "0.0", 8);
+        text += Pad(std::to_string(row.HpLeft), 10);
+        text += std::to_string(row.FocusLeft);
+        text += "\n";
+    }
+    return text;
+}
+
 int RunPlaytestSim(const PlaytestOptions& options)
 {
     const std::filesystem::path directory = PlaytestDataDirectory(options);
@@ -1020,6 +1460,25 @@ int RunPlaytestSim(const PlaytestOptions& options)
             return 1;
         }
         std::fputs(FormatChain(rows).c_str(), stdout);
+        if (!error.empty()) {
+            std::fprintf(stderr, "%s\n", error.c_str());
+            return 1;
+        }
+        return 0;
+    }
+
+    if (options.Route) {
+        ChainQuery routeQuery;
+        routeQuery.ClassId = options.ClassId;
+        if (!options.PickIds.empty())
+            routeQuery.PickId = options.PickIds.front();
+        std::string error;
+        const std::vector<RouteRow> rows = SimulateRoute(data, routeQuery, error);
+        if (rows.empty()) {
+            std::fprintf(stderr, "%s\n", error.empty() ? "the route produced no fights" : error.c_str());
+            return 1;
+        }
+        std::fputs(FormatRoute(rows).c_str(), stdout);
         if (!error.empty()) {
             std::fprintf(stderr, "%s\n", error.c_str());
             return 1;

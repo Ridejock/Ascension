@@ -2425,6 +2425,15 @@ const char* kUiLabels[] = {
     "reaches rank ",
     "Found ",
     "( )",
+    "I TALK",
+    "I SHOP",
+    "Nothing here.",
+    "The next fight is on the map.",
+    "Exit to .",
+    "Map .",
+    "Rested.",
+    "Blocked.",
+    "Back to the start.",
 };
 
 void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
@@ -2820,10 +2829,96 @@ void TestMapValidation()
     }
 }
 
+i32 CountSpawns(const Database& data, std::string_view encounter)
+{
+    i32 count = 0;
+    for (const MapDef& map : data.GetMaps()) {
+        for (const MapSpawn& spawn : map.Spawns) {
+            if (spawn.Encounter == encounter)
+                ++count;
+        }
+    }
+    return count;
+}
+
+void CheckCampaignMaps(const char* dir)
+{
+    Database data(dir);
+    DataError error;
+    Check(data.Load(&error), "shipped maps load");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    Check(data.FindMap("fixture_a") == nullptr && data.FindMap("fixture_b") == nullptr,
+          "the shipped maps are not the fixtures");
+    Check(data.GetMaps().size() == 9, "a hub and eight dungeon rooms");
+    const MapDef* hub = data.FindMap("hub");
+    i32 hubs = 0;
+    for (const MapDef& map : data.GetMaps()) {
+        if (map.Hub)
+            ++hubs;
+    }
+    Check(hubs == 1 && hub != nullptr && hub->Hub, "one hub, and its id is hub");
+    if (hub == nullptr)
+        return;
+    Check(hub->Start.X == 3 && hub->Start.Y == 2 && hub->Spawns.empty() && hub->Links.size() == 1 &&
+              hub->Links[0].Map == "barrow_1",
+          "the hub starts on its rest and leaves through one door");
+    const MapPoint* rest = FindPoint(*hub, MapPointKind::Rest);
+    const MapPoint* talk = FindPoint(*hub, MapPointKind::Talk);
+    const MapPoint* shop = FindPoint(*hub, MapPointKind::Shop);
+    Check(hub->Points.size() == 3 && rest != nullptr && rest->Tile.X == hub->Start.X &&
+              rest->Tile.Y == hub->Start.Y,
+          "the hub rest shares the start tile");
+    Check(talk != nullptr && talk->Dialogue == "pell" && talk->Tile.X == 5 && talk->Tile.Y == 2 &&
+              data.FindDialogue("pell") != nullptr,
+          "the hub talk point is Pell's existing dialogue");
+    Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 3 && shop->Tile.Y == 4,
+          "the hub shop point opens the shop");
+
+    const char* rooms[] = {"barrow_1", "barrow_2", "barrow_3", "barrow_4",
+                           "barrow_5", "barrow_6", "barrow_7", "barrow_side"};
+    for (const char* id : rooms) {
+        const MapDef* room = data.FindMap(id);
+        Check(room != nullptr && !room->Hub, "each barrow room loads and is not the hub");
+    }
+
+    i32 spawns = 0;
+    i32 noFlee = 0;
+    const MapSpawn* brute = nullptr;
+    const MapDef* bruteRoom = nullptr;
+    for (const MapDef& map : data.GetMaps()) {
+        for (const MapSpawn& spawn : map.Spawns) {
+            ++spawns;
+            Check(spawn.Once, "a cleared foe does not come back");
+            if (!spawn.NoFlee)
+                continue;
+            ++noFlee;
+            brute = &spawn;
+            bruteRoom = &map;
+        }
+    }
+    Check(spawns == static_cast<i32>(data.GetEncounters().size()) && spawns == 10,
+          "one spawn for each encounter");
+    Check(noFlee == 1 && brute != nullptr && bruteRoom != nullptr && brute->Id == "barrow_brute" &&
+              brute->Encounter == "barrow_brute" && bruteRoom->Id == "barrow_7",
+          "the Barrow Brute is the one no-flee spawn");
+    for (const EncounterDef& encounter : data.GetEncounters()) {
+        const i32 count = CountSpawns(data, encounter.Id);
+        if (count != 1)
+            std::printf("    encounter '%s' is on %d spawns\n", encounter.Id.c_str(), count);
+        Check(count == 1, "each encounter stands on one tile");
+    }
+    const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");
+    Check(varn != nullptr && varn->Boss, "Varn stays the roster's one boss");
+}
+
 void TestMaps()
 {
     CheckFixtureMaps(ASCENSION_DATA_DIR, "sample maps load");
-    CheckFixtureMaps(ASCENSION_SHIPPED_DATA_DIR, "shipped maps load");
+    CheckCampaignMaps(ASCENSION_SHIPPED_DATA_DIR);
     TestMapReload();
     TestMapValidation();
 }
