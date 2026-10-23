@@ -1785,6 +1785,45 @@ void AscensionApp::UseHotkey(int digit)
     DrinkAt(drinks[static_cast<usize>(drink)]);
 }
 
+bool AscensionApp::TakeAutoPath()
+{
+    if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing)
+        return true;
+    std::string why;
+    const EvolutionPick pick = PickEvolution(m_Hero, m_Play.ChooseId, why);
+    if (pick == EvolutionPick::Failed) {
+        Note(why);
+        std::fprintf(stderr, "%s\n", why.c_str());
+        if (m_Battle == nullptr)
+            m_StartError = std::move(why);
+        Quit();
+        return false;
+    }
+    if (pick == EvolutionPick::Chosen) {
+        const ClassDef* chosen = m_Data.FindClass(m_Hero.ClassId());
+        Note(std::string(chosen != nullptr ? chosen->Name : m_Hero.ClassId()) + " chosen.");
+        PushRanks();
+    }
+    while (m_PickCursor < m_Play.PickIds.size() && m_Hero.PickPending()) {
+        const std::string& id = m_Play.PickIds[m_PickCursor];
+        const SkillOptionPick kept = PickSkillOption(m_Hero, id, why);
+        if (kept == SkillOptionPick::Failed) {
+            Note(why);
+            std::fprintf(stderr, "%s\n", why.c_str());
+            if (m_Battle == nullptr)
+                m_StartError = std::move(why);
+            Quit();
+            return false;
+        }
+        if (kept != SkillOptionPick::Chosen)
+            break;
+        ++m_PickCursor;
+        Note(SkillName(m_Data, id) + " chosen.");
+        PushRanks();
+    }
+    return true;
+}
+
 void AscensionApp::UseCommand(int row)
 {
     if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)

@@ -5,13 +5,15 @@
     "gap": 4,
     "groupGap": 16,
     "textFamily": "keyboard",
-    "defaultFamily": "switch",
+    "defaultFamily": "xbox",
     "devices": [
       {
         "family": "xbox",
         "types": [
           "Xbox 360",
-          "Xbox One/Series"
+          "Xbox One/Series",
+          "Standard",
+          "Unknown"
         ]
       },
       {
@@ -29,8 +31,6 @@
           "Joy-Con (L)",
           "Joy-Con (R)",
           "Joy-Con pair",
-          "Standard",
-          "Unknown",
           "GameCube"
         ]
       }

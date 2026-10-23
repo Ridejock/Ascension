@@ -12,7 +12,7 @@ Hints the game already draws (talk, camp, battle commands, the map tile prompt) 
 | `xbox.json` | Atlas in the starter format |
 | `playstation.png` | PlayStation sheet |
 | `playstation.json` | Atlas |
-| `switch.png` | Switch sheet, also used for a generic pad |
+| `switch.png` | Switch sheet, Nintendo pads only |
 | `switch.json` | Atlas |
 | `CREDITS.md` | CC0, original art |
 
@@ -38,13 +38,13 @@ Families, from Emerald's pad type name:
 
 | Family | Type names | Sheet |
 |---|---|---|
-| `xbox` | Xbox 360, Xbox One/Series | `xbox.png` |
+| `xbox` | Xbox 360, Xbox One/Series, Standard, Unknown | `xbox.png` |
 | `playstation` | PS3, PS4, PS5 | `playstation.png` |
-| `switch` | Switch Pro, Joy-Con (L), Joy-Con (R), Joy-Con pair, Standard, Unknown, GameCube | `switch.png` |
+| `switch` | Switch Pro, Joy-Con (L), Joy-Con (R), Joy-Con pair, GameCube | `switch.png` |
 
-`defaultFamily` is `switch`, so a type the list does not name still uses that sheet. `textFamily` is `keyboard`: no sheet.
+`defaultFamily` is `xbox`, so a type the list does not name still uses that sheet. `textFamily` is `keyboard`: no sheet.
 
-Switch face tiles follow the printed letters, not Xbox positions: South is `b`, East is `a`, West is `y`, North is `x`. A generic or Standard pad shares that sheet.
+SDL reports a Steam Deck as `Standard`. A generic or unknown XInput-style pad is `Standard` or `Unknown`. Those print A south, B east, X west, Y north, so they use the Xbox sheet. Switch face tiles follow the printed letters: South is `b`, East is `a`, West is `y`, North is `x`. That sheet is only the Nintendo pads above.
 
 ## Size
 

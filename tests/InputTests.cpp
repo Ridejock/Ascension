@@ -77,7 +77,7 @@ void TestShippedControls(const Database& data)
     const PromptRules& prompts = data.GetPrompts();
     Check(prompts.IconScale == 1 && prompts.TextScale == 2, "prompt scales come from prompts.json");
     Check(prompts.TextFamily == "keyboard", "keyboard is the text family");
-    Check(prompts.DefaultFamily == "switch", "an unnamed pad uses the switch sheet");
+    Check(prompts.DefaultFamily == "xbox", "an unnamed pad uses the xbox sheet");
     Check(prompts.Sheets.size() == 3, "xbox, playstation, and switch sheets");
     for (const PromptSheet& sheet : prompts.Sheets) {
         Check(sheet.TilePixels == 16, "prompt tiles are 16 pixels");
@@ -91,8 +91,11 @@ void TestShippedControls(const Database& data)
     Check(PromptFamilyForType(prompts, "Xbox One/Series") == "xbox", "xbox one uses the xbox sheet");
     Check(PromptFamilyForType(prompts, "PS5") == "playstation", "ps5 uses the playstation sheet");
     Check(PromptFamilyForType(prompts, "Switch Pro") == "switch", "switch pro uses the switch sheet");
-    Check(PromptFamilyForType(prompts, "Standard") == "switch", "a generic pad uses the switch sheet");
-    Check(PromptFamilyForType(prompts, "Not A Pad") == "switch", "an unknown type uses the default sheet");
+    Check(PromptFamilyForType(prompts, "Joy-Con pair") == "switch", "joy-cons use the switch sheet");
+    Check(PromptFamilyForType(prompts, "GameCube") == "switch", "gamecube uses the switch sheet");
+    Check(PromptFamilyForType(prompts, "Standard") == "xbox", "a standard pad uses the xbox sheet");
+    Check(PromptFamilyForType(prompts, "Unknown") == "xbox", "an unknown pad uses the xbox sheet");
+    Check(PromptFamilyForType(prompts, "Not A Pad") == "xbox", "an unlisted type uses the xbox sheet");
 }
 
 void TestMapping()
