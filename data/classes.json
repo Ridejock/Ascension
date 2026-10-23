@@ -15,11 +15,16 @@
       "growth": {
         "vitality": 4,
         "strength": 2,
-        "defense": 1,
+        "defense": 4,
         "agility": 1,
         "focus": 1
       },
-      "skills": ["strike", "brace", "heavy_blow", "second_wind"],
+      "skills": [
+        { "skill": "strike", "tune": { "hit": { "power": 12 } } },
+        "brace",
+        "heavy_blow",
+        "second_wind"
+      ],
       "passives": []
     },
     {
