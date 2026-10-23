@@ -13,6 +13,7 @@
 #include "Ascension/Map/Walk.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
+#include "Ascension/Progress/DebugRun.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
 #include "Emerald/Core/Application.h"
@@ -121,6 +122,13 @@ private:
     // The map's own step repeat reads the move actions in StepMap.
     void PollActions(f32 dt);
     void HandleAction(std::string_view action);
+    // DebugRespawnFoes brings cleared foes back. An ongoing fight, or a map fight
+    // that has not settled, is left alone and notes the busy line from input.json.
+    void DebugRespawnFoes();
+    // DebugNewGame twice, inside debugConfirmMilliseconds, starts the run Start()
+    // would. The save file is not touched.
+    void DebugNewGame();
+    void ApplyFreshRun(const FreshStart& fresh);
     void HandleOverland(std::string_view action);
     void HandleChoice(std::string_view action);
     void HandleBattle(std::string_view action);
@@ -270,6 +278,8 @@ private:
     NavHold m_Nav[6]{};
     // Last device that pressed a key or a button. prompts.json's text family until a pad is used.
     std::string m_PromptFamily;
+    // First DebugNewGame press. The second, inside the data window, starts over.
+    ConfirmWindow m_NewGameConfirm;
     struct PromptPicture {
         std::string Family;
         Emerald::AssetHandle<Emerald::Texture> Texture;
