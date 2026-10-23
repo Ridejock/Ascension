@@ -1,5 +1,6 @@
 #include "Ascension/Data/ArtPack.h"
 
+#include <cmath>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
@@ -16,8 +17,34 @@ constexpr const char* kTilesKey = "tiles";
 constexpr const char* kFoesKey = "foes";
 constexpr const char* kHeroesKey = "heroes";
 constexpr const char* kNpcsKey = "npcs";
+constexpr const char* kThemesKey = "themes";
+constexpr const char* kMarkersKey = "markers";
+
+constexpr i32 kMaxFrames = 256;
+constexpr i32 kMaxFrameWidth = 16384;
+constexpr i32 kMaxFrameDurationMs = 60000;
+constexpr i32 kMaxVariants = 64;
 
 constexpr unsigned char kPngSignature[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+
+// The markers the map already draws. These names are the manifest contract, the same
+// kind of token as "tiles". They are not ids from data/.
+struct MarkerRole {
+    const char* Id;
+    ArtSlot Slot;
+};
+
+constexpr MarkerRole kMarkerRoles[] = {
+    {"hero", ArtSlot::HeroMarker},
+    {"rest", ArtSlot::RestMarker},
+    {"shop", ArtSlot::ShopMarker},
+    {"exit", ArtSlot::ExitMarker},
+};
+
+struct ListedTheme {
+    std::string Theme;
+    std::string Map;
+};
 
 enum class Section : u8 { Tiles, Foes, Heroes, Npcs };
 
@@ -77,6 +104,15 @@ const char* SectionKind(Section section)
     if (section == Section::Npcs)
         return "npc";
     return "tile";
+}
+
+const MarkerRole* FindMarkerRole(std::string_view id)
+{
+    for (const MarkerRole& role : kMarkerRoles) {
+        if (id == role.Id)
+            return &role;
+    }
+    return nullptr;
 }
 
 bool ReadText(const std::filesystem::path& path, std::string& out, std::string& error)
@@ -149,6 +185,34 @@ bool ReadString(const Json& object, const char* key, bool required, std::string&
     return true;
 }
 
+bool ReadInt(const Json& value, i32 min, i32 max, i32& out, std::string& error)
+{
+    if (!value.is_number_integer()) {
+        error = "must be an integer";
+        return false;
+    }
+    const i64 number = value.get<i64>();
+    if (number < min || number > max) {
+        error = "must be between " + std::to_string(min) + " and " + std::to_string(max);
+        return false;
+    }
+    out = static_cast<i32>(number);
+    return true;
+}
+
+bool OptionalInt(const Json& object, const char* key, i32 min, i32 max, i32& out,
+                 std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!ReadInt(*it, min, max, out, error)) {
+        error = std::string("'") + key + "' " + error;
+        return false;
+    }
+    return true;
+}
+
 bool IdExists(Section section, const Database& data, std::string_view id)
 {
     if (section == Section::Tiles)
@@ -180,6 +244,18 @@ bool AlreadyListed(const std::vector<ArtImage>& images, Section section, std::st
     return false;
 }
 
+bool TileScopeTaken(const std::vector<ArtImage>& images, std::string_view id,
+                    std::string_view map, std::string_view theme)
+{
+    for (const ArtImage& image : images) {
+        if (image.Slot != ArtSlot::Tile || image.Id != id)
+            continue;
+        if (image.Map == map && image.Theme == theme)
+            return true;
+    }
+    return false;
+}
+
 bool PathEscapes(const std::filesystem::path& relative)
 {
     if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||
@@ -206,19 +282,34 @@ std::string LowerExtension(const std::filesystem::path& path)
     return extension;
 }
 
-bool HasPngSignature(const std::filesystem::path& path)
+u32 ReadBe32(const unsigned char* bytes)
+{
+    return (static_cast<u32>(bytes[0]) << 24) | (static_cast<u32>(bytes[1]) << 16) |
+           (static_cast<u32>(bytes[2]) << 8) | static_cast<u32>(bytes[3]);
+}
+
+bool ReadPngSize(const std::filesystem::path& path, i32& width, i32& height)
 {
     std::ifstream in(path, std::ios::binary);
     if (!in)
         return false;
-    unsigned char bytes[8] = {};
-    in.read(reinterpret_cast<char*>(bytes), 8);
-    if (in.gcount() != static_cast<std::streamsize>(8))
+    unsigned char bytes[24] = {};
+    in.read(reinterpret_cast<char*>(bytes), 24);
+    if (in.gcount() != static_cast<std::streamsize>(24))
         return false;
     for (int index = 0; index < 8; ++index) {
         if (bytes[index] != kPngSignature[index])
             return false;
     }
+    if (bytes[12] != 'I' || bytes[13] != 'H' || bytes[14] != 'D' || bytes[15] != 'R')
+        return false;
+    const u32 wide = ReadBe32(bytes + 16);
+    const u32 high = ReadBe32(bytes + 20);
+    if (wide == 0 || high == 0 || wide > static_cast<u32>(kMaxFrameWidth) ||
+        high > static_cast<u32>(kMaxFrameWidth))
+        return false;
+    width = static_cast<i32>(wide);
+    height = static_cast<i32>(high);
     return true;
 }
 
@@ -238,9 +329,28 @@ bool InsideDirectory(const std::filesystem::path& root, const std::filesystem::p
     return !PathEscapes(nested);
 }
 
+bool FitStrip(ArtPicture& picture, i32 width, i32 height, std::string& error)
+{
+    picture.FrameHeight = height;
+    if (picture.FrameWidth == 0) {
+        if (width % picture.Frames != 0) {
+            error = "width is not divisible by 'frames'";
+            return false;
+        }
+        picture.FrameWidth = width / picture.Frames;
+        return true;
+    }
+    const i64 span = static_cast<i64>(picture.FrameWidth) * static_cast<i64>(picture.Frames);
+    if (span > width) {
+        error = "'frameWidth' does not fit in the image";
+        return false;
+    }
+    return true;
+}
+
 // `text` is the path as written in the manifest. The result is an absolute png inside `root`.
-bool ResolvePng(const std::filesystem::path& root, const std::string& text,
-                std::filesystem::path& absolute, std::string& error)
+bool ResolvePng(const std::filesystem::path& root, const std::string& text, ArtPicture& picture,
+                std::string& error)
 {
     if (text.find('\\') != std::string::npos) {
         error = Quote(text) + " must use '/' and stay inside the pack";
@@ -261,61 +371,261 @@ bool ResolvePng(const std::filesystem::path& root, const std::string& text,
         error = Quote(text) + " must stay inside the pack";
         return false;
     }
-    if (!HasPngSignature(full)) {
+    i32 width = 0;
+    i32 height = 0;
+    if (!ReadPngSize(full, width, height)) {
         error = Quote(text) + " is not a png";
         return false;
     }
+    if (!FitStrip(picture, width, height, error))
+        return false;
     error.clear();
     std::error_code canonicalError;
     const std::filesystem::path canonical = std::filesystem::weakly_canonical(full, canonicalError);
-    absolute = canonicalError ? full : canonical;
+    picture.File = canonicalError ? full : canonical;
     return true;
 }
 
+bool ReadPicture(const Json& value, const std::filesystem::path& root, ArtPicture& picture,
+                 std::string& error)
+{
+    picture = {};
+    picture.Frames = 1;
+    std::string text;
+    if (value.is_string()) {
+        text = value.get<std::string>();
+        if (text.empty()) {
+            error = "must not be empty";
+            return false;
+        }
+        return ResolvePng(root, text, picture, error);
+    }
+    if (!value.is_object()) {
+        error = "must be a string or an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(value, {"file", "frames", "frameWidth", "frameDuration"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!ReadString(value, "file", true, text, error))
+        return false;
+    if (!OptionalInt(value, "frames", 1, kMaxFrames, picture.Frames, error) ||
+        !OptionalInt(value, "frameWidth", 1, kMaxFrameWidth, picture.FrameWidth, error) ||
+        !OptionalInt(value, "frameDuration", 1, kMaxFrameDurationMs, picture.FrameDurationMs,
+                     error))
+        return false;
+    return ResolvePng(root, text, picture, error);
+}
+
 void AddImage(std::vector<ArtImage>& images, ArtSlot slot, const std::string& id,
-              const std::filesystem::path& file)
+              const std::string& map, const std::string& theme, std::vector<ArtPicture> pictures)
 {
     ArtImage image;
     image.Slot = slot;
     image.Id = id;
-    image.File = file;
+    image.Map = map;
+    image.Theme = theme;
+    image.Pictures = std::move(pictures);
     images.push_back(std::move(image));
 }
 
-bool AddResolved(std::vector<ArtImage>& images, ArtSlot slot, const std::string& id,
-                 const std::filesystem::path& root, const std::string& text, std::string& error)
+bool AddOnePicture(std::vector<ArtImage>& images, ArtSlot slot, const std::string& id,
+                   const Json& value, const std::filesystem::path& root, std::string& error)
 {
-    std::filesystem::path file;
-    if (!ResolvePng(root, text, file, error))
+    ArtPicture picture;
+    if (!ReadPicture(value, root, picture, error))
         return false;
-    AddImage(images, slot, id, file);
+    std::vector<ArtPicture> pictures;
+    pictures.push_back(std::move(picture));
+    AddImage(images, slot, id, {}, {}, std::move(pictures));
     return true;
 }
 
-bool LoadEntry(Section section, const Json& entry, const std::filesystem::path& root,
-               const Database& data, std::vector<ArtImage>& images, std::string& error)
+bool LoadThemes(const Json& root, const Database& data, std::vector<ListedTheme>& themes,
+                std::string& error)
+{
+    const auto list = root.find(kThemesKey);
+    if (list == root.end())
+        return true;
+    if (!list->is_array()) {
+        error = ManifestError({}, "'themes' must be a list");
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = ManifestError(kThemesKey, "entries must be objects");
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "maps"}, unknown)) {
+            error = ManifestError(kThemesKey, "unknown field " + Quote(unknown));
+            return false;
+        }
+        std::string id;
+        std::string why;
+        if (!ReadString(entry, "id", true, id, why)) {
+            error = ManifestError(kThemesKey, why);
+            return false;
+        }
+        const std::string where = EntryWhere("theme", id);
+        if (!IsId(id)) {
+            error = ManifestError(where, "id must be letters, digits and _, starting with a letter");
+            return false;
+        }
+        for (const ListedTheme& held : themes) {
+            if (held.Theme == id) {
+                error = ManifestError(where, "there is another theme with this id");
+                return false;
+            }
+        }
+        const auto maps = entry.find("maps");
+        if (maps == entry.end() || !maps->is_array()) {
+            error = ManifestError(where, "'maps' must be a list");
+            return false;
+        }
+        if (maps->empty()) {
+            error = ManifestError(where, "'maps' must name at least one map");
+            return false;
+        }
+        for (const Json& mapValue : *maps) {
+            if (!mapValue.is_string()) {
+                error = ManifestError(where, "'maps' entries must be strings");
+                return false;
+            }
+            const std::string mapId = mapValue.get<std::string>();
+            if (!IsId(mapId) || data.FindMap(mapId) == nullptr) {
+                error = ManifestError(where, "map " + Quote(mapId) + " does not exist");
+                return false;
+            }
+            for (const ListedTheme& held : themes) {
+                if (held.Map == mapId) {
+                    error = ManifestError(where, "map " + Quote(mapId) + " is already in a theme");
+                    return false;
+                }
+            }
+            ListedTheme use;
+            use.Theme = id;
+            use.Map = mapId;
+            themes.push_back(std::move(use));
+        }
+    }
+    return true;
+}
+
+bool ThemeDefined(const std::vector<ListedTheme>& themes, std::string_view id)
+{
+    for (const ListedTheme& use : themes)
+        if (use.Theme == id)
+            return true;
+    return false;
+}
+
+bool LoadTile(const Json& entry, const std::filesystem::path& root, const Database& data,
+              const std::vector<ListedTheme>& themes, std::vector<ArtImage>& images,
+              std::string& error)
+{
+    std::string unknown;
+    if (!AllowKeys(entry, {"id", "file", "variants", "map", "theme"}, unknown)) {
+        error = ManifestError(kTilesKey, "unknown field " + Quote(unknown));
+        return false;
+    }
+    std::string id;
+    std::string why;
+    if (!ReadString(entry, "id", true, id, why)) {
+        error = ManifestError(kTilesKey, why);
+        return false;
+    }
+    const std::string where = EntryWhere("tile", id);
+    if (!IsId(id)) {
+        error = ManifestError(where, "id must be letters, digits and _, starting with a letter");
+        return false;
+    }
+    if (!IdExists(Section::Tiles, data, id)) {
+        error = ManifestError(where, "id does not exist");
+        return false;
+    }
+    std::string map;
+    std::string theme;
+    if (!ReadString(entry, "map", false, map, why) || !ReadString(entry, "theme", false, theme, why)) {
+        error = ManifestError(where, why);
+        return false;
+    }
+    if (!map.empty() && !theme.empty()) {
+        error = ManifestError(where, "name 'map' or 'theme', not both");
+        return false;
+    }
+    if (!map.empty() && (!IsId(map) || data.FindMap(map) == nullptr)) {
+        error = ManifestError(where, "map " + Quote(map) + " does not exist");
+        return false;
+    }
+    if (!theme.empty() && (!IsId(theme) || !ThemeDefined(themes, theme))) {
+        error = ManifestError(where, "theme " + Quote(theme) + " does not exist");
+        return false;
+    }
+    if (TileScopeTaken(images, id, map, theme)) {
+        if (!map.empty())
+            error = ManifestError(where, "there is another tile with this id on this map");
+        else if (!theme.empty())
+            error = ManifestError(where, "there is another tile with this id for this theme");
+        else
+            error = ManifestError(where, "there is another tile with this id");
+        return false;
+    }
+
+    const bool hasFile = entry.find("file") != entry.end();
+    const auto variants = entry.find("variants");
+    const bool hasVariants = variants != entry.end();
+    if (hasFile == hasVariants) {
+        error = ManifestError(where, "name 'file' or 'variants'");
+        return false;
+    }
+    std::vector<ArtPicture> pictures;
+    if (hasFile) {
+        const auto file = entry.find("file");
+        ArtPicture picture;
+        if (!ReadPicture(*file, root, picture, why)) {
+            error = ManifestError(where, why);
+            return false;
+        }
+        pictures.push_back(std::move(picture));
+    } else {
+        if (!variants->is_array()) {
+            error = ManifestError(where, "'variants' must be a list");
+            return false;
+        }
+        if (variants->empty() || variants->size() > static_cast<usize>(kMaxVariants)) {
+            error = ManifestError(where, "'variants' must name between 1 and " +
+                                              std::to_string(kMaxVariants) + " images");
+            return false;
+        }
+        for (const Json& variant : *variants) {
+            ArtPicture picture;
+            if (!ReadPicture(variant, root, picture, why)) {
+                error = ManifestError(where, why);
+                return false;
+            }
+            pictures.push_back(std::move(picture));
+        }
+    }
+    AddImage(images, ArtSlot::Tile, id, map, theme, std::move(pictures));
+    return true;
+}
+
+bool LoadFoeOrNpc(Section section, const Json& entry, const std::filesystem::path& root,
+                  const Database& data, std::vector<ArtImage>& images, std::string& error)
 {
     const char* key = SectionKey(section);
     const char* kind = SectionKind(section);
-    if (!entry.is_object()) {
-        error = ManifestError(key, "entries must be objects");
-        return false;
-    }
+    const bool foe = section == Section::Foes;
     std::string unknown;
-    bool keysOk = false;
-    if (section == Section::Tiles)
-        keysOk = AllowKeys(entry, {"id", "file"}, unknown);
-    else if (section == Section::Foes)
-        keysOk = AllowKeys(entry, {"id", "overland", "battle"}, unknown);
-    else if (section == Section::Heroes)
-        keysOk = AllowKeys(entry, {"id", "battle"}, unknown);
-    else
-        keysOk = AllowKeys(entry, {"id", "sprite", "portrait"}, unknown);
+    const bool keysOk = foe ? AllowKeys(entry, {"id", "overland", "battle"}, unknown)
+                            : AllowKeys(entry, {"id", "sprite", "portrait"}, unknown);
     if (!keysOk) {
         error = ManifestError(key, "unknown field " + Quote(unknown));
         return false;
     }
-
     std::string id;
     std::string why;
     if (!ReadString(entry, "id", true, id, why)) {
@@ -335,82 +645,129 @@ bool LoadEntry(Section section, const Json& entry, const std::filesystem::path& 
         error = ManifestError(where, "id does not exist");
         return false;
     }
-
-    if (section == Section::Tiles) {
-        std::string file;
-        if (!ReadString(entry, "file", true, file, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        if (!AddResolved(images, ArtSlot::Tile, id, root, file, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        return true;
+    const char* firstKey = foe ? "overland" : "sprite";
+    const char* secondKey = foe ? "battle" : "portrait";
+    const ArtSlot firstSlot = foe ? ArtSlot::FoeOverland : ArtSlot::NpcSprite;
+    const ArtSlot secondSlot = foe ? ArtSlot::FoeBattle : ArtSlot::NpcPortrait;
+    const auto first = entry.find(firstKey);
+    const auto second = entry.find(secondKey);
+    if (first == entry.end() && second == entry.end()) {
+        error = ManifestError(where, std::string("name an '") + firstKey + "' image, a '" +
+                                         secondKey + "' image, or both");
+        return false;
     }
-
-    if (section == Section::Heroes) {
-        std::string battle;
-        if (!ReadString(entry, "battle", true, battle, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        if (!AddResolved(images, ArtSlot::HeroBattle, id, root, battle, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        return true;
-    }
-
-    if (section == Section::Foes) {
-        std::string overland;
-        std::string battle;
-        if (!ReadString(entry, "overland", false, overland, why) ||
-            !ReadString(entry, "battle", false, battle, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        if (overland.empty() && battle.empty()) {
-            error = ManifestError(where, "name an 'overland' image, a 'battle' image, or both");
-            return false;
-        }
-        if (!overland.empty() &&
-            !AddResolved(images, ArtSlot::FoeOverland, id, root, overland, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        if (!battle.empty() && !AddResolved(images, ArtSlot::FoeBattle, id, root, battle, why)) {
-            error = ManifestError(where, why);
-            return false;
-        }
-        return true;
-    }
-
-    std::string sprite;
-    std::string portrait;
-    if (!ReadString(entry, "sprite", false, sprite, why) ||
-        !ReadString(entry, "portrait", false, portrait, why)) {
+    if (first != entry.end() && !AddOnePicture(images, firstSlot, id, *first, root, why)) {
         error = ManifestError(where, why);
         return false;
     }
-    if (sprite.empty() && portrait.empty()) {
-        error = ManifestError(where, "name a 'sprite' image, a 'portrait' image, or both");
-        return false;
-    }
-    if (!sprite.empty() && !AddResolved(images, ArtSlot::NpcSprite, id, root, sprite, why)) {
-        error = ManifestError(where, why);
-        return false;
-    }
-    if (!portrait.empty() &&
-        !AddResolved(images, ArtSlot::NpcPortrait, id, root, portrait, why)) {
+    if (second != entry.end() && !AddOnePicture(images, secondSlot, id, *second, root, why)) {
         error = ManifestError(where, why);
         return false;
     }
     return true;
 }
 
+bool LoadHero(const Json& entry, const std::filesystem::path& root, const Database& data,
+              std::vector<ArtImage>& images, std::string& error)
+{
+    std::string unknown;
+    if (!AllowKeys(entry, {"id", "battle"}, unknown)) {
+        error = ManifestError(kHeroesKey, "unknown field " + Quote(unknown));
+        return false;
+    }
+    std::string id;
+    std::string why;
+    if (!ReadString(entry, "id", true, id, why)) {
+        error = ManifestError(kHeroesKey, why);
+        return false;
+    }
+    const std::string where = EntryWhere("hero", id);
+    if (!IsId(id)) {
+        error = ManifestError(where, "id must be letters, digits and _, starting with a letter");
+        return false;
+    }
+    if (AlreadyListed(images, Section::Heroes, id)) {
+        error = ManifestError(where, "there is another hero with this id");
+        return false;
+    }
+    if (!IdExists(Section::Heroes, data, id)) {
+        error = ManifestError(where, "id does not exist");
+        return false;
+    }
+    const auto battle = entry.find("battle");
+    if (battle == entry.end()) {
+        error = ManifestError(where, "'battle' is required");
+        return false;
+    }
+    if (!AddOnePicture(images, ArtSlot::HeroBattle, id, *battle, root, why)) {
+        error = ManifestError(where, why);
+        return false;
+    }
+    return true;
+}
+
+bool LoadMarker(const Json& entry, const std::filesystem::path& root, std::vector<ArtImage>& images,
+                std::string& error)
+{
+    if (!entry.is_object()) {
+        error = ManifestError(kMarkersKey, "entries must be objects");
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(entry, {"id", "file"}, unknown)) {
+        error = ManifestError(kMarkersKey, "unknown field " + Quote(unknown));
+        return false;
+    }
+    std::string id;
+    std::string why;
+    if (!ReadString(entry, "id", true, id, why)) {
+        error = ManifestError(kMarkersKey, why);
+        return false;
+    }
+    const std::string where = EntryWhere("marker", id);
+    const MarkerRole* role = FindMarkerRole(id);
+    if (role == nullptr) {
+        error = ManifestError(where, "id does not exist");
+        return false;
+    }
+    for (const ArtImage& image : images) {
+        if (image.Slot == role->Slot) {
+            error = ManifestError(where, "there is another marker with this id");
+            return false;
+        }
+    }
+    const auto file = entry.find("file");
+    if (file == entry.end()) {
+        error = ManifestError(where, "'file' is required");
+        return false;
+    }
+    if (!AddOnePicture(images, role->Slot, id, *file, root, why)) {
+        error = ManifestError(where, why);
+        return false;
+    }
+    return true;
+}
+
+bool LoadMarkers(const Json& root, const std::filesystem::path& directory,
+                 std::vector<ArtImage>& images, std::string& error)
+{
+    const auto list = root.find(kMarkersKey);
+    if (list == root.end())
+        return true;
+    if (!list->is_array()) {
+        error = ManifestError({}, "'markers' must be a list");
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!LoadMarker(entry, directory, images, error))
+            return false;
+    }
+    return true;
+}
+
 bool LoadSection(Section section, const Json& root, const std::filesystem::path& directory,
-                 const Database& data, std::vector<ArtImage>& images, std::string& error)
+                 const Database& data, const std::vector<ListedTheme>& themes,
+                 std::vector<ArtImage>& images, std::string& error)
 {
     const char* key = SectionKey(section);
     const auto list = root.find(key);
@@ -421,14 +778,26 @@ bool LoadSection(Section section, const Json& root, const std::filesystem::path&
         return false;
     }
     for (const Json& entry : *list) {
-        if (!LoadEntry(section, entry, directory, data, images, error))
+        if (!entry.is_object()) {
+            error = ManifestError(key, "entries must be objects");
+            return false;
+        }
+        bool loaded = false;
+        if (section == Section::Tiles)
+            loaded = LoadTile(entry, directory, data, themes, images, error);
+        else if (section == Section::Heroes)
+            loaded = LoadHero(entry, directory, data, images, error);
+        else
+            loaded = LoadFoeOrNpc(section, entry, directory, data, images, error);
+        if (!loaded)
             return false;
     }
     return true;
 }
 
 bool ReadManifest(const std::filesystem::path& directory, const Database& data,
-                  std::vector<ArtImage>& images, std::string& error)
+                  std::vector<ArtImage>& images, std::vector<ListedTheme>& themes,
+                  std::string& error)
 {
     const std::filesystem::path manifest = directory / std::string(kArtPackManifestName);
     std::string text;
@@ -443,25 +812,65 @@ bool ReadManifest(const std::filesystem::path& directory, const Database& data,
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(root, {kTilesKey, kFoesKey, kHeroesKey, kNpcsKey}, unknown)) {
+    if (!AllowKeys(root, {kTilesKey, kFoesKey, kHeroesKey, kNpcsKey, kThemesKey, kMarkersKey},
+                   unknown)) {
         error = ManifestError({}, "unknown field " + Quote(unknown));
         return false;
     }
+    if (!LoadThemes(root, data, themes, error))
+        return false;
     const Section sections[] = {Section::Tiles, Section::Foes, Section::Heroes, Section::Npcs};
     for (const Section section : sections) {
-        if (!LoadSection(section, root, directory, data, images, error))
+        if (!LoadSection(section, root, directory, data, themes, images, error))
             return false;
     }
-    return true;
+    return LoadMarkers(root, directory, images, error);
+}
+
+ResolvedArt FromImage(const ArtImage* image, i32 x, i32 y)
+{
+    if (image == nullptr || image->Pictures.empty())
+        return {};
+    i32 index = ArtVariantIndex(x, y, static_cast<i32>(image->Pictures.size()));
+    if (index < 0 || static_cast<usize>(index) >= image->Pictures.size())
+        index = 0;
+    ResolvedArt resolved;
+    resolved.Origin = ArtOrigin::Pack;
+    resolved.Picture = image->Pictures[static_cast<usize>(index)];
+    return resolved;
 }
 
 } // namespace
+
+i32 ArtFrameIndex(i32 frames, i32 frameDurationMs, f32 seconds)
+{
+    if (frames <= 1 || seconds <= 0.0f)
+        return 0;
+    const i32 duration = frameDurationMs > 0 ? frameDurationMs : kArtFrameMilliseconds;
+    const double cycle = static_cast<double>(duration) * static_cast<double>(frames);
+    const double elapsed = std::fmod(static_cast<double>(seconds) * 1000.0, cycle);
+    if (elapsed < 0.0)
+        return 0;
+    const i32 index = static_cast<i32>(elapsed / static_cast<double>(duration));
+    if (index < 0 || index >= frames)
+        return 0;
+    return index;
+}
+
+i32 ArtVariantIndex(i32 x, i32 y, i32 count)
+{
+    if (count <= 1)
+        return 0;
+    const u32 mixed = static_cast<u32>(x) * kArtVariantX + static_cast<u32>(y) * kArtVariantY;
+    return static_cast<i32>(mixed % static_cast<u32>(count));
+}
 
 bool ArtPack::Load(const std::filesystem::path& directory, const Database& data, DataError* error)
 {
     std::error_code code;
     if (!std::filesystem::is_directory(directory, code) || code) {
         m_Images.clear();
+        m_Themes.clear();
         m_Directory.clear();
         m_Loaded = false;
         m_LastError = "art pack folder '" + directory.string() + "' is not a directory";
@@ -477,9 +886,11 @@ bool ArtPack::Load(const std::filesystem::path& directory, const Database& data,
         root = absolute;
 
     std::vector<ArtImage> images;
+    std::vector<ListedTheme> listed;
     std::string message;
-    if (!ReadManifest(root, data, images, message)) {
+    if (!ReadManifest(root, data, images, listed, message)) {
         m_Images.clear();
+        m_Themes.clear();
         m_Directory.clear();
         m_Loaded = false;
         m_LastError = std::move(message);
@@ -488,8 +899,16 @@ bool ArtPack::Load(const std::filesystem::path& directory, const Database& data,
         return false;
     }
 
+    std::vector<ThemeUse> themes;
+    for (const ListedTheme& row : listed) {
+        ThemeUse use;
+        use.Theme = row.Theme;
+        use.Map = row.Map;
+        themes.push_back(std::move(use));
+    }
     m_Directory = std::move(root);
     m_Images = std::move(images);
+    m_Themes = std::move(themes);
     m_Loaded = true;
     m_LastError.clear();
     if (error != nullptr)
@@ -497,17 +916,58 @@ bool ArtPack::Load(const std::filesystem::path& directory, const Database& data,
     return true;
 }
 
+const std::string* ArtPack::ThemeOf(std::string_view mapId) const
+{
+    for (const ThemeUse& use : m_Themes) {
+        if (use.Map == mapId)
+            return &use.Theme;
+    }
+    return nullptr;
+}
+
+const ArtImage* ArtPack::Select(ArtSlot slot, std::string_view id, std::string_view mapId) const
+{
+    const ArtImage* fallback = nullptr;
+    const ArtImage* themed = nullptr;
+    const ArtImage* mapped = nullptr;
+    const std::string* theme = ThemeOf(mapId);
+    for (const ArtImage& image : m_Images) {
+        if (image.Slot != slot)
+            continue;
+        if (!id.empty()) {
+            if (image.Id != id)
+                continue;
+        } else if (!IsArtMarker(slot)) {
+            continue;
+        }
+        if (!image.Map.empty()) {
+            if (image.Map == mapId)
+                mapped = &image;
+            continue;
+        }
+        if (!image.Theme.empty()) {
+            if (theme != nullptr && image.Theme == *theme)
+                themed = &image;
+            continue;
+        }
+        fallback = &image;
+    }
+    if (mapped != nullptr)
+        return mapped;
+    if (themed != nullptr)
+        return themed;
+    return fallback;
+}
+
 ResolvedArt ArtPack::Find(ArtSlot slot, std::string_view id) const
 {
-    for (const ArtImage& image : m_Images) {
-        if (image.Slot == slot && image.Id == id) {
-            ResolvedArt resolved;
-            resolved.Origin = ArtOrigin::Pack;
-            resolved.File = image.File;
-            return resolved;
-        }
-    }
-    return {};
+    return FindPlaced(slot, id, {}, 0, 0);
+}
+
+ResolvedArt ArtPack::FindPlaced(ArtSlot slot, std::string_view id, std::string_view mapId, i32 x,
+                                i32 y) const
+{
+    return FromImage(Select(slot, id, mapId), x, y);
 }
 
 bool DiscoverArtPack(std::filesystem::path& requested,
@@ -526,8 +986,7 @@ bool DiscoverArtPack(std::filesystem::path& requested,
         error.clear();
         return true;
     }
-    const std::filesystem::path beside =
-        executableDirectory / std::string(kArtPackDirectoryName);
+    const std::filesystem::path beside = executableDirectory / std::string(kArtPackDirectoryName);
     std::error_code code;
     if (std::filesystem::is_directory(beside, code) && !code)
         requested = beside;

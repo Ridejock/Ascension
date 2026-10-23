@@ -1788,6 +1788,7 @@ void AscensionApp::PlayScriptedKey()
 
 void AscensionApp::OnUpdate(f32 dt)
 {
+    m_Gallery.Advance(dt);
     if (!TakeAutoPath())
         return;
     MaybeSettle();
