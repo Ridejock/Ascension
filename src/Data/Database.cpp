@@ -3565,16 +3565,6 @@ bool OptionalList(const Json& object, const char* key, const Json*& out, std::st
     return true;
 }
 
-// True when the object has no keys. The first key is reported when it does.
-bool NoKeys(const Json& object, std::string& unknown)
-{
-    const auto it = object.begin();
-    if (it == object.end())
-        return true;
-    unknown = it.key();
-    return false;
-}
-
 struct LegendGlyph {
     char Glyph = 0;
     std::string Tile;

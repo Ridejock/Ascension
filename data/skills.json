@@ -25,12 +25,13 @@
     {
       "id": "heavy_blow",
       "name": "Heavy Blow",
-      "description": "A committed swing. It stuns a foe who is winding up.",
+      "description": "A committed swing. It stuns a foe who is winding up. A {crush.ifTargetHas} foe takes another blow that scales with {crush.scaling}.",
       "kind": "active",
       "target": "enemy",
       "focusCost": 3,
       "effects": [
         { "id": "hit", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "strength" },
+        { "id": "crush", "trigger": "onUse", "op": "damage", "power": 16, "scaling": "strength", "ifTargetHas": "steadfast" },
         { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
       ]
     },
@@ -336,8 +337,8 @@
       "target": "enemy",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "strength" },
-        { "id": "hit2", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" },
+        { "id": "hit2", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "strength" }
       ]
     },
     {
@@ -348,7 +349,7 @@
       "target": "self",
       "focusCost": 0,
       "effects": [
-        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 10 }
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8 }
       ]
     },
     {
@@ -371,7 +372,7 @@
       "focusCost": 0,
       "windup": 1,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 75, "scaling": "strength" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 43, "scaling": "strength" }
       ]
     },
     {

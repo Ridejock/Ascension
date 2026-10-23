@@ -204,7 +204,7 @@
       "description": "A huge barrow thrall. When it bellows, it cannot be stunned or Exposed until the next big swing lands; only a guard takes the weight.",
       "level": 8,
       "stats": {
-        "vitality": 95,
+        "vitality": 91,
         "strength": 14,
         "defense": 6,
         "agility": 3,
