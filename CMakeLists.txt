@@ -57,11 +57,15 @@ add_library(AscensionData STATIC
     src/Data/Database.cpp
     src/Data/Talk.cpp
     src/Data/ArtPack.cpp
+    src/Input/Controls.cpp
+    src/Input/Prompts.cpp
     include/Ascension/Data/Database.h
     include/Ascension/Data/ArtPack.h
     include/Ascension/Data/Map.h
     include/Ascension/Data/Talk.h
     include/Ascension/Data/Types.h
+    include/Ascension/Input/Controls.h
+    include/Ascension/Input/Prompts.h
 )
 target_include_directories(AscensionData PUBLIC include)
 target_link_libraries(AscensionData
@@ -265,6 +269,14 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     emerald_set_warnings(AscensionDialogueTests)
     add_test(NAME Dialogue COMMAND AscensionDialogueTests)
+
+    add_executable(AscensionInputTests tests/InputTests.cpp tests/Check.h)
+    target_link_libraries(AscensionInputTests PRIVATE AscensionData)
+    target_compile_definitions(AscensionInputTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionInputTests)
+    add_test(NAME Input COMMAND AscensionInputTests)
 endif()
 
 # ---------------------------------------------------------------------------

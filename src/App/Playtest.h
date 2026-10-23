@@ -185,17 +185,6 @@ enum class FightStanding { None, Ongoing, Victory, Defeat };
     return standing != FightStanding::Ongoing;
 }
 
-// True for a press that aims or spends the player's turn. N, R, and I are not in that set.
-[[nodiscard]] inline bool KeyNeedsPlayerTurn(SDL_Scancode scancode)
-{
-    if (scancode == SDL_SCANCODE_SPACE || scancode == SDL_SCANCODE_LEFT ||
-        scancode == SDL_SCANCODE_RIGHT || scancode == SDL_SCANCODE_C ||
-        scancode == SDL_SCANCODE_F)
-        return true;
-    const int digit = static_cast<int>(scancode) - static_cast<int>(SDL_SCANCODE_1);
-    return digit >= 0 && digit < 8;
-}
-
 // What to do with one key while a --keys script is running.
 enum class ScriptedPress { Play, IgnoreWindow, WaitForTurn };
 

@@ -23,4 +23,7 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                    std::span<const SpawnPlace> places = {}, const ArtGallery* art = nullptr,
                    const SpawnGlides* motion = nullptr);
 
+// "TALK" or "SHOP" when the hero stands on that point. Null on a rest or an empty tile.
+[[nodiscard]] const char* MapInteractWord(const Database& data, const Walker& walker);
+
 } // namespace Ascension

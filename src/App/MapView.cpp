@@ -220,20 +220,6 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                               "   FOCUS " + std::to_string(focus) + "/" + std::to_string(maxFocus);
     const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
     Emerald::DrawDebugText(renderer, {16.0f, poolsY}, Upper(pools), label, 2);
-    const MapTile heroTile = walker.Place().Tile;
-    const char* prompt = nullptr;
-    for (const MapPoint& point : map->Points) {
-        if (point.Tile.X != heroTile.X || point.Tile.Y != heroTile.Y)
-            continue;
-        if (point.Kind == MapPointKind::Talk)
-            prompt = "I TALK";
-        else if (point.Kind == MapPointKind::Shop)
-            prompt = "I SHOP";
-    }
-    if (prompt != nullptr) {
-        const f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
-        Emerald::DrawDebugText(renderer, {16.0f, promptY}, prompt, label, 2);
-    }
     const usize shown = std::min(log.size(), static_cast<usize>(4));
     const f32 lineStep = Emerald::DebugTextLineHeight(1) + 2.0f;
     f32 logY = height - 16.0f - static_cast<f32>(shown) * lineStep;
@@ -242,6 +228,25 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         Emerald::DrawDebugText(renderer, {16.0f, logY}, Upper(line), dim, 1);
         logY += lineStep;
     }
+}
+
+const char* MapInteractWord(const Database& data, const Walker& walker)
+{
+    if (!walker.Placed())
+        return nullptr;
+    const MapDef* map = data.FindMap(walker.Place().MapId);
+    if (map == nullptr)
+        return nullptr;
+    const MapTile hero = walker.Place().Tile;
+    for (const MapPoint& point : map->Points) {
+        if (point.Tile.X != hero.X || point.Tile.Y != hero.Y)
+            continue;
+        if (point.Kind == MapPointKind::Talk)
+            return "TALK";
+        if (point.Kind == MapPointKind::Shop)
+            return "SHOP";
+    }
+    return nullptr;
 }
 
 } // namespace Ascension
