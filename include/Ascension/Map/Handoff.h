@@ -28,8 +28,7 @@ struct FledWounds {
     std::vector<FoeWound> Foes;
 };
 
-// Cleared spawn ids and the wounds a flee left. Neither is written by the save.
-// Version 3 stays the encounter index; recording this is a later version.
+// Cleared spawn ids and the wounds a flee left. The save writes both, by spawn id.
 struct MapMemory {
     std::vector<std::string> Cleared;
     std::vector<FledWounds> Wounds;

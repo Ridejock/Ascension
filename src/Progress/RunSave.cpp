@@ -12,6 +12,15 @@ namespace {
 constexpr i32 kMaxEntries = 256;
 constexpr std::string_view kSlot = "run";
 
+bool Listed(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& held : ids) {
+        if (held == id)
+            return true;
+    }
+    return false;
+}
+
 std::string Key(std::string_view prefix, i32 index, std::string_view field)
 {
     std::string key;
@@ -124,11 +133,29 @@ void MigrateRunV2(Emerald::SaveData& data)
         data.SetBool("fight.known", false);
 }
 
+// Version 3's position is an encounter-list index. Version 4 stores a map, a tile, and
+// spawn ids. The index waits under legacy.index until the maps are loaded. A finished
+// fight did not carry HP in version 3; drop a leftover health field so it still does not.
+void MigrateRunV3(Emerald::SaveData& data)
+{
+    if (data.Has("position") && !data.Has("legacy.index")) {
+        data.SetInt("legacy.index", data.GetInt("position", 0));
+        data.Remove("position");
+    }
+    const std::string standing = data.GetString("standing");
+    if (standing == "victory" || standing == "defeat") {
+        data.Remove("resources");
+        data.Remove("hp");
+        data.Remove("focus");
+    }
+}
+
 Emerald::SaveSystem Open(const std::filesystem::path& folder)
 {
     Emerald::SaveSystem system(folder, RunSave::kVersion);
     system.AddMigration(1, MigrateRunV1);
     system.AddMigration(2, MigrateRunV2);
+    system.AddMigration(3, MigrateRunV3);
     return system;
 }
 
@@ -381,7 +408,28 @@ void Store(const RunState& run, Emerald::SaveData& data)
     for (i32 index = 0; index < static_cast<i32>(run.Flags.size()); ++index)
         data.SetString(Key("flag", index, {}), run.Flags[static_cast<usize>(index)]);
 
-    data.SetInt("position", run.Position);
+    data.SetString("map", run.MapId);
+    data.SetInt("tile.x", run.Tile.X);
+    data.SetInt("tile.y", run.Tile.Y);
+    data.SetInt("cleared.count", static_cast<i32>(run.Cleared.size()));
+    for (i32 index = 0; index < static_cast<i32>(run.Cleared.size()); ++index)
+        data.SetString(Key("cleared", index, {}), run.Cleared[static_cast<usize>(index)]);
+
+    data.SetInt("wound.count", static_cast<i32>(run.Wounds.size()));
+    for (i32 index = 0; index < static_cast<i32>(run.Wounds.size()); ++index) {
+        const FledWounds& wounds = run.Wounds[static_cast<usize>(index)];
+        const std::string prefix = Key("wound", index, {});
+        data.SetString(prefix + ".spawn", wounds.SpawnId);
+        data.SetInt(prefix + ".foe.count", static_cast<i32>(wounds.Foes.size()));
+        for (i32 foe = 0; foe < static_cast<i32>(wounds.Foes.size()); ++foe) {
+            const std::string foeKey = Key(prefix + ".foe", foe, {});
+            data.SetString(foeKey + ".id", wounds.Foes[static_cast<usize>(foe)].Id);
+            data.SetInt(foeKey + ".hp", wounds.Foes[static_cast<usize>(foe)].Hp);
+        }
+    }
+
+    data.SetString("spawn", run.SpawnId);
+    data.SetString("encounter", run.EncounterId);
     data.SetString("direct", run.DirectEnemy);
     data.SetString("standing", StandingName(run.Standing));
     data.SetBool("resources", run.ResourcesKnown);
@@ -420,9 +468,12 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     const i32 foes = data.GetInt("defeated.count", 0);
     const i32 found = data.GetInt("found.count", 0);
     const i32 flags = data.GetInt("flag.count", 0);
+    const i32 cleared = data.GetInt("cleared.count", 0);
+    const i32 wounds = data.GetInt("wound.count", 0);
     if (!CountOk(skills, error) || !CountOk(picks, error) || !CountOk(steps, error) ||
         !CountOk(sources, error) || !CountOk(bags, error) || !CountOk(foes, error) ||
-        !CountOk(found, error) || !CountOk(flags, error))
+        !CountOk(found, error) || !CountOk(flags, error) || !CountOk(cleared, error) ||
+        !CountOk(wounds, error))
         return false;
 
     run.Career.Practiced.resize(static_cast<usize>(skills));
@@ -511,7 +562,46 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
         run.Flags[static_cast<usize>(index)] = id;
     }
 
-    run.Position = data.GetInt("position", 0);
+    run.MapId = data.GetString("map");
+    run.Tile.X = data.GetInt("tile.x", 0);
+    run.Tile.Y = data.GetInt("tile.y", 0);
+    run.Cleared.resize(static_cast<usize>(cleared));
+    for (i32 index = 0; index < cleared; ++index) {
+        const std::string id = data.GetString(Key("cleared", index, {}));
+        if (id.empty()) {
+            error = "the save's cleared spawns are damaged";
+            return false;
+        }
+        run.Cleared[static_cast<usize>(index)] = id;
+    }
+    run.Wounds.resize(static_cast<usize>(wounds));
+    for (i32 index = 0; index < wounds; ++index) {
+        const std::string prefix = Key("wound", index, {});
+        FledWounds& wound = run.Wounds[static_cast<usize>(index)];
+        wound.SpawnId = data.GetString(prefix + ".spawn");
+        if (wound.SpawnId.empty()) {
+            error = "the save's flee wounds are damaged";
+            return false;
+        }
+        const i32 foesInWound = data.GetInt(prefix + ".foe.count", 0);
+        if (!CountOk(foesInWound, error))
+            return false;
+        wound.Foes.resize(static_cast<usize>(foesInWound));
+        for (i32 foe = 0; foe < foesInWound; ++foe) {
+            const std::string foeKey = Key(prefix + ".foe", foe, {});
+            FoeWound& body = wound.Foes[static_cast<usize>(foe)];
+            body.Id = data.GetString(foeKey + ".id");
+            if (body.Id.empty()) {
+                error = "the save's flee wounds are damaged";
+                return false;
+            }
+            const i32 hp = data.GetInt(foeKey + ".hp", 0);
+            body.Hp = hp < 0 ? 0 : hp;
+        }
+    }
+    run.SpawnId = data.GetString("spawn");
+    run.EncounterId = data.GetString("encounter");
+    run.LegacyIndex = data.Has("legacy.index") ? data.GetInt("legacy.index", 0) : -1;
     run.DirectEnemy = data.GetString("direct");
     run.Standing = StandingFrom(data.GetString("standing"));
     run.ResourcesKnown = data.GetBool("resources", false);
@@ -585,6 +675,46 @@ RunLoad RunSave::Read() const
     }
     out.Error = RunSaveError::None;
     return out;
+}
+
+void AdoptLegacyMap(const Database& data, RunState& run)
+{
+    if (run.LegacyIndex < 0)
+        return;
+    const i32 index = run.LegacyIndex;
+    run.LegacyIndex = -1;
+
+    const auto encounters = data.GetEncounters();
+    if (run.EncounterId.empty() && !encounters.empty()) {
+        i32 at = index;
+        if (at < 0 || at >= static_cast<i32>(encounters.size()))
+            at = 0;
+        run.EncounterId = encounters[static_cast<usize>(at)].Id;
+    }
+
+    if (run.MapId.empty()) {
+        const MapDef* home = nullptr;
+        for (const MapDef& map : data.GetMaps()) {
+            if (map.Hub)
+                home = &map;
+        }
+        if (home == nullptr && !data.GetMaps().empty())
+            home = &data.GetMaps().front();
+        if (home != nullptr) {
+            run.MapId = home->Id;
+            run.Tile = home->Start;
+        }
+    }
+
+    for (const MapDef& map : data.GetMaps()) {
+        for (const MapSpawn& spawn : map.Spawns) {
+            if (!spawn.Once || spawn.Id.empty() || spawn.Encounter.empty())
+                continue;
+            if (!Listed(run.Defeated, spawn.Encounter) || Listed(run.Cleared, spawn.Id))
+                continue;
+            run.Cleared.push_back(spawn.Id);
+        }
+    }
 }
 
 } // namespace Ascension

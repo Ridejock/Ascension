@@ -641,6 +641,20 @@ void AscensionApp::BeginSpawnFight()
         return;
     }
     m_Battle->SetFleeAllowed(m_MapFight.AllowFlee);
+    if (m_ResumeFight.Known) {
+        const FightSnapshot shot = std::move(m_ResumeFight);
+        m_ResumeFight = {};
+        m_ResumeSpawn.clear();
+        std::string restoreError;
+        if (m_Battle->ImportFight(shot, restoreError)) {
+            m_ResumeResources = false;
+            m_AnnounceResume = false;
+            m_Standing = RunStanding::Ongoing;
+            PushRanks();
+            Note("Resumed.");
+            return;
+        }
+    }
     if (const FledWounds* wounds = WoundsOf(m_MapMemory, m_MapFight.SpawnId))
         ApplyFoeWounds(*m_Battle, *wounds);
     m_Standing = RunStanding::Ongoing;
@@ -737,6 +751,34 @@ void AscensionApp::MaybeSettle()
     m_Talk = false;
     m_Picking = false;
     NoteRest();
+    WriteSave();
+}
+
+void AscensionApp::OpenResumedSpawn()
+{
+    const MapSpawnRef ref = m_Data.FindSpawn(m_ResumeSpawn);
+    if (ref.Map == nullptr || ref.Spawn == nullptr) {
+        m_ResumeFight = {};
+        m_ResumeSpawn.clear();
+        m_Standing = RunStanding::None;
+        Note("The spawn is gone.");
+        return;
+    }
+    m_MapFight.Active = true;
+    m_MapFight.SpawnId = ref.Spawn->Id;
+    m_MapFight.EncounterId = ref.Spawn->Encounter;
+    m_MapFight.MapId = ref.Map->Id;
+    m_MapFight.SpawnTile = ref.Spawn->Tile;
+    m_MapFight.Once = ref.Spawn->Once;
+    m_MapFight.AllowFlee = FleeAllowed(m_Data, *ref.Spawn);
+    ContactQuery beside;
+    beside.Tile = ref.Spawn->Tile;
+    const MapFightRequest offer = OfferSpawn(m_Data, *ref.Map, beside, m_MapMemory);
+    if (offer.Active)
+        m_MapFight.ReturnTile = offer.ReturnTile;
+    else
+        m_MapFight.ReturnTile = ref.Map->Start;
+    BeginSpawnFight();
 }
 
 void AscensionApp::BeginFight()
@@ -1026,7 +1068,7 @@ void AscensionApp::OnStart()
     PlaytestSetup setup;
     std::string why;
     bool resumed = false;
-    if (!m_Play.DefinesRun())
+    if (m_Play.LoadsSave())
         resumed = TryResume(why);
     if (!resumed) {
         if (!ApplyPlaytest(m_Hero, m_Inventory, m_Data, m_Play, setup, why)) {
@@ -1043,13 +1085,20 @@ void AscensionApp::OnStart()
     }
     if (!TakeAutoPath())
         return;
-    if (m_Hero.IsReady() && m_Inventory.IsReady())
+    if (m_Hero.IsReady() && m_Inventory.IsReady() && !m_Vitals.Known)
         FillVitals(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
     OpenPads();
     EnsureIcons();
     BindMapActions();
     if (!m_Play.MapId.empty()) {
-        if (!m_Walker.Enter(m_Data, m_Play.MapId)) {
+        bool stood = false;
+        if (m_HasPlace)
+            stood = m_Walker.Place(m_Data, m_PlaceMap, m_PlaceTile);
+        if (!stood && m_HasPlace)
+            stood = m_Walker.Enter(m_Data, m_PlaceMap);
+        if (!stood)
+            stood = m_Walker.Enter(m_Data, m_Play.MapId);
+        if (!stood) {
             m_StartError = "map '" + m_Play.MapId + "' does not exist";
             std::fprintf(stderr, "%s\n", m_StartError.c_str());
             Note(m_StartError);
@@ -1057,8 +1106,21 @@ void AscensionApp::OnStart()
             return;
         }
         m_OnMap = true;
+        m_HasPlace = true;
+        m_PlaceMap = m_Walker.Place().MapId;
+        m_PlaceTile = m_Walker.Place().Tile;
         Note("Map " + m_Walker.Place().MapId + ".");
-        NoteRest();
+        if (!m_ResumeSpawn.empty() &&
+            (m_ResumeFight.Known || m_Standing == RunStanding::Ongoing))
+            OpenResumedSpawn();
+        else if (m_Standing == RunStanding::Ongoing) {
+            // A version 3 fight was the encounter list. It names no spawn, so the
+            // map does not open it.
+            m_ResumeFight = {};
+            m_Standing = RunStanding::None;
+        }
+        if (!SpawnFightOpen())
+            NoteRest();
         return;
     }
     if (resumed && (m_Standing == RunStanding::Victory || m_Standing == RunStanding::Defeat)) {
@@ -1629,13 +1691,46 @@ bool AscensionApp::WriteSave()
     run.Defeated = m_Defeated;
     run.Found = m_Found;
     run.Flags = m_TalkFlags;
-    run.Position = m_EnemyIndex;
     run.DirectEnemy = m_DirectEnemy;
-    run.Standing = m_Standing;
-    if (m_Battle != nullptr) {
-        RememberOutcome(run, m_Battle->Result(), m_Battle->Player().Hp, m_Battle->Player().Focus);
-        if (m_Battle->Result() == BattleResult::Ongoing)
-            run.Fight = m_Battle->ExportFight();
+    run.Cleared = m_MapMemory.Cleared;
+    run.Wounds = m_MapMemory.Wounds;
+    if (m_Walker.Placed()) {
+        run.MapId = m_Walker.Place().MapId;
+        run.Tile = m_Walker.Place().Tile;
+    } else if (m_HasPlace) {
+        run.MapId = m_PlaceMap;
+        run.Tile = m_PlaceTile;
+    }
+    const auto encounters = m_Data.GetEncounters();
+    const bool spawnFight = m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing &&
+                            m_MapFight.Active && !m_MapFight.EncounterId.empty();
+    if (spawnFight)
+        run.EncounterId = m_MapFight.EncounterId;
+    else if (m_EnemyIndex >= 0 && m_EnemyIndex < static_cast<i32>(encounters.size()))
+        run.EncounterId = encounters[static_cast<usize>(m_EnemyIndex)].Id;
+
+    if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
+        RememberOutcome(run, BattleResult::Ongoing, m_Battle->Player().Hp, m_Battle->Player().Focus);
+        run.Fight = m_Battle->ExportFight();
+        if (m_MapFight.Active)
+            run.SpawnId = m_MapFight.SpawnId;
+    } else if (m_Vitals.Known) {
+        BattleResult result = BattleResult::Fled;
+        if (m_Battle != nullptr)
+            result = m_Battle->Result();
+        else if (m_Standing == RunStanding::Victory)
+            result = BattleResult::Victory;
+        else if (m_Standing == RunStanding::Defeat)
+            result = BattleResult::Defeat;
+        else if (m_Standing == RunStanding::Ongoing)
+            result = BattleResult::Ongoing;
+        RememberOutcome(run, result, m_Vitals.Hp, m_Vitals.Focus);
+        if (result == BattleResult::Ongoing && m_ResumeFight.Known) {
+            run.Fight = m_ResumeFight;
+            run.SpawnId = m_ResumeSpawn;
+        }
+    } else {
+        run.Standing = m_Standing;
     }
     RunSave saves(SaveFolder());
     std::string error;
@@ -1657,25 +1752,43 @@ bool AscensionApp::TryResume(std::string& error)
     }
     if (!m_Hero.Start(m_Data, error) || !m_Inventory.Start(m_Data, error))
         return false;
-    if (!m_Hero.ImportCareer(loaded.Run.Career, error) ||
-        !m_Inventory.ImportBag(loaded.Run.Bag, error))
+    RunState run = loaded.Run;
+    AdoptLegacyMap(m_Data, run);
+    if (!m_Hero.ImportCareer(run.Career, error) || !m_Inventory.ImportBag(run.Bag, error))
         return false;
-    m_Defeated = loaded.Run.Defeated;
-    m_Found = loaded.Run.Found;
-    m_TalkFlags = loaded.Run.Flags;
+    m_Defeated = run.Defeated;
+    m_Found = run.Found;
+    m_TalkFlags = run.Flags;
     m_Inventory.SetDefeated(m_Defeated);
-    m_EnemyIndex = loaded.Run.Position < 0 ? 0 : loaded.Run.Position;
-    m_DirectEnemy = loaded.Run.DirectEnemy;
-    m_Standing = loaded.Run.Standing;
+    m_EnemyIndex = 0;
+    const auto encounters = m_Data.GetEncounters();
+    for (i32 index = 0; index < static_cast<i32>(encounters.size()); ++index) {
+        if (encounters[static_cast<usize>(index)].Id == run.EncounterId) {
+            m_EnemyIndex = index;
+            break;
+        }
+    }
+    m_DirectEnemy = run.DirectEnemy;
+    m_Standing = run.Standing;
+    m_MapMemory.Cleared = run.Cleared;
+    m_MapMemory.Wounds = run.Wounds;
+    m_HasPlace = !run.MapId.empty();
+    m_PlaceMap = run.MapId;
+    m_PlaceTile = run.Tile;
+    m_ResumeSpawn = run.SpawnId;
     m_ResumeResources = false;
     m_ResumeFight = {};
-    if (ResumeWound(loaded.Run)) {
+    if (ResumeWound(run)) {
+        m_Vitals.Known = true;
+        m_Vitals.Hp = run.Hp;
+        m_Vitals.Focus = run.Focus;
+        m_Vitals.ReturnToHub = false;
         m_ResumeResources = true;
-        m_ResumeHp = loaded.Run.Hp;
-        m_ResumeFocus = loaded.Run.Focus;
+        m_ResumeHp = run.Hp;
+        m_ResumeFocus = run.Focus;
     }
-    if (loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.Fight.Known)
-        m_ResumeFight = loaded.Run.Fight;
+    if (run.Standing == RunStanding::Ongoing && run.Fight.Known)
+        m_ResumeFight = run.Fight;
     if (loaded.FromBackup)
         Note("The save was damaged. The previous one was loaded.");
     error.clear();

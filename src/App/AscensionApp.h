@@ -51,6 +51,9 @@ private:
     void BeginSpawnFight();
     // Puts a finished spawn fight back on the map. A list fight never has one open.
     void MaybeSettle();
+    // An ongoing save named a spawn. Opens that fight and puts the snapshot back.
+    // A spawn id the data no longer has leaves the hero where they were standing.
+    void OpenResumedSpawn();
     // A loss fills both pools and marks a hub return. Gold is not touched.
     void RememberDefeat();
     // Standing on a rest point fills both pools, once per arrival.
@@ -161,7 +164,8 @@ private:
     // for the step taken later in the same frame.
     WalkDir m_ScriptDir = WalkDir::None;
     // The spawn fight on screen. Active is false on the encounter list, and on the
-    // map whenever the hero is walking. Cleared ids live in m_MapMemory, not the save.
+    // map whenever the hero is walking. Cleared ids and flee wounds live in
+    // m_MapMemory, and the save writes them by spawn id.
     struct MapEngagement {
         bool Active = false;
         std::string SpawnId;
@@ -174,9 +178,17 @@ private:
     };
     MapEngagement m_MapFight;
     MapMemory m_MapMemory;
-    // HP and focus between fights. A new hero is full. A win writes the leftover
-    // back. A loss fills both and sets ReturnToHub. The save still uses version 3,
-    // which does not store this.
+    // The place a save recorded when this launch is not standing on the map. The
+    // walker is the place while --map is up. A fight-screen launch writes this back
+    // so it does not erase a map the save already had.
+    bool m_HasPlace = false;
+    std::string m_PlaceMap;
+    MapTile m_PlaceTile;
+    // Spawn id from a save, until the snapshot is restored or dropped.
+    std::string m_ResumeSpawn;
+    // HP and focus between fights. A new hero is full. A win or a flee writes the
+    // leftover back. A loss fills both and sets ReturnToHub. The save records the
+    // pools whenever they are known.
     Vitals m_Vitals;
     // True once this fight's end has been written into m_Vitals. R mid-fight leaves
     // it clear, so the retry starts from the pools the fight opened with.

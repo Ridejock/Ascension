@@ -82,12 +82,26 @@ struct PlaytestOptions {
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
 
-    // True when the command builds a hero of its own. That run does not load a save.
+    // True when the command names a hero, a fight, or a map. Those start from the
+    // flags. --map with --save-dir is the exception: LoadsSave still reads that folder.
     [[nodiscard]] bool DefinesRun() const
     {
         return Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || !MapId.empty() ||
                Gold.has_value() || !Give.empty() || !Equip.empty() || !ChooseId.empty() ||
                !PickIds.empty() || Sim;
+    }
+
+    // True when this launch should read the run save. --map alone does not, so it
+    // never opens the per-user save. --map with --save-dir does. A command that builds
+    // a hero (--level and the rest) still starts fresh.
+    [[nodiscard]] bool LoadsSave() const
+    {
+        if (Level.has_value() || !ClassId.empty() || !Fight.Id.empty() || Gold.has_value() ||
+            !Give.empty() || !Equip.empty() || !ChooseId.empty() || !PickIds.empty() || Sim)
+            return false;
+        if (!MapId.empty())
+            return !SaveDir.empty();
+        return true;
     }
 };
 

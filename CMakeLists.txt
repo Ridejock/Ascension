@@ -215,7 +215,8 @@ if(ASCENSION_BUILD_TESTS)
     target_link_libraries(AscensionSaveTests PRIVATE AscensionProgress AscensionCombat)
     target_compile_definitions(AscensionSaveTests PRIVATE
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
-        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+        ASCENSION_SAVE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/v3-run.sav")
     emerald_set_warnings(AscensionSaveTests)
     add_test(NAME Save COMMAND AscensionSaveTests)
 

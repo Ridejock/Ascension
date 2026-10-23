@@ -234,7 +234,21 @@ void TestRoundTrip()
     run.Defeated.push_back("wolf");
     run.Defeated.push_back(boss);
     run.Flags.push_back("met");
-    run.Position = 4;
+    run.Found.push_back("alphas_fang");
+    run.EncounterId = "wolf_pack";
+    run.MapId = "fixture_a";
+    run.Tile.X = 3;
+    run.Tile.Y = 1;
+    run.Cleared.push_back("fixture_spawn");
+    run.Cleared.push_back("retired_spawn");
+    FledWounds wounds;
+    wounds.SpawnId = "fixture_hold";
+    FoeWound foe;
+    foe.Id = "wolf";
+    foe.Hp = 11;
+    wounds.Foes.push_back(foe);
+    run.Wounds.push_back(std::move(wounds));
+    run.SpawnId = "fixture_hold";
     run.DirectEnemy = "rubble_shard";
     run.Standing = RunStanding::Ongoing;
     run.ResourcesKnown = true;
@@ -251,7 +265,8 @@ void TestRoundTrip()
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     Check(text.find("EMERALD-SAVE 1") == 0, "the file is an Emerald save, not JSON");
-    Check(text.find("version = 3") != std::string::npos, "the header carries the data version");
+    Check(text.find("version = 4") != std::string::npos, "the header carries the data version");
+    Check(text.find("position =") == std::string::npos, "the encounter index is not stored");
     Check(text.find('{') == std::string::npos, "the save text has no JSON object");
 
     const RunLoad loaded = saves.Read();
@@ -281,12 +296,20 @@ void TestRoundTrip()
               bagAgain.Equipped(GearSlot::Weapon) == "rusty_sword",
           "gold, stack counts, and worn gear come back");
     Check(loaded.Run.Defeated.size() == 2 && loaded.Run.Defeated[0] == "wolf" &&
-              loaded.Run.Defeated[1] == boss && loaded.Run.Position == 4 &&
+              loaded.Run.Defeated[1] == boss && loaded.Run.EncounterId == "wolf_pack" &&
               loaded.Run.DirectEnemy == "rubble_shard" &&
               loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.ResourcesKnown &&
               loaded.Run.Hp == 17 && loaded.Run.Focus == 1 && loaded.Run.Flags.size() == 1 &&
-              loaded.Run.Flags[0] == "met",
-          "defeated foes, position, the wound, and a dialogue flag come back");
+              loaded.Run.Flags[0] == "met" && loaded.Run.Found.size() == 1 &&
+              loaded.Run.Found[0] == "alphas_fang",
+          "defeated foes, the encounter, the wound, a flag, and the fang come back");
+    Check(loaded.Run.MapId == "fixture_a" && loaded.Run.Tile.X == 3 && loaded.Run.Tile.Y == 1 &&
+              loaded.Run.SpawnId == "fixture_hold" && loaded.Run.Cleared.size() == 2 &&
+              loaded.Run.Cleared[0] == "fixture_spawn" && loaded.Run.Cleared[1] == "retired_spawn" &&
+              loaded.Run.Wounds.size() == 1 && loaded.Run.Wounds[0].SpawnId == "fixture_hold" &&
+              loaded.Run.Wounds[0].Foes.size() == 1 && loaded.Run.Wounds[0].Foes[0].Id == "wolf" &&
+              loaded.Run.Wounds[0].Foes[0].Hp == 11 && loaded.Run.LegacyIndex < 0,
+          "the map, the tile, cleared spawn ids, and the flee wound come back");
 
     Battle battle(data, std::make_unique<AgilityRoundModel>());
     battle.SetPickedSkills(again.PickedIds());
@@ -351,7 +374,7 @@ void TestMigration()
     Check(version1.Save("run", older, "old"), "a version 1 file is written");
 
     RunSave saves(dir.Path);
-    const RunLoad loaded = saves.Read();
+    RunLoad loaded = saves.Read();
     Check(static_cast<bool>(loaded) && loaded.FileVersion == 1 && !loaded.FromBackup,
           "version 1 migrates forward");
     Hero hero = StartHero(data);
@@ -363,11 +386,21 @@ void TestMigration()
     Check(bag.Gold() == 11 && StackCount(bag, "minor_potion") == 2 &&
               bag.Equipped(GearSlot::Weapon) == "rusty_sword",
           "the old bag loads");
-    Check(loaded.Run.ResourcesKnown && loaded.Run.Hp == 15 && loaded.Run.Focus == 3 &&
-              loaded.Run.Position == 2 && loaded.Run.Standing == RunStanding::Victory &&
-              loaded.Run.Defeated.size() == 2 && loaded.Run.Defeated[0] == "wolf" &&
-              loaded.Run.Defeated[1] == "bandit",
-          "health, place, and the foe list are migrated");
+    AdoptLegacyMap(data, loaded.Run);
+    Check(!loaded.Run.ResourcesKnown && loaded.Run.Hp == 0 && loaded.Run.Focus == 0 &&
+              loaded.Run.Standing == RunStanding::Victory && loaded.Run.LegacyIndex < 0 &&
+              loaded.Run.EncounterId == "tomb_moth" && loaded.Run.MapId == "fixture_a" &&
+              loaded.Run.Tile.X == 1 && loaded.Run.Tile.Y == 1 && loaded.Run.Defeated.size() == 2 &&
+              loaded.Run.Defeated[0] == "wolf" && loaded.Run.Defeated[1] == "bandit",
+          "a finished fight drops the old health, and the index becomes an encounter and a tile");
+    Check(loaded.Run.Cleared.size() == 1 && loaded.Run.Cleared[0] == "fixture_spawn",
+          "the wolf spawn is cleared because its encounter id was defeated");
+    bool holdCleared = false;
+    for (const std::string& id : loaded.Run.Cleared) {
+        if (id == "fixture_hold")
+            holdCleared = true;
+    }
+    Check(!holdCleared, "a repeatable spawn is not cleared by the old list");
     Check(!loaded.Run.Fight.Known, "a version 1 file has no mid-fight snapshot");
 }
 
@@ -412,7 +445,11 @@ void TestMidFight()
     run.ResourcesKnown = true;
     run.Hp = heroHp;
     run.Focus = battle.Player().Focus;
-    run.Position = 0;
+    run.EncounterId = "wolf";
+    run.SpawnId = "fixture_spawn";
+    run.MapId = "fixture_a";
+    run.Tile.X = 4;
+    run.Tile.Y = 1;
     run.Fight = battle.ExportFight();
     Check(run.Fight.Known && run.Fight.Actor == CombatantSide::Player && run.Fight.Foes.size() == 1,
           "the snapshot is the player's turn against one wolf");
@@ -422,8 +459,9 @@ void TestMidFight()
     Check(saves.Write(run, why), "the mid-fight run is written");
     const RunLoad loaded = saves.Read();
     Check(static_cast<bool>(loaded) && loaded.FileVersion == RunSave::kVersion &&
-              loaded.Run.Fight.Known,
-          "the mid-fight snapshot loads at the current version");
+              loaded.Run.Fight.Known && loaded.Run.SpawnId == "fixture_spawn" &&
+              loaded.Run.MapId == "fixture_a" && loaded.Run.Tile.X == 4 && loaded.Run.Tile.Y == 1,
+          "the mid-fight snapshot loads with the spawn it came from");
 
     Battle again(data, std::make_unique<AgilityRoundModel>());
     Check(again.Start("fighter", 1, "wolf", why), "a fresh wolf fight starts");
@@ -506,7 +544,7 @@ void TestCorruptFallsBack()
     bag.GrantGold(4);
     RunState first = Capture(hero, bag);
     first.Standing = RunStanding::Victory;
-    first.Position = 1;
+    first.EncounterId = "bandit";
 
     Hero richer = StartHero(data);
     Inventory richerBag = StartBag(data);
@@ -529,7 +567,7 @@ void TestCorruptFallsBack()
     Hero again = StartHero(data);
     Inventory bagAgain = StartBag(data);
     Check(Restore(again, bagAgain, loaded.Run, why), "the backup is applied");
-    Check(again.Xp() == 8 && bagAgain.Gold() == 4 && loaded.Run.Position == 1,
+    Check(again.Xp() == 8 && bagAgain.Gold() == 4 && loaded.Run.EncounterId == "bandit",
           "the backup is the earlier run, not the truncated one");
 
     std::error_code removeError;
@@ -595,8 +633,9 @@ void TestAiSnapshot()
     RunSave saves(dir.Path);
     Check(saves.Write(run, why), "the exposed post fight is written");
     const RunLoad loaded = saves.Read();
-    Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.Fight.Known,
-          "the snapshot loads at version 3");
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == RunSave::kVersion &&
+              loaded.Run.Fight.Known,
+          "the snapshot loads at the current version");
 
     Battle again(data, std::make_unique<AgilityRoundModel>());
     Check(again.Start("fighter", 1, "rule_post", why) && again.ImportFight(loaded.Run.Fight, why),
@@ -842,15 +881,193 @@ void TestVictoryHp()
     RunSave saves(dir.Path);
     Check(saves.Write(run, why), "the victory is written");
     const RunLoad loaded = saves.Read();
+    const i32 left = battle.Player().Hp;
     Check(static_cast<bool>(loaded) && loaded.Run.Standing == RunStanding::Victory &&
-              !loaded.Run.ResourcesKnown && loaded.Run.Hp == 0 && !ResumeWound(loaded.Run),
-          "a victory save stores no wound");
+              loaded.Run.ResourcesKnown && loaded.Run.Hp == left && ResumeWound(loaded.Run),
+          "a victory save keeps the HP that was left");
 
     Battle next(data, std::make_unique<AgilityRoundModel>());
     Check(next.Start("fighter", 1, "bandit", why), "the next fight starts from that save");
     if (ResumeWound(loaded.Run))
         next.SetPlayerHp(loaded.Run.Hp);
-    Check(next.Player().Hp == next.Player().MaxHp, "the next fight refills HP");
+    Check(next.Player().Hp == left, "the next fight starts at the HP the win left");
+}
+
+bool HoldsId(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& held : ids) {
+        if (held == id)
+            return true;
+    }
+    return false;
+}
+
+void TestVersion3Hub()
+{
+    DataCopy copy;
+    ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"hub\": false", "\"hub\": true");
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "a hub map loads");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    const MapDef* hub = data.FindMap("fixture_b");
+    Check(hub != nullptr && hub->Hub, "fixture_b is the hub");
+
+    TempDir dir("ascension-save-v3-hub");
+    Emerald::SaveData older;
+    older.SetString("class", "fighter");
+    older.SetInt("xp", 8);
+    older.SetInt("gold", 4);
+    older.SetInt("position", 0);
+    older.SetString("standing", "victory");
+    older.SetInt("defeated.count", 1);
+    older.SetString("defeated.0", "wolf");
+    older.SetInt("found.count", 1);
+    older.SetString("found.0", "alphas_fang");
+    Emerald::SaveSystem version3(dir.Path, 3);
+    Check(version3.Save("run", older, "v3"), "a version 3 file is written");
+
+    RunSave saves(dir.Path);
+    RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.LegacyIndex == 0 &&
+              loaded.Run.Found.size() == 1 && loaded.Run.Found[0] == "alphas_fang",
+          "version 3 migrates and keeps the fang");
+    AdoptLegacyMap(data, loaded.Run);
+    Check(loaded.Run.LegacyIndex < 0 && loaded.Run.EncounterId == "wolf" &&
+              loaded.Run.MapId == "fixture_b" && loaded.Run.Tile.X == hub->Start.X &&
+              loaded.Run.Tile.Y == hub->Start.Y && HoldsId(loaded.Run.Cleared, "fixture_spawn") &&
+              !HoldsId(loaded.Run.Cleared, "fixture_hold") && loaded.Run.Found.size() == 1 &&
+              loaded.Run.Found[0] == "alphas_fang",
+          "the hero stands on the hub start, and the once-spawn of a defeated encounter is cleared");
+
+    std::string why;
+    Check(saves.Write(loaded.Run, why), "the migrated run is written as version 4");
+    std::ifstream in(dir.Path / "run.sav");
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    Check(text.find("version = 4") != std::string::npos && text.find("position =") == std::string::npos &&
+              text.find("legacy.index") == std::string::npos &&
+              text.find("alphas_fang") != std::string::npos,
+          "the new file is version 4, with spawn ids and the fang, and no list index");
+}
+
+void TestFixtureV3()
+{
+    const fs::path fixture = ASCENSION_SAVE_FIXTURE;
+    TempDir dir("ascension-save-fixture-v3");
+    std::error_code copyError;
+    fs::copy_file(fixture, dir.Path / "run.sav", copyError);
+    Check(!copyError, "the version 3 fixture is copied");
+    if (copyError)
+        return;
+    RunSave saves(dir.Path);
+    RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 3 && loaded.Run.LegacyIndex == 1 &&
+              loaded.Run.Found.size() == 1 && loaded.Run.Found[0] == "alphas_fang" &&
+              loaded.Run.Flags.size() == 1 && loaded.Run.Flags[0] == "met",
+          "the fixture version 3 file migrates and keeps the fang");
+    if (!loaded)
+        std::printf("    %s\n", loaded.Message.c_str());
+    Database data = Sample();
+    if (!data.IsLoaded())
+        return;
+    AdoptLegacyMap(data, loaded.Run);
+    Hero hero = StartHero(data);
+    Inventory bag = StartBag(data);
+    std::string why;
+    Check(Restore(hero, bag, loaded.Run, why), "the fixture career loads");
+    Check(hero.ClassId() == "fighter" && hero.Xp() == 8 && bag.Gold() == 4 &&
+              loaded.Run.EncounterId == "bandit" && loaded.Run.MapId == "fixture_a" &&
+              loaded.Run.Tile.X == 1 && loaded.Run.Tile.Y == 1 &&
+              HoldsId(loaded.Run.Cleared, "fixture_spawn") &&
+              !HoldsId(loaded.Run.Cleared, "fixture_hold") && loaded.Run.LegacyIndex < 0,
+          "the fixture stands on the first map's start with the wolf spawn cleared");
+    Check(saves.Write(loaded.Run, why), "the fixture is saved as version 4");
+    const RunLoad again = saves.Read();
+    Check(static_cast<bool>(again) && again.FileVersion == RunSave::kVersion &&
+              again.Run.Found.size() == 1 && again.Run.Found[0] == "alphas_fang" &&
+              HoldsId(again.Run.Cleared, "fixture_spawn") && again.Run.LegacyIndex < 0,
+          "saving the fixture does not drop the fang or the cleared id");
+}
+
+void TestSpawnIds()
+{
+    DataCopy copy;
+    ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                  "\"spawns\": [\n"
+                  "      {\n"
+                  "        \"id\": \"fixture_spawn\",\n"
+                  "        \"tile\": { \"x\": 4, \"y\": 1 },\n"
+                  "        \"encounter\": \"wolf\"\n"
+                  "      }\n"
+                  "    ]",
+                  "\"spawns\": [\n"
+                  "      {\n"
+                  "        \"id\": \"fixture_extra\",\n"
+                  "        \"tile\": { \"x\": 4, \"y\": 1 },\n"
+                  "        \"encounter\": \"bandit\"\n"
+                  "      },\n"
+                  "      {\n"
+                  "        \"id\": \"fixture_spawn\",\n"
+                  "        \"tile\": { \"x\": 1, \"y\": 2 },\n"
+                  "        \"encounter\": \"wolf\"\n"
+                  "      }\n"
+                  "    ]");
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "a reordered spawn list loads");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    const MapDef* map = data.FindMap("fixture_a");
+    const MapSpawnRef spawn = data.FindSpawn("fixture_spawn");
+    const MapSpawnRef missing = data.FindSpawn("missing_spawn");
+    Check(map != nullptr && map->Spawns.size() == 2 && map->Spawns[0].Id == "fixture_extra" &&
+              spawn.Spawn != nullptr && spawn.Spawn->Tile.X == 1 && spawn.Spawn->Tile.Y == 2 &&
+              missing.Spawn == nullptr,
+          "the saved id is not the first spawn, and a removed id is absent");
+
+    Hero hero = StartHero(data);
+    RunState run = Capture(hero, StartBag(data));
+    run.MapId = "fixture_a";
+    run.Tile.X = 2;
+    run.Tile.Y = 1;
+    run.Cleared.push_back("fixture_spawn");
+    run.Cleared.push_back("missing_spawn");
+    FledWounds wounds;
+    wounds.SpawnId = "missing_spawn";
+    FoeWound foe;
+    foe.Id = "wolf";
+    foe.Hp = 9;
+    wounds.Foes.push_back(foe);
+    run.Wounds.push_back(std::move(wounds));
+    run.Found.push_back("alphas_fang");
+    std::string why;
+    TempDir dir("ascension-save-spawn-ids");
+    RunSave saves(dir.Path);
+    Check(saves.Write(run, why), "cleared ids and an unknown wound are written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.Run.Cleared.size() == 2 &&
+              loaded.Run.Cleared[0] == "fixture_spawn" && loaded.Run.Cleared[1] == "missing_spawn" &&
+              loaded.Run.Wounds.size() == 1 && loaded.Run.Wounds[0].SpawnId == "missing_spawn" &&
+              loaded.Run.Wounds[0].Foes.size() == 1 && loaded.Run.Wounds[0].Foes[0].Hp == 9 &&
+              loaded.Run.Found.size() == 1 && loaded.Run.Found[0] == "alphas_fang" &&
+              loaded.Run.MapId == "fixture_a" && loaded.Run.Tile.X == 2 && loaded.Run.Tile.Y == 1,
+          "reordering spawns leaves the cleared id, and an unknown id still loads");
+
+    TempDir brokenDir("ascension-save-empty-spawn");
+    Emerald::SaveData broken;
+    broken.SetString("class", "fighter");
+    broken.SetInt("cleared.count", 1);
+    broken.SetString("cleared.0", "");
+    Emerald::SaveSystem version4(brokenDir.Path, 4);
+    Check(version4.Save("run", broken, "empty"), "a version 4 file with an empty spawn id is written");
+    RunSave brokenSave(brokenDir.Path);
+    const RunLoad bad = brokenSave.Read();
+    Check(!bad && bad.Error == RunSaveError::BadData, "an empty spawn id is damaged, not a crash");
 }
 
 void TestFoundOptional()
@@ -884,6 +1101,9 @@ int main()
     TestFangDrop();
     TestGenericDrop();
     TestVictoryHp();
+    TestVersion3Hub();
+    TestFixtureV3();
+    TestSpawnIds();
     TestFoundOptional();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();
