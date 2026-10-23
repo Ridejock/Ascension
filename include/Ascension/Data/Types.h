@@ -169,6 +169,10 @@ struct CombatRules {
     i32 FocusBase = 0;
     i32 FocusPerTurn = 0;
     i32 FocusOnWait = 0;
+    // How many foes one fight seats. combat.json names it. A map contact seats this
+    // many and leaves the rest queued. A summon stops at the same number. 3 in the
+    // sample and in the shipped file.
+    i32 MaxFoes = 3;
 };
 
 // What a level-up does to current HP. The new max is always the new vitality. Gained adds
@@ -376,7 +380,9 @@ struct EnemyDef {
 
 // A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack),
 // except an enemy with Unique set, which can be listed once. Different unique enemies
-// may share a fight.
+// may share a fight. The list cannot be longer than CombatRules::MaxFoes. A map contact
+// that gathers more foes than that seats MaxFoes and queues the rest; it does not grow
+// this list.
 // The sandbox walks this list. One id is still a normal single-enemy fight. Zone is the
 // campaign stretch drawn above the foe name. Empty means that line is absent. The log
 // never includes it.

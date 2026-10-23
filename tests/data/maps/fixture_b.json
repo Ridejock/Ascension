@@ -20,7 +20,7 @@
         "encounter": "wolf",
         "once": false,
         "noFlee": true,
-        "mover": {}
+        "mover": { "behavior": "stand" }
       }
     ],
     "links": [

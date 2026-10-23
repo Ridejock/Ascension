@@ -58,11 +58,21 @@ bool SpawnCleared(std::span<const std::string> cleared, std::string_view id)
     return false;
 }
 
+MapTile SpawnDrawTile(const MapSpawn& spawn, std::span<const SpawnPlace> places)
+{
+    for (const SpawnPlace& place : places) {
+        if (place.Id == spawn.Id)
+            return place.Tile;
+    }
+    return spawn.Tile;
+}
+
 } // namespace
 
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
-                   i32 focus, i32 maxFocus, std::span<const std::string> cleared)
+                   i32 focus, i32 maxFocus, std::span<const std::string> cleared,
+                   std::span<const SpawnPlace> places)
 {
     const Emerald::Vec4 label = ByteColor(kLabelRed, kLabelGreen, kLabelBlue);
     const Emerald::Vec4 dim = ByteColor(kLogRed, kLogGreen, kLogBlue);
@@ -137,11 +147,11 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         for (const MapSpawn& spawn : map->Spawns) {
             if (SpawnCleared(cleared, spawn.Id))
                 continue;
-            if (spawn.Tile.X < firstX || spawn.Tile.X >= lastX || spawn.Tile.Y < firstY ||
-                spawn.Tile.Y >= lastY)
+            const MapTile at = SpawnDrawTile(spawn, places);
+            if (at.X < firstX || at.X >= lastX || at.Y < firstY || at.Y >= lastY)
                 continue;
-            const f32 left = (static_cast<f32>(spawn.Tile.X) - frame.OriginX) * tile + inset;
-            const f32 top = (static_cast<f32>(spawn.Tile.Y) - frame.OriginY) * tile + inset;
+            const f32 left = (static_cast<f32>(at.X) - frame.OriginX) * tile + inset;
+            const f32 top = (static_cast<f32>(at.Y) - frame.OriginY) * tile + inset;
             DrawCell(renderer, left, top, inner, spawnColor);
         }
     }

@@ -123,6 +123,64 @@ const FledWounds* WoundsOf(const MapMemory& memory, std::string_view spawnId)
     return nullptr;
 }
 
+namespace {
+
+i32 TileGap(i32 left, i32 right)
+{
+    const i32 gap = left - right;
+    return gap < 0 ? -gap : gap;
+}
+
+// The greater of the two axis gaps. A radius of 1 is the eight neighboring tiles.
+i32 TileDistance(MapTile left, MapTile right)
+{
+    const i32 east = TileGap(left.X, right.X);
+    const i32 south = TileGap(left.Y, right.Y);
+    return east > south ? east : south;
+}
+
+MapTile TileNow(const MapSpawn& spawn, std::span<const SpawnPlace> places)
+{
+    for (const SpawnPlace& place : places) {
+        if (place.Id == spawn.Id)
+            return place.Tile;
+    }
+    return spawn.Tile;
+}
+
+bool AlreadySeated(const std::vector<PartyFoe>& foes, std::string_view spawnId)
+{
+    for (const PartyFoe& foe : foes) {
+        if (foe.SpawnId == spawnId)
+            return true;
+    }
+    return false;
+}
+
+void AppendSpawn(const Database& data, const MapSpawn& spawn, std::vector<PartyFoe>& out)
+{
+    const EncounterDef* encounter = data.FindEncounter(spawn.Encounter);
+    if (encounter == nullptr)
+        return;
+    for (const std::string& id : encounter->Enemies) {
+        PartyFoe foe;
+        foe.SpawnId = spawn.Id;
+        foe.Id = id;
+        out.push_back(std::move(foe));
+    }
+}
+
+bool StatusListed(const std::vector<std::string>& statuses, std::string_view id)
+{
+    for (const std::string& have : statuses) {
+        if (have == id)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
 i32 StoredWound(const FledWounds& wounds, i32 index, std::string_view id)
 {
     if (index < 0 || static_cast<usize>(index) >= wounds.Foes.size())
@@ -131,6 +189,44 @@ i32 StoredWound(const FledWounds& wounds, i32 index, std::string_view id)
     if (wound.Id != id)
         return -1;
     return wound.Hp;
+}
+
+PartySplit SplitParty(std::span<const PartyFoe> ordered, i32 maxFoes)
+{
+    PartySplit split;
+    i32 cap = maxFoes;
+    if (cap < 0)
+        cap = 0;
+    for (const PartyFoe& foe : ordered) {
+        if (static_cast<i32>(split.Seated.size()) < cap)
+            split.Seated.push_back(foe);
+        else
+            split.Queued.push_back(foe);
+    }
+    return split;
+}
+
+void ApplyMapAuras(const Database&, const MapDef& map, const MapMemory& memory,
+                   std::span<const SpawnPlace> places, std::vector<PartyFoe>& foes)
+{
+    for (PartyFoe& foe : foes) {
+        foe.Statuses.clear();
+        const MapSpawn* who = map.FindSpawn(foe.SpawnId);
+        if (who == nullptr)
+            continue;
+        const MapTile foeTile = TileNow(*who, places);
+        for (const MapSpawn& auraSpawn : map.Spawns) {
+            if (!auraSpawn.Aura.Listed || auraSpawn.Id == foe.SpawnId)
+                continue;
+            if (IsCleared(memory, auraSpawn.Id))
+                continue;
+            if (TileDistance(foeTile, TileNow(auraSpawn, places)) > auraSpawn.Aura.Radius)
+                continue;
+            if (StatusListed(foe.Statuses, auraSpawn.Aura.Status))
+                continue;
+            foe.Statuses.push_back(auraSpawn.Aura.Status);
+        }
+    }
 }
 
 bool FleeAllowed(const Database& data, const MapSpawn& spawn)
@@ -149,12 +245,12 @@ bool FleeAllowed(const Database& data, const MapSpawn& spawn)
 }
 
 MapFightRequest OfferSpawn(const Database& data, const MapDef& map, ContactQuery query,
-                           const MapMemory& memory)
+                           const MapMemory& memory, std::span<const SpawnPlace> places)
 {
     MapFightRequest request;
     const MapSpawn* spawn = nullptr;
     for (const MapSpawn& candidate : map.Spawns) {
-        if (SameTile(candidate.Tile, query.Tile))
+        if (SameTile(TileNow(candidate, places), query.Tile))
             spawn = &candidate;
     }
     if (spawn == nullptr || IsCleared(memory, spawn->Id))
@@ -162,15 +258,37 @@ MapFightRequest OfferSpawn(const Database& data, const MapDef& map, ContactQuery
     const EncounterDef* encounter = data.FindEncounter(spawn->Encounter);
     if (encounter == nullptr)
         return request;
+
+    std::vector<PartyFoe> ordered;
+    AppendSpawn(data, *spawn, ordered);
+    for (const std::string& id : query.Joining) {
+        if (AlreadySeated(ordered, id))
+            continue;
+        const MapSpawn* extra = map.FindSpawn(id);
+        if (extra == nullptr || IsCleared(memory, extra->Id))
+            continue;
+        AppendSpawn(data, *extra, ordered);
+    }
+    const PartySplit split = SplitParty(ordered, data.GetRules().MaxFoes);
+    request.Seats = split.Seated;
+    request.Queue = split.Queued;
+    ApplyMapAuras(data, map, memory, places, request.Seats);
+    for (const PartyFoe& foe : request.Seats) {
+        request.Foes.push_back(foe.Id);
+        for (const std::string& status : foe.Statuses) {
+            if (!StatusListed(request.StartStatuses, status))
+                request.StartStatuses.push_back(status);
+        }
+    }
+
     request.Active = true;
     request.SpawnId = spawn->Id;
     request.EncounterId = encounter->Id;
     request.MapId = map.Id;
-    request.SpawnTile = spawn->Tile;
+    request.SpawnTile = TileNow(*spawn, places);
     request.Once = spawn->Once;
     request.AllowFlee = FleeAllowed(data, *spawn);
-    request.Foes = encounter->Enemies;
-    request.ReturnTile = FleeTile(data, map, spawn->Tile, query);
+    request.ReturnTile = FleeTile(data, map, request.SpawnTile, query);
     return request;
 }
 

@@ -122,8 +122,8 @@ void TestSample()
     Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
               data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1 &&
               data.GetRules().FocusBase == 4 && data.GetRules().FocusPerTurn == 1 &&
-              data.GetRules().FocusOnWait == 2,
-          "combat.json supplies the damage rules and focus regen");
+              data.GetRules().FocusOnWait == 2 && data.GetRules().MaxFoes == 3,
+          "combat.json supplies the damage rules, focus regen, and a 3-foe fight");
     Check(data.GetEnemies().size() == 7, "seven enemies, counting the boss and the shard");
     Check(data.GetItems().size() == 7, "seven items");
     i32 mythicItems = 0;
@@ -692,6 +692,22 @@ void TestValidation()
                       "\"enemies\": [\"wolf\", \"wolf\", \"wolf\", \"wolf\"]");
         TestRejected(copy.Path, "encounters.json", "more than 3",
                      "an encounter cannot list more than 3 enemies");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "combat.json", "\"maxFoes\": 3", "\"maxFoes\": 2");
+        TestRejected(copy.Path, "encounters.json", "more than 2",
+                     "the fight cap is the number in combat.json");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "combat.json", "\"maxFoes\": 3", "\"maxFoes\": 4");
+        Database wider(copy.Path);
+        DataError error;
+        Check(wider.Load(&error), "raising the cap still loads the wolf pack");
+        const EncounterDef* pack = wider.FindEncounter("wolf_pack");
+        Check(wider.GetRules().MaxFoes == 4 && pack != nullptr && pack->Enemies.size() == 3,
+              "maxFoes 4 comes from the file and the pack still lists 3");
     }
     {
         TempCopy copy;
@@ -2597,10 +2613,15 @@ void CheckFixtureMaps(const char* dir, const char* what)
 
     Check(second->Width == 4 && second->Height == 4 && !second->Hub && second->Points.empty(),
           "fixture_b is 4 by 4 with no points");
+    const MoverDef* stand = data.FindMover("stand");
+    Check(stand != nullptr && stand->Kind == MoverKind::Idle &&
+              std::string(ToString(MoverKind::Idle)) == "idle",
+          "stand is the idle step");
     Check(second->Spawns.size() == 1 && second->Spawns[0].Id == "fixture_hold" &&
               !second->Spawns[0].Once && second->Spawns[0].NoFlee &&
-              second->Spawns[0].Mover.Listed && second->Spawns[0].Encounter == "wolf",
-          "once, noFlee, and an empty mover are stored");
+              second->Spawns[0].Mover.Listed && second->Spawns[0].Mover.Behavior == "stand" &&
+              !second->Spawns[0].Aura.Listed && second->Spawns[0].Encounter == "wolf",
+          "once, noFlee, and the stand behavior are stored");
     Check(second->Links.size() == 1 && second->Links[0].Map == "fixture_a" &&
               second->Links[0].Arrival.X == 4 && second->Links[0].Arrival.Y == 2,
           "fixture_b links back");
@@ -2811,9 +2832,43 @@ void TestMapValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"mover\": {}",
-                      "\"mover\": { \"kind\": \"idle\" }");
-        TestRejected(copy.Path, "maps/fixture_b.json", "kind", "a mover must be an empty object");
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json",
+                      "\"mover\": { \"behavior\": \"stand\" }", "\"mover\": {}");
+        TestRejected(copy.Path, "maps/fixture_b.json", "behavior", "a mover must name a behavior");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"behavior\": \"stand\"",
+                      "\"behavior\": \"stand\", \"kind\": \"idle\"");
+        TestRejected(copy.Path, "maps/fixture_b.json", "kind", "a mover rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"behavior\": \"stand\"",
+                      "\"behavior\": \"pace\"");
+        TestRejected(copy.Path, "maps/fixture_b.json", "pace", "a mover behavior must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "movers.json", "\"kind\": \"idle\"", "\"kind\": \"chase\"");
+        TestRejected(copy.Path, "movers.json", "chase", "an unknown mover kind is named");
+    }
+    {
+        TempCopy copy;
+        fs::remove(copy.Path / "movers.json");
+        TestRejected(copy.Path, "movers.json", "could not be read", "a missing movers file is an error");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
+                      "\"encounter\": \"wolf\", \"aura\": { \"radius\": 1, \"status\": \"no_such\" }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "no_such", "an aura status must exist");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
+                      "\"encounter\": \"wolf\", \"aura\": { \"radius\": -1, \"status\": \"exposed\" }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "radius", "an aura radius cannot be negative");
     }
     {
         TempCopy copy;
@@ -2893,6 +2948,8 @@ void CheckCampaignMaps(const char* dir)
         for (const MapSpawn& spawn : map.Spawns) {
             ++spawns;
             Check(spawn.Once, "a cleared foe does not come back");
+            Check(!spawn.Mover.Listed && !spawn.Aura.Listed,
+                  "a shipped spawn does not move and does not grant a status");
             if (!spawn.NoFlee)
                 continue;
             ++noFlee;
@@ -2913,6 +2970,10 @@ void CheckCampaignMaps(const char* dir)
     }
     const EnemyDef* varn = data.FindEnemy("oathkeeper_varn");
     Check(varn != nullptr && varn->Boss, "Varn stays the roster's one boss");
+    const MoverDef* stand = data.FindMover("stand");
+    Check(data.GetMovers().size() == 1 && stand != nullptr && stand->Kind == MoverKind::Idle,
+          "the only shipped step is stand");
+    Check(data.GetRules().MaxFoes == 3, "a shipped fight seats 3 foes");
 }
 
 void TestMaps()

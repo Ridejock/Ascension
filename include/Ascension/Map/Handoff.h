@@ -35,17 +35,38 @@ struct MapMemory {
 };
 
 // The tile the hero just stepped onto, and the tile they stepped from when this
-// step stayed on the same map. HasFrom is false for a link arrival.
+// step stayed on the same map. HasFrom is false for a link arrival. Joining is
+// extra spawn ids that enter this fight after the spawn on the tile, in that
+// order. Empty means the tile's spawn alone, which is every fight the hub starts.
 struct ContactQuery {
     MapTile Tile;
     MapTile From;
     bool HasFrom = false;
+    std::vector<std::string> Joining;
+};
+
+// One foe a contact can seat. SpawnId is the map spawn. Id is the enemy. Statuses
+// is filled for a foe who is seated, from auras on the map at that moment. A queued
+// foe leaves Statuses empty; the next offer samples the auras again.
+struct PartyFoe {
+    std::string SpawnId;
+    std::string Id;
+    std::vector<std::string> Statuses;
+};
+
+// Seated is at most maxFoes. Queued is the rest, in the same order. Call SplitParty
+// on Queued for the follow-up fight. Nobody joins a seat that opens during a fight.
+struct PartySplit {
+    std::vector<PartyFoe> Seated;
+    std::vector<PartyFoe> Queued;
 };
 
 // The fight a tile offers. Active is false when the tile has no spawn, that spawn
-// is already cleared, or its encounter is gone. Foes is the encounter's list (the
-// loader caps it at three). StartStatuses stays empty until a later step fills it.
-// AllowFlee is false when the spawn sets noFlee, or when a foe sets boss.
+// is already cleared, or its encounter is gone. Foes is the seated enemy ids. For
+// one spawn whose encounter fits in maxFoes, that is the encounter's own list.
+// Seats is one entry per id in Foes. Queue is who did not fit. StartStatuses is
+// the unique status ids across Seats, in the order they first appear. AllowFlee
+// is false when the spawn on the tile sets noFlee, or when a foe sets boss.
 struct MapFightRequest {
     bool Active = false;
     std::string SpawnId;
@@ -56,6 +77,8 @@ struct MapFightRequest {
     bool Once = true;
     bool AllowFlee = false;
     std::vector<std::string> Foes;
+    std::vector<PartyFoe> Seats;
+    std::vector<PartyFoe> Queue;
     std::vector<std::string> StartStatuses;
 };
 
@@ -115,8 +138,22 @@ void RememberWounds(MapMemory& memory, std::string_view spawnId, std::span<const
 // The roster boss is that flag (Varn today). A later foe gets it by the same field.
 [[nodiscard]] bool FleeAllowed(const Database& data, const MapSpawn& spawn);
 
+// First `maxFoes` stay in Seated. The rest wait in Queued. A cap below 1 queues
+// everyone. Order is kept. Statuses are copied, not sampled here.
+[[nodiscard]] PartySplit SplitParty(std::span<const PartyFoe> ordered, i32 maxFoes);
+
+// Writes each foe's Statuses from auras on this map. A foe's own aura does not
+// count, and a cleared aura does not grant. `places` overrides a spawn's file tile
+// when that id is listed; an empty span uses the file. Calling this again replaces
+// the lists, so a spawn that has walked out of the radius loses the status.
+void ApplyMapAuras(const Database& data, const MapDef& map, const MapMemory& memory,
+                   std::span<const SpawnPlace> places, std::vector<PartyFoe>& foes);
+
+// `places` is the same overlay as ApplyMapAuras. Empty uses the file tiles, which
+// is where an idle mover is standing.
 [[nodiscard]] MapFightRequest OfferSpawn(const Database& data, const MapDef& map,
-                                         ContactQuery query, const MapMemory& memory);
+                                         ContactQuery query, const MapMemory& memory,
+                                         std::span<const SpawnPlace> places = {});
 
 [[nodiscard]] LossSpot FindLossReturn(const Database& data, std::string_view foughtMapId);
 

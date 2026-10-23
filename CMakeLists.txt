@@ -74,8 +74,10 @@ emerald_set_warnings(AscensionData)
 add_library(AscensionMap STATIC
     src/Map/Walk.cpp
     src/Map/Handoff.cpp
+    src/Map/Movers.cpp
     include/Ascension/Map/Walk.h
     include/Ascension/Map/Handoff.h
+    include/Ascension/Map/Movers.h
 )
 target_link_libraries(AscensionMap PUBLIC AscensionData)
 emerald_set_warnings(AscensionMap)

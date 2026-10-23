@@ -25,7 +25,7 @@ constexpr const char* kFileNames[] = {
     "stats.json",   "effects.json", "skills.json",     "statuses.json",
     "classes.json", "enemies.json", "encounters.json", "items.json",
     "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-    "tiles.json",   "walk.json",
+    "tiles.json",   "walk.json",    "movers.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -331,6 +331,7 @@ struct Parsed {
     std::vector<DialogueDef> Dialogues;
     std::vector<TileDef> Tiles;
     std::vector<MapDef> Maps;
+    std::vector<MoverDef> Movers;
     CombatRules Rules;
     ProgressRules Progress;
     WalkRules Walk;
@@ -1955,8 +1956,6 @@ bool LoadEncounters(const Json& root, Parsed& parsed, std::string& error)
             return fail(listed);
         if (encounter.Enemies.empty())
             return fail("'enemies' must list at least one enemy");
-        if (encounter.Enemies.size() > 3)
-            return fail("'enemies' cannot list more than 3");
         for (usize index = 0; index < encounter.Enemies.size(); ++index) {
             const std::string& enemyId = encounter.Enemies[index];
             const EnemyDef* foe = FindId(parsed.Enemies, enemyId);
@@ -2577,7 +2576,7 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
     if (!AllowKeys(*body,
                    {"hpPerVitality", "minDamage", "attackNumerator", "attackDenominator",
                     "defenseNumerator", "defenseDenominator", "focusBase", "focusPerTurn",
-                    "focusOnWait"},
+                    "focusOnWait", "maxFoes"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2591,7 +2590,8 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
         !RequireInt(*body, "defenseDenominator", 1, 999, rules.DefenseDenominator, error) ||
         !RequireInt(*body, "focusBase", 0, 99, rules.FocusBase, error) ||
         !RequireInt(*body, "focusPerTurn", 0, 99, rules.FocusPerTurn, error) ||
-        !RequireInt(*body, "focusOnWait", 0, 99, rules.FocusOnWait, error))
+        !RequireInt(*body, "focusOnWait", 0, 99, rules.FocusOnWait, error) ||
+        !RequireInt(*body, "maxFoes", 1, 9, rules.MaxFoes, error))
         return false;
     parsed.Rules = rules;
     return true;
@@ -2661,6 +2661,58 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
         !ReadColorField(*body, "shopColor", rules.ShopRed, rules.ShopGreen, rules.ShopBlue, error))
         return false;
     parsed.Walk = rules;
+    return true;
+}
+
+bool ParseMoverKind(std::string_view text, MoverKind& out)
+{
+    if (text == "idle") {
+        out = MoverKind::Idle;
+        return true;
+    }
+    return false;
+}
+
+bool LoadMovers(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("movers");
+    if (list == root.end() || !list->is_array()) {
+        error = "'movers' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "mover entries must be objects";
+            return false;
+        }
+        MoverDef mover;
+        if (!RequireString(entry, "id", mover.Id, error))
+            return false;
+        const std::string where = "mover " + Quote(mover.Id);
+        if (!IsId(mover.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (FindId(parsed.Movers, mover.Id) != nullptr) {
+            error = where + ": there is another mover with this id";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "kind"}, unknown)) {
+            error = where + ": unknown field " + Quote(unknown);
+            return false;
+        }
+        std::string kind;
+        if (!RequireString(entry, "kind", kind, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        if (!ParseMoverKind(kind, mover.Kind)) {
+            error = where + ": unknown kind " + Quote(kind);
+            return false;
+        }
+        parsed.Movers.push_back(std::move(mover));
+    }
     return true;
 }
 
@@ -3383,6 +3435,13 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
     }
     if (!DescriptionsResolve(parsed, error))
         return false;
+    for (const EncounterDef& encounter : parsed.Encounters) {
+        if (static_cast<i32>(encounter.Enemies.size()) <= parsed.Rules.MaxFoes)
+            continue;
+        error = "encounter " + Quote(encounter.Id) + ": 'enemies' cannot list more than " +
+                std::to_string(parsed.Rules.MaxFoes);
+        return false;
+    }
     return true;
 }
 
@@ -3733,7 +3792,8 @@ bool LoadSpawns(const Json& body, const Parsed& parsed, MapDef& map, std::string
             return false;
         }
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "tile", "encounter", "once", "noFlee", "mover"}, unknown)) {
+        if (!AllowKeys(entry, {"id", "tile", "encounter", "once", "noFlee", "mover", "aura"},
+                       unknown)) {
             error = where + ": unknown field " + Quote(unknown);
             return false;
         }
@@ -3767,11 +3827,54 @@ bool LoadSpawns(const Json& body, const Parsed& parsed, MapDef& map, std::string
                 return false;
             }
             std::string moverUnknown;
-            if (!NoKeys(mover, moverUnknown)) {
+            if (!AllowKeys(mover, {"behavior"}, moverUnknown)) {
                 error = where + ": 'mover' unknown field " + Quote(moverUnknown);
                 return false;
             }
+            std::string whyBehavior;
+            if (!RequireString(mover, "behavior", spawn.Mover.Behavior, whyBehavior)) {
+                error = where + ": 'mover' " + whyBehavior;
+                return false;
+            }
+            if (!IsId(spawn.Mover.Behavior)) {
+                error = where + ": 'mover.behavior' must be an id";
+                return false;
+            }
+            if (FindId(parsed.Movers, spawn.Mover.Behavior) == nullptr) {
+                error = where + ": behavior " + Quote(spawn.Mover.Behavior) + " does not exist";
+                return false;
+            }
             spawn.Mover.Listed = true;
+        }
+        if (entry.contains("aura")) {
+            const Json& aura = entry["aura"];
+            if (!aura.is_object()) {
+                error = where + ": 'aura' must be an object";
+                return false;
+            }
+            std::string auraUnknown;
+            if (!AllowKeys(aura, {"radius", "status"}, auraUnknown)) {
+                error = where + ": 'aura' unknown field " + Quote(auraUnknown);
+                return false;
+            }
+            std::string whyAura;
+            if (!RequireInt(aura, "radius", 0, kMaxMapSpan - 1, spawn.Aura.Radius, whyAura)) {
+                error = where + ": 'aura.radius' " + whyAura;
+                return false;
+            }
+            if (!RequireString(aura, "status", spawn.Aura.Status, whyAura)) {
+                error = where + ": 'aura' " + whyAura;
+                return false;
+            }
+            if (!IsId(spawn.Aura.Status)) {
+                error = where + ": 'aura.status' must be an id";
+                return false;
+            }
+            if (FindId(parsed.Statuses, spawn.Aura.Status) == nullptr) {
+                error = where + ": status " + Quote(spawn.Aura.Status) + " does not exist";
+                return false;
+            }
+            spawn.Aura.Listed = true;
         }
         map.Spawns.push_back(std::move(spawn));
     }
@@ -3978,12 +4081,12 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
                               LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
                               LoadShop,    LoadCombat,  LoadProgress,   LoadRarities,
-                              LoadTiles,   LoadWalk};
+                              LoadTiles,   LoadWalk,    LoadMovers};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
                            "classes.json", "enemies.json", "encounters.json", "items.json",
                            "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-                           "tiles.json",   "walk.json"};
+                           "tiles.json",   "walk.json",    "movers.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4002,7 +4105,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
                                     "classes", "enemies", "encounters", "items",
                                     "shop",    "combat",  "progress",   "rarities",
-                                    "tiles",   "walk"};
+                                    "tiles",   "walk",    "movers"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -4252,6 +4355,7 @@ bool Database::Load(DataError* error)
     m_Dialogues = std::move(parsed.Dialogues);
     m_Tiles = std::move(parsed.Tiles);
     m_Maps = std::move(parsed.Maps);
+    m_Movers = std::move(parsed.Movers);
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
     m_Walk = parsed.Walk;
@@ -4358,6 +4462,11 @@ const TileDef* Database::FindTile(std::string_view id) const
 const MapDef* Database::FindMap(std::string_view id) const
 {
     return FindId(m_Maps, id);
+}
+
+const MoverDef* Database::FindMover(std::string_view id) const
+{
+    return FindId(m_Movers, id);
 }
 
 MapSpawnRef Database::FindSpawn(std::string_view id) const

@@ -8,6 +8,7 @@
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Talk.h"
 #include "Ascension/Map/Handoff.h"
+#include "Ascension/Map/Movers.h"
 #include "Ascension/Map/Walk.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
@@ -44,6 +45,10 @@ private:
     // Starts the battle at the hero's carried HP and focus. A lone Start() fills both;
     // this path is the one the encounter list uses.
     bool OpenBattle(std::string_view fightId, std::string& error);
+    // Seats the ids a contact kept, instead of the encounter's whole list. Used when
+    // those two lists differ. The ordinary spawn fight does not call it.
+    bool OpenRoster(std::span<const std::string> foeIds, std::string& error);
+    void ApplyOpeningStatuses();
     // True while a spawn's fight is on screen, including a win that is still choosing
     // a path. The map does not walk during that.
     [[nodiscard]] bool SpawnFightOpen() const;
@@ -118,6 +123,10 @@ private:
     void BindMapActions();
     void StepMap(f32 dt);
     void AdoptMap();
+    // Places for the map the hero is standing on. Cleared spawns are left out.
+    void SyncPlaces();
+    // One mover step. Idle does not change a tile, so a shipped map looks the same.
+    void StepMovers();
     [[nodiscard]] WalkDir DirectionOfKey(SDL_Scancode scancode);
     [[nodiscard]] WalkInput ReadMapInput();
 
@@ -186,9 +195,17 @@ private:
         MapTile ReturnTile;
         bool Once = true;
         bool AllowFlee = false;
+        // Empty on a resumed fight and on a list fight. A contact copies the request.
+        // When Foes matches the encounter, the fight starts the ordinary way.
+        std::vector<std::string> Foes;
+        std::vector<PartyFoe> Seats;
     };
     MapEngagement m_MapFight;
     MapMemory m_MapMemory;
+    // Where this map's spawns are standing. Rebuilt from the file on entry, on an
+    // exit, and after a reload. Idle leaves every tile on its home.
+    std::vector<SpawnPlace> m_Places;
+    std::string m_PlacesMap;
     // The place a save recorded when this launch is not standing on the map. The
     // walker is the place while --map is up. A fight-screen launch writes this back
     // so it does not erase a map the save already had.
