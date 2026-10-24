@@ -85,7 +85,7 @@ ctest --preset debug
 | `walk.json` | Move time, settle time, settle easing, tile size in pixels, the hero's inset, and the hero, exit, and spawn colors |
 | `movers.json` | Named map steps. `stand` is `idle`, which does not move. A spawn's `mover` names one |
 | `maps/*.json` | One character grid per map: legend, start, spawns, links, and talk, shop, and rest points |
-| `input.json` | Every action's keys and buttons, plus the menu repeat |
+| `input.json` | Every action's keys and buttons, the menu repeat, and the new-game confirm window |
 | `prompts.json` | Button glyphs per device family, and the icon and text scales for hint rows |
 | `battle_ui.json` | Type size, color, spacing, panels, and message hold for the fight screen. The shop uses the same type and color |
 | `shop_ui.json` | How many shop rows are on screen, the icon scale, and the gap between the bag and the stock |
@@ -107,6 +107,8 @@ Pad buttons are positional, so the same `input.json` row is A on Xbox, Cross on 
 | Flee | F | LT | Leave a fight that allows it |
 | Unequip | U |  | Take off the marked worn row. Context does this too |
 | Save / Quit / Retry / Next | F5, Escape, R, N |  | Save, save and quit, retry the fight, next foe |
+| DebugRespawnFoes | F6 |  | Bring every defeated foe back on every map. Level, gear, gold, and the tile stay. Ignored during a fight |
+| DebugNewGame | F9, twice |  | Start a new run. The second press has to land within `debugConfirmMilliseconds`. The save file stays until the next save |
 | Slot1–Slot8 | 1–8 |  | The numbered skill, drink, or choice. Confirm uses the marked row when there is no number |
 
 Menu repeat is `navInitialMilliseconds` (280) then `navRepeatMilliseconds` (120). On the map a held direction glides; `walk.json` sets `moveMilliseconds` and `settleMilliseconds`. Hints use the glyph for the action's current binding on the last-used pad. Keyboard, and a button with no tile, draws a short label. `iconScale` and `textScale` in `prompts.json` set the sizes; the text cap is centered on the icon.
@@ -164,6 +166,8 @@ The public headers (`include/Ascension/Data/`, `include/Ascension/Combat/`, and 
 While the game is running it checks the data files a few times a second. A save is applied once the new modification time has been seen twice, so a half-written file is left alone. If the new text does not load, the previous definitions stay and the error is shown, naming the file and the field. The revision in the corner goes up on every successful reload. The fight keeps its wounds and whose turn it is. XP and skill uses are kept too: editing the curve or `usesPerRank` updates the level and the ranks on the next successful reload, and class growth applies on the next fight. Edit Strike's `power` in `data/skills.json`, Bulwark's defense `amount`, or `hpPerVitality` in `data/combat.json`, save, and the next blow uses the new numbers.
 
 ## Save
+
+`F6` (`DebugRespawnFoes`) clears defeated foe ids and cleared spawn ids on every map. Stats, level, XP, worn gear, the bag, gold, and the tile stay. Claimed drops stay claimed, and a flee wound stays, because that foe was not defeated. An ongoing fight, and a map fight that has not settled, leaves the lists alone and shows the busy line. `F9` (`DebugNewGame`) arms a confirm, and a second press within `debugConfirmMilliseconds` (1500) starts the run a missing save starts: the first starter, level 1, an empty bag, full health, and the hub's start tile. It does not delete or rewrite the save. The next `F5` or quit writes that new run over the file. Both actions are keyboard only. The four lines (`debugRespawned`, `debugRespawnBusy`, `debugNewGameArmed`, `debugNewGame`) are in `input.json`. While the help line is on, the map, the fight, and the between-fights screen show those two keys. `design/debug.md` is the same note.
 
 `F5` writes the run. Escape writes it and quits. The next launch loads that file, unless the command builds a hero of its own (`--level` and the other setup flags). The file is Emerald's text save, data version 4, one slot named `run` under the per-user Ascension folder (`~/.local/share/Ridejock/Ascension/saves/run.sav` on Linux). A write goes to a temporary file and is renamed into place. A truncated file falls back to the previous copy. The save holds the class, XP, stats, skill uses, kept picks (a tuned upgrade included), gold, bag stacks, worn gear, the carried HP and focus, the defeated foe ids, the found drop ids, the map id and tile, cleared spawn ids, flee wounds, and the encounter id when the fight screen is in use. It does not store an encounter-list index. A victory resumes between fights at the HP that was left, so the reward is not granted again. A flee keeps that HP and the foe's wound. An ongoing fight restores each foe's wound, statuses, pattern step, and whose turn it is, and prints Resumed before anyone acts. On a map, that fight also records the spawn id it came from. A version 2 ongoing file has no foe snapshot, so that encounter starts over.
 

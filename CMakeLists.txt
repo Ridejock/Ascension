@@ -109,10 +109,12 @@ add_library(AscensionProgress STATIC
     src/Progress/Inventory.cpp
     src/Progress/RunSave.cpp
     src/Progress/Vitals.cpp
+    src/Progress/DebugRun.cpp
     include/Ascension/Progress/Hero.h
     include/Ascension/Progress/Inventory.h
     include/Ascension/Progress/RunSave.h
     include/Ascension/Progress/Vitals.h
+    include/Ascension/Progress/DebugRun.h
 )
 target_link_libraries(AscensionProgress PUBLIC AscensionData)
 emerald_set_warnings(AscensionProgress)
@@ -270,6 +272,14 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     emerald_set_warnings(AscensionDialogueTests)
     add_test(NAME Dialogue COMMAND AscensionDialogueTests)
+
+    add_executable(AscensionDebugRunTests tests/DebugRunTests.cpp tests/Check.h)
+    target_link_libraries(AscensionDebugRunTests PRIVATE AscensionProgress)
+    target_compile_definitions(AscensionDebugRunTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionDebugRunTests)
+    add_test(NAME DebugRun COMMAND AscensionDebugRunTests)
 
     add_executable(AscensionInputTests tests/InputTests.cpp tests/Check.h)
     target_link_libraries(AscensionInputTests PRIVATE AscensionData)

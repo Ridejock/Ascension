@@ -2726,7 +2726,10 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body, {"navInitialMilliseconds", "navRepeatMilliseconds", "actions"},
+    if (!AllowKeys(*body,
+                   {"navInitialMilliseconds", "navRepeatMilliseconds", "debugConfirmMilliseconds",
+                    "debugRespawned", "debugRespawnBusy", "debugNewGameArmed", "debugNewGame",
+                    "actions"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2734,7 +2737,13 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
     ControlRules rules;
     if (!RequireInt(*body, "navInitialMilliseconds", 1, 2000, rules.NavInitialMilliseconds,
                     error) ||
-        !RequireInt(*body, "navRepeatMilliseconds", 1, 2000, rules.NavRepeatMilliseconds, error))
+        !RequireInt(*body, "navRepeatMilliseconds", 1, 2000, rules.NavRepeatMilliseconds, error) ||
+        !RequireInt(*body, "debugConfirmMilliseconds", 1, 10000, rules.DebugConfirmMilliseconds,
+                    error) ||
+        !RequireString(*body, "debugRespawned", rules.DebugRespawned, error) ||
+        !RequireString(*body, "debugRespawnBusy", rules.DebugRespawnBusy, error) ||
+        !RequireString(*body, "debugNewGameArmed", rules.DebugNewGameArmed, error) ||
+        !RequireString(*body, "debugNewGame", rules.DebugNewGame, error))
         return false;
     const auto list = body->find("actions");
     if (list == body->end() || !list->is_array()) {

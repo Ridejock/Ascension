@@ -21,9 +21,16 @@ struct ControlBind {
 // navInitialMilliseconds is the pause after the first press before a held direction
 // repeats. navRepeatMilliseconds is the pause between repeats after that. The walk
 // step uses walk.json; this pair is menus, the battle command cursor, and targeting.
+// DebugConfirmMilliseconds is how long the second DebugNewGame press still counts.
+// The four debug lines are the notes those actions write.
 struct ControlRules {
     i32 NavInitialMilliseconds = 280;
     i32 NavRepeatMilliseconds = 120;
+    i32 DebugConfirmMilliseconds = 1500;
+    std::string DebugRespawned;
+    std::string DebugRespawnBusy;
+    std::string DebugNewGameArmed;
+    std::string DebugNewGame;
     std::vector<ControlBind> Actions;
 };
 
@@ -57,12 +64,14 @@ inline constexpr std::string_view kSlot5 = "Slot5";
 inline constexpr std::string_view kSlot6 = "Slot6";
 inline constexpr std::string_view kSlot7 = "Slot7";
 inline constexpr std::string_view kSlot8 = "Slot8";
+inline constexpr std::string_view kDebugRespawnFoes = "DebugRespawnFoes";
+inline constexpr std::string_view kDebugNewGame = "DebugNewGame";
 
-inline constexpr std::array<std::string_view, 28> kControlActions = {
-    kMoveNorth, kMoveSouth, kMoveEast, kMoveWest, kConfirm, kCancel, kMenu,    kContext,
+inline constexpr std::array<std::string_view, 30> kControlActions = {
+    kMoveNorth, kMoveSouth, kMoveEast, kMoveWest, kConfirm, kCancel, kMenu,     kContext,
     kPause,     kHelp,      kCyclePrev, kCycleNext, kWait,   kFlee,   kInteract, kUnequip,
     kSave,      kQuit,      kRetry,     kNext,      kSlot1,  kSlot2,  kSlot3,    kSlot4,
-    kSlot5,     kSlot6,     kSlot7,     kSlot8,
+    kSlot5,     kSlot6,     kSlot7,     kSlot8,     kDebugRespawnFoes, kDebugNewGame,
 };
 
 [[nodiscard]] inline bool IsControlAction(std::string_view name)
@@ -105,6 +114,44 @@ inline constexpr std::array<std::string_view, 28> kControlActions = {
     if (paused)
         return true;
     return true;
+}
+
+// The second DebugNewGame press. Armed is the first press. Accepted is a second
+// press that landed while the window was still open. AdvanceConfirmWindow drops
+// an armed press once DebugConfirmMilliseconds has passed.
+enum class ConfirmTap : u8 { Armed, Accepted };
+
+struct ConfirmWindow {
+    bool Armed = false;
+    f32 Elapsed = 0.0f;
+};
+
+// dt is seconds, the same clock as the frame. A non-positive dt does not move
+// the window. A window below 1ms never expires on its own.
+inline void AdvanceConfirmWindow(ConfirmWindow& window, f32 dt, i32 windowMilliseconds)
+{
+    if (!window.Armed || windowMilliseconds < 1)
+        return;
+    if (dt > 0.0f)
+        window.Elapsed += dt;
+    const f32 limit = static_cast<f32>(windowMilliseconds) / 1000.0f;
+    if (window.Elapsed < limit)
+        return;
+    window.Armed = false;
+    window.Elapsed = 0.0f;
+}
+
+// The first press arms the window. A press while it is armed accepts and disarms.
+inline ConfirmTap TapConfirmWindow(ConfirmWindow& window)
+{
+    if (window.Armed) {
+        window.Armed = false;
+        window.Elapsed = 0.0f;
+        return ConfirmTap::Accepted;
+    }
+    window.Armed = true;
+    window.Elapsed = 0.0f;
+    return ConfirmTap::Armed;
 }
 
 // Pause toggles. While paused, Cancel resumes. Any other action leaves the flag.
