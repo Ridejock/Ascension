@@ -27,7 +27,7 @@ constexpr const char* kFileNames[] = {
     "classes.json", "enemies.json", "encounters.json", "items.json",
     "shop.json",    "combat.json",  "progress.json",   "rarities.json",
     "tiles.json",   "walk.json",    "movers.json",     "input.json",
-    "prompts.json",
+    "prompts.json", "battle_ui.json", "shop_ui.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -350,6 +350,8 @@ struct Parsed {
     WalkRules Walk;
     ControlRules Controls;
     PromptRules Prompts;
+    BattleUi BattleScreen;
+    ShopUi ShopScreen;
     std::filesystem::path Directory;
     std::vector<std::string> HigherFields;
     std::vector<std::string> LowerFields;
@@ -4387,6 +4389,108 @@ bool LoadMapFile(const Json& root, const std::string& stem, Parsed& parsed, std:
     return true;
 }
 
+bool RequireColor(const Json& body, const char* key, UiRgb& out, std::string& error)
+{
+    std::string text;
+    if (!RequireString(body, key, text, error))
+        return false;
+    std::string why;
+    if (!ParseColor(text, out.Red, out.Green, out.Blue, why)) {
+        error = std::string(key) + " " + why;
+        return false;
+    }
+    return true;
+}
+
+bool LoadStyle(const Json& body, UiStyle& style, std::string& error)
+{
+    if (!RequireInt(body, "titleScale", 1, 8, style.TitleScale, error) ||
+        !RequireInt(body, "bodyScale", 1, 8, style.BodyScale, error) ||
+        !RequireInt(body, "detailScale", 1, 8, style.DetailScale, error) ||
+        !RequireInt(body, "bannerScale", 1, 8, style.BannerScale, error) ||
+        !RequireInt(body, "messageScale", 1, 8, style.MessageScale, error) ||
+        !RequireInt(body, "lineGap", 0, 64, style.LineGap, error) ||
+        !RequireInt(body, "groupGap", 0, 80, style.GroupGap, error) ||
+        !RequireInt(body, "rowGap", 0, 64, style.RowGap, error) ||
+        !RequireInt(body, "panelPad", 0, 80, style.PanelPad, error) ||
+        !RequireInt(body, "barHeight", 4, 48, style.BarHeight, error) ||
+        !RequireInt(body, "barWidth", 40, 800, style.BarWidth, error) ||
+        !RequireInt(body, "hintClearance", 0, 80, style.HintClearance, error) ||
+        !RequireInt(body, "messageMinMilliseconds", 0, 10000, style.MessageMinMilliseconds, error))
+        return false;
+    if (!RequireColor(body, "ink", style.Ink, error) ||
+        !RequireColor(body, "dim", style.Dim, error) ||
+        !RequireColor(body, "frame", style.Frame, error) ||
+        !RequireColor(body, "panel", style.Panel, error) ||
+        !RequireColor(body, "error", style.Error, error) ||
+        !RequireColor(body, "hp", style.Hp, error) ||
+        !RequireColor(body, "focus", style.Focus, error) ||
+        !RequireColor(body, "highlight", style.Highlight, error) ||
+        !RequireColor(body, "figure", style.Figure, error) ||
+        !RequireColor(body, "foe", style.Foe, error))
+        return false;
+    return true;
+}
+
+bool LoadBattleUi(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("battleUi");
+    if (body == root.end() || !body->is_object()) {
+        error = "'battleUi' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body,
+                   {"titleScale", "bodyScale", "detailScale", "bannerScale", "messageScale",
+                    "lineGap", "groupGap", "rowGap", "panelPad", "barHeight", "barWidth",
+                    "hintClearance", "messageMinMilliseconds", "margin", "panelTop", "partyWidth",
+                    "gutter", "bottomHeight", "bottomInset", "splitGap", "figureSize",
+                    "turnPreview", "packScale", "ink", "dim", "frame", "panel", "error", "hp",
+                    "focus", "highlight", "figure", "foe"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    BattleUi screen;
+    if (!LoadStyle(*body, screen.Style, error))
+        return false;
+    if (!RequireInt(*body, "margin", 0, 200, screen.Margin, error) ||
+        !RequireInt(*body, "panelTop", 0, 200, screen.PanelTop, error) ||
+        !RequireInt(*body, "partyWidth", 200, 1600, screen.PartyWidth, error) ||
+        !RequireInt(*body, "gutter", 0, 80, screen.Gutter, error) ||
+        !RequireInt(*body, "bottomHeight", 48, 400, screen.BottomHeight, error) ||
+        !RequireInt(*body, "bottomInset", 0, 80, screen.BottomInset, error) ||
+        !RequireInt(*body, "splitGap", 0, 80, screen.SplitGap, error) ||
+        !RequireInt(*body, "figureSize", 8, 64, screen.FigureSize, error) ||
+        !RequireInt(*body, "turnPreview", 0, 8, screen.TurnPreview, error) ||
+        !RequireInt(*body, "packScale", 1, 8, screen.PackScale, error))
+        return false;
+    parsed.BattleScreen = screen;
+    return true;
+}
+
+bool LoadShopUi(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("shopUi");
+    if (body == root.end() || !body->is_object()) {
+        error = "'shopUi' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"listRows", "iconScale", "detailLines", "columnGap"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    ShopUi screen;
+    if (!RequireInt(*body, "listRows", 3, 16, screen.ListRows, error) ||
+        !RequireInt(*body, "iconScale", 1, 4, screen.IconScale, error) ||
+        !RequireInt(*body, "detailLines", 1, 8, screen.DetailLines, error) ||
+        !RequireInt(*body, "columnGap", 0, 80, screen.ColumnGap, error))
+        return false;
+    parsed.ShopScreen = screen;
+    return true;
+}
+
 // Link targets are resolved here so a map may name another file that sorts later.
 bool CheckMapLinks(const Parsed& parsed, std::string& error)
 {
@@ -4429,13 +4533,13 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
                               LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
                               LoadShop,    LoadCombat,  LoadProgress,   LoadRarities,
                               LoadTiles,   LoadWalk,    LoadMovers,     LoadControls,
-                              LoadPrompts};
+                              LoadPrompts, LoadBattleUi, LoadShopUi};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
                            "classes.json", "enemies.json", "encounters.json", "items.json",
                            "shop.json",    "combat.json",  "progress.json",   "rarities.json",
                            "tiles.json",   "walk.json",    "movers.json",     "input.json",
-                           "prompts.json"};
+                           "prompts.json", "battle_ui.json", "shop_ui.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4455,7 +4559,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
                                     "classes", "enemies", "encounters", "items",
                                     "shop",    "combat",  "progress",   "rarities",
                                     "tiles",   "walk",    "movers",     "controls",
-                                    "prompts"};
+                                    "prompts", "battleUi", "shopUi"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -4711,6 +4815,8 @@ bool Database::Load(DataError* error)
     m_Walk = parsed.Walk;
     m_Controls = std::move(parsed.Controls);
     m_Prompts = std::move(parsed.Prompts);
+    m_BattleUi = parsed.BattleScreen;
+    m_ShopUi = parsed.ShopScreen;
     m_HigherFields = std::move(parsed.HigherFields);
     m_LowerFields = std::move(parsed.LowerFields);
     ApplyTimes(times);

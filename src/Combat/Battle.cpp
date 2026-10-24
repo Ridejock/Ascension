@@ -922,6 +922,38 @@ CombatantSide Battle::Actor()
     return CurrentSeat().Side;
 }
 
+void Battle::FillTurnPreview(std::vector<TurnSeat>& out, i32 count)
+{
+    out.clear();
+    if (count < 1 || m_Turns == nullptr || !m_Started || m_Result != BattleResult::Ongoing)
+        return;
+    const std::vector<TurnSeat> living = Living();
+    if (living.empty())
+        return;
+    (void)m_Turns->Next(living);
+    std::vector<TurnSeat> order;
+    i32 cursor = 0;
+    m_Turns->Capture(order, cursor);
+    if (order.empty())
+        return;
+    const i32 limit = static_cast<i32>(order.size()) * 2;
+    i32 walked = 0;
+    while (static_cast<i32>(out.size()) < count && walked < limit) {
+        if (cursor < 0 || cursor >= static_cast<i32>(order.size()))
+            cursor = 0;
+        const TurnSeat seat = order[static_cast<usize>(cursor)];
+        ++cursor;
+        ++walked;
+        bool alive = false;
+        for (const TurnSeat& other : living) {
+            if (other.Side == seat.Side && other.Index == seat.Index)
+                alive = true;
+        }
+        if (alive)
+            out.push_back(seat);
+    }
+}
+
 i32 Battle::ActorIndex()
 {
     const TurnSeat seat = CurrentSeat();
