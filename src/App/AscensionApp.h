@@ -77,6 +77,16 @@ private:
     void ClampCamp();
     void HandleCamp(std::string_view action);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    void DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // One line on the battle and shop screens. Further lines wait, and Confirm skips the wait.
+    void ClearPresented();
+    void PacePresented(f32 dt);
+    void ActOneEnemy();
+    // True when Confirm was spent showing the next waiting line.
+    bool SkipPresented();
+    // Scripted keys still resolve every waiting foe turn. A live fight waits for the message hold.
+    void SettleFoes();
+    void CommitShop();
     // Lists the run already keeps. "found" is claimed drops. "defeated" is felled foes.
     // The talk matches those names from data. No item id is named here.
     void FillTalkFacts(TalkList lists[2], TalkFacts& facts) const;
@@ -132,6 +142,8 @@ private:
     void HandleOverland(std::string_view action);
     void HandleChoice(std::string_view action);
     void HandleBattle(std::string_view action);
+    // Confirm on a skill arms a target. Confirm again uses it. Cancel leaves that step.
+    void ConfirmCommand();
     void ChooseHotkey(int digit);
     void UseHotkey(int digit);
     void UseCommand(int row);
@@ -273,6 +285,15 @@ private:
     bool m_ShowHelp = true;
     // The highlighted battle command (skills, then wait, items, flee) and choice row.
     i32 m_CommandRow = 0;
+    // True after Confirm on a skill, until Confirm uses it or Cancel steps back.
+    bool m_Aiming = false;
+    enum class ShopAsk : u8 { None, Buy, Sell, Equip, Unequip };
+    ShopAsk m_ShopAsk = ShopAsk::None;
+    // The line on screen, and the lines still waiting. Age is seconds on the current line.
+    std::string m_Shown;
+    std::vector<std::string> m_Pending;
+    f32 m_ShownAge = 0.0f;
+    f32 m_TurnHold = 0.0f;
     i32 m_ChoiceRow = 0;
     // Held-direction repeat for the four moves and the two cycle actions, in that order.
     NavHold m_Nav[6]{};

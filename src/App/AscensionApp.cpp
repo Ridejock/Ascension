@@ -125,21 +125,99 @@ void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const ArtG
     DrawFigure(renderer, origin, size, alive ? fallback : kDim);
 }
 
+Emerald::Vec4 Paint(const UiRgb& rgb)
+{
+    return {static_cast<f32>(rgb.Red) / 255.0f, static_cast<f32>(rgb.Green) / 255.0f,
+            static_cast<f32>(rgb.Blue) / 255.0f, 1.0f};
+}
+
+// One debug-font line, cut on the right when it would run past `width`.
+std::string FitLine(std::string_view text, i32 scale, f32 width)
+{
+    const std::string full = Upper(text);
+    if (scale <= 0 || width <= 0.0f)
+        return {};
+    if (Emerald::MeasureDebugText(full, scale).x <= width)
+        return full;
+    std::string kept;
+    kept.reserve(full.size());
+    for (char code : full) {
+        kept.push_back(code);
+        if (Emerald::MeasureDebugText(kept, scale).x > width) {
+            kept.pop_back();
+            break;
+        }
+    }
+    while (!kept.empty() && kept.back() == ' ')
+        kept.pop_back();
+    return kept;
+}
+
+// Wrapped text that stays inside `maxHeight`. Words that would start another line are left off.
+std::string WrapClip(std::string_view text, i32 scale, f32 width, f32 maxHeight)
+{
+    const std::string full = Upper(text);
+    if (scale <= 0 || width <= 0.0f || maxHeight <= 0.0f)
+        return {};
+    if (Emerald::MeasureDebugText(full, scale, width).y <= maxHeight)
+        return full;
+    std::string kept;
+    std::string word;
+    for (usize index = 0; index <= full.size(); ++index) {
+        const bool end = index == full.size();
+        const char code = end ? ' ' : full[index];
+        if (!end && code != ' ') {
+            word.push_back(code);
+            continue;
+        }
+        if (word.empty())
+            continue;
+        std::string trial = kept;
+        if (!trial.empty())
+            trial.push_back(' ');
+        trial += word;
+        if (Emerald::MeasureDebugText(trial, scale, width).y > maxHeight)
+            break;
+        kept = std::move(trial);
+        word.clear();
+    }
+    return kept;
+}
+
+void DrawHalo(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, const Emerald::Vec2& size,
+              const Emerald::Vec4& color)
+{
+    constexpr f32 kBand = 4.0f;
+    renderer.FillRect({origin.x - kBand, origin.y - kBand}, {size.x + kBand * 2.0f, kBand}, color);
+    renderer.FillRect({origin.x - kBand, origin.y + size.y}, {size.x + kBand * 2.0f, kBand}, color);
+    renderer.FillRect({origin.x - kBand, origin.y}, {kBand, size.y}, color);
+    renderer.FillRect({origin.x + size.x, origin.y}, {kBand, size.y}, color);
+}
+
+void DrawPanel(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, const Emerald::Vec2& size,
+               const Emerald::Vec4& fill, const Emerald::Vec4& edge)
+{
+    renderer.FillRect(origin, size, fill);
+    renderer.DrawRect(origin, size, edge);
+}
+
 void DrawPanel(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin,
                const Emerald::Vec2& size)
 {
-    renderer.FillRect(origin, size, kPanel);
-    renderer.DrawRect(origin, size, kFrame);
+    DrawPanel(renderer, origin, size, kPanel, kFrame);
 }
 
-void DrawBar(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, f32 width, f32 filled,
-             const Emerald::Vec4& color)
+void DrawBar(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, f32 width, f32 height,
+             f32 filled, const Emerald::Vec4& color)
 {
-    constexpr f32 kHeight = 14.0f;
-    renderer.DrawRect(origin, {width, kHeight}, color);
+    if (height < 2.0f)
+        height = 2.0f;
+    if (width < 2.0f)
+        width = 2.0f;
+    renderer.DrawRect(origin, {width, height}, color);
     const f32 inner = std::clamp(filled, 0.0f, 1.0f) * (width - 2.0f);
     if (inner > 0.0f)
-        renderer.FillRect(origin + Emerald::Vec2{1.0f, 1.0f}, {inner, kHeight - 2.0f}, color);
+        renderer.FillRect(origin + Emerald::Vec2{1.0f, 1.0f}, {inner, height - 2.0f}, color);
 }
 
 std::string PoolText(std::string_view label, i32 current, i32 maximum)
@@ -162,79 +240,12 @@ std::string FightZone(const Database& data, i32 index, bool loneEnemy)
 // Draws `zone` and returns where the next line starts. An empty zone leaves `at` alone,
 // so a fight that names none keeps its title where it was.
 f32 DrawZone(Emerald::Renderer2D& renderer, const std::string& zone, const Emerald::Vec2& at,
-             int scale)
+             f32 wrap, int scale, const Emerald::Vec4& color, f32 gap)
 {
-    if (zone.empty())
+    if (zone.empty() || scale <= 0)
         return at.y;
-    Emerald::DrawDebugText(renderer, at, Upper(zone), kDim, scale);
-    return at.y + Emerald::DebugTextLineHeight(scale) + 2.0f;
-}
-
-std::string AddsLine(const Database& data, const ClassDef& evolution)
-{
-    std::string line = "Adds";
-    for (const SkillGrant& grant : evolution.Skills) {
-        const SkillDef* skill = data.FindSkill(grant.Id);
-        line += " ";
-        line += skill != nullptr ? skill->Name : grant.Id;
-    }
-    if (!evolution.Passives.empty()) {
-        line += " (";
-        bool first = true;
-        for (const SkillGrant& grant : evolution.Passives) {
-            if (!first)
-                line += " ";
-            first = false;
-            const SkillDef* skill = data.FindSkill(grant.Id);
-            line += skill != nullptr ? skill->Name : grant.Id;
-        }
-        line += ")";
-    }
-    return line;
-}
-
-std::string StatLabel(const Database& data, const std::string& id)
-{
-    if (const StatDef* named = data.FindStat(id))
-        return named->Name;
-    return id;
-}
-
-std::string PassiveLine(const Database& data, const SkillDef& passive)
-{
-    const EffectDef* missing = nullptr;
-    const EffectDef* flat = nullptr;
-    const EffectDef* focus = nullptr;
-    for (const EffectDef& effect : passive.Effects) {
-        if (effect.Trigger == EffectTrigger::Always && effect.Op == EffectOp::StatPerMissingHp)
-            missing = &effect;
-        else if (effect.Trigger == EffectTrigger::Always && effect.Op == EffectOp::Stat)
-            flat = &effect;
-        else if (effect.Op == EffectOp::GrantFocus)
-            focus = &effect;
-    }
-    if (missing != nullptr) {
-        const std::string stat = StatLabel(data, missing->Stat.value_or(""));
-        return "Passive " + passive.Name + " +" + std::to_string(missing->Amount.value_or(0)) +
-               " " + stat + " per " + std::to_string(missing->Per.value_or(0)) + " up to +" +
-               std::to_string(missing->Max.value_or(0));
-    }
-    if (flat != nullptr && focus != nullptr) {
-        const std::string stat = StatLabel(data, flat->Stat.value_or(""));
-        return "Passive " + passive.Name + " " + stat + " +" +
-               std::to_string(flat->Amount.value_or(0)) + "  focus +" +
-               std::to_string(focus->Amount.value_or(0)) + " on block";
-    }
-    if (flat != nullptr) {
-        const std::string stat = StatLabel(data, flat->Stat.value_or(""));
-        std::string line = "Passive " + passive.Name + " " + stat + " ";
-        const i32 amount = flat->Amount.value_or(0);
-        if (amount > 0)
-            line += "+";
-        line += std::to_string(amount);
-        return line;
-    }
-    return "Passive " + passive.Name;
+    Emerald::DrawDebugText(renderer, at, FitLine(zone, scale, wrap), color, scale);
+    return at.y + Emerald::DebugTextLineHeight(scale) + gap;
 }
 
 // The keeper's first word, for the help key and the "waits between battles" note.
@@ -334,10 +345,24 @@ std::string StatusLine(const Database& data, const CombatantState& who)
     return line;
 }
 
+// One alert line. A line that would cross `floor` is left off, and the y comes back unchanged.
+f32 DrawOneAlert(Emerald::Renderer2D& renderer, std::string text, const Emerald::Vec2& at, f32 wrap,
+                 int scale, const Emerald::Vec4& color, f32 gap, f32 floor)
+{
+    if (text.empty() || scale <= 0)
+        return at.y;
+    const f32 line = Emerald::DebugTextLineHeight(scale);
+    if (at.y + line > floor)
+        return at.y;
+    Emerald::DrawDebugText(renderer, at, FitLine(text, scale, wrap), color, scale);
+    return at.y + line + gap;
+}
+
 // Wind-up, a raised guard, a defense buff that is still counting down, a summoned add
-// that is about to join, and statuses. The y that comes back is just under the last line.
+// that is about to join, and statuses. Lines that would pass `floor` are skipped.
 f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const CombatantState& who,
-                  const Emerald::Vec2& origin, f32 wrap, int scale)
+                  const Emerald::Vec2& origin, f32 wrap, int scale, const Emerald::Vec4& color,
+                  f32 gap, f32 floor)
 {
     f32 alertY = origin.y;
     if (!who.WindupSkill.empty()) {
@@ -352,22 +377,13 @@ f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const Com
             windName + " " + std::to_string(shown) + "/" + std::to_string(who.WindupTotal);
         if (who.WindupLeft <= 0)
             windLine += " incoming";
-        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(windLine), kError,
-                                        scale, wrap);
-        alertY += 4.0f;
+        alertY = DrawOneAlert(renderer, std::move(windLine), {origin.x, alertY}, wrap, scale, color,
+                              gap, floor);
     }
-    const std::string guardAlert = FoeGuardAlert(who);
-    if (!guardAlert.empty()) {
-        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(guardAlert), kError,
-                                        scale, wrap);
-        alertY += 4.0f;
-    }
-    const std::string defenseAlert = FoeDefenseAlert(data, who);
-    if (!defenseAlert.empty()) {
-        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(defenseAlert), kError,
-                                        scale, wrap);
-        alertY += 4.0f;
-    }
+    alertY = DrawOneAlert(renderer, FoeGuardAlert(who), {origin.x, alertY}, wrap, scale, color, gap,
+                          floor);
+    alertY = DrawOneAlert(renderer, FoeDefenseAlert(data, who), {origin.x, alertY}, wrap, scale,
+                          color, gap, floor);
     if (who.ShardDue) {
         std::string incoming = "Incoming";
         const EnemyDef* host = data.FindEnemy(who.Id);
@@ -375,17 +391,157 @@ f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const Com
             const EnemyDef* add = data.FindEnemy(host->SummonId);
             incoming = add != nullptr ? add->Name : host->SummonId;
         }
-        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(incoming), kError,
-                                        scale, wrap);
-        alertY += 4.0f;
+        alertY = DrawOneAlert(renderer, std::move(incoming), {origin.x, alertY}, wrap, scale, color,
+                              gap, floor);
     }
-    const std::string foeStatus = StatusLine(data, who);
-    if (!foeStatus.empty()) {
-        alertY = Emerald::DrawDebugText(renderer, {origin.x, alertY}, Upper(foeStatus), kError,
-                                        scale, wrap);
-        alertY += 4.0f;
-    }
+    alertY = DrawOneAlert(renderer, StatusLine(data, who), {origin.x, alertY}, wrap, scale, color,
+                          gap, floor);
     return alertY;
+}
+
+// One row of a battle menu. Detail is the selected row only, drawn when it fits under the list.
+struct MenuLine {
+    std::string Text;
+    std::string Detail;
+    bool Enabled = true;
+};
+
+i32 WindowStart(i32 count, i32 cursor, i32 visible)
+{
+    if (count <= visible || visible < 1)
+        return 0;
+    if (cursor < 0)
+        cursor = 0;
+    if (cursor >= count)
+        cursor = count - 1;
+    i32 first = cursor - visible / 2;
+    if (first < 0)
+        first = 0;
+    if (first + visible > count)
+        first = count - visible;
+    return first;
+}
+
+// Body-scale rows with `rowGap` between them. The cursor row is a highlight band. A short
+// detail sits under the window when the gap data leaves room; the row size never shrinks.
+void DrawMenu(Emerald::Renderer2D& renderer, std::span<const MenuLine> lines, i32 cursor,
+              const Emerald::Vec2& origin, f32 width, f32 floor, const UiStyle& style)
+{
+    const i32 count = static_cast<i32>(lines.size());
+    if (count <= 0 || style.BodyScale <= 0 || width <= 0.0f)
+        return;
+    if (cursor < 0)
+        cursor = 0;
+    if (cursor >= count)
+        cursor = count - 1;
+
+    const Emerald::Vec4 ink = Paint(style.Ink);
+    const Emerald::Vec4 dim = Paint(style.Dim);
+    const Emerald::Vec4 highlight = Paint(style.Highlight);
+    const Emerald::Vec4 panel = Paint(style.Panel);
+    const f32 line = Emerald::DebugTextLineHeight(style.BodyScale);
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 groupGap = static_cast<f32>(style.GroupGap);
+    const f32 detailLine = Emerald::DebugTextLineHeight(style.DetailScale);
+
+    bool withDetail = false;
+    i32 fit = 1;
+    for (i32 rows = count; rows >= 1; --rows) {
+        const f32 gaps = rows > 1 ? static_cast<f32>(rows - 1) * rowGap : 0.0f;
+        const f32 block = static_cast<f32>(rows) * line + gaps;
+        if (origin.y + block + groupGap + detailLine <= floor) {
+            fit = rows;
+            withDetail = true;
+            break;
+        }
+    }
+    if (!withDetail) {
+        for (i32 rows = count; rows >= 1; --rows) {
+            const f32 gaps = rows > 1 ? static_cast<f32>(rows - 1) * rowGap : 0.0f;
+            const f32 block = static_cast<f32>(rows) * line + gaps;
+            if (origin.y + block <= floor || rows == 1) {
+                fit = rows;
+                break;
+            }
+        }
+    }
+
+    const f32 gaps = fit > 1 ? static_cast<f32>(fit - 1) * rowGap : 0.0f;
+    const f32 block = static_cast<f32>(fit) * line + gaps;
+    i32 maxDetail = 0;
+    if (style.DetailScale > 0) {
+        f32 pen = origin.y + block + groupGap;
+        while (maxDetail < 4 && pen + detailLine <= floor) {
+            ++maxDetail;
+            pen += detailLine;
+        }
+    }
+
+    const i32 first = WindowStart(count, cursor, fit);
+    const f32 stride = line + rowGap;
+    for (i32 index = 0; index < fit; ++index) {
+        const i32 row = first + index;
+        const MenuLine& entry = lines[static_cast<usize>(row)];
+        const bool marked = row == cursor;
+        const f32 y = origin.y + static_cast<f32>(index) * stride;
+        if (marked)
+            renderer.FillRect({origin.x, y}, {width, line}, highlight);
+        const Emerald::Vec4 color = marked ? panel : (entry.Enabled ? ink : dim);
+        Emerald::DrawDebugText(renderer, {origin.x, y}, FitLine(entry.Text, style.BodyScale, width),
+                               color, style.BodyScale);
+    }
+    if (maxDetail <= 0)
+        return;
+    const std::string& detail = lines[static_cast<usize>(cursor)].Detail;
+    if (detail.empty())
+        return;
+    const f32 budget = static_cast<f32>(maxDetail) * detailLine;
+    const std::string shown = WrapClip(detail, style.DetailScale, width, budget);
+    if (shown.empty())
+        return;
+    Emerald::DrawDebugText(renderer, {origin.x, origin.y + block + groupGap}, shown, dim,
+                           style.DetailScale, width);
+}
+
+// Stat change against the piece in the same slot. A consumable names heal and focus.
+// The worn piece itself has nothing to compare, so the line is empty.
+std::string GearDelta(const Database& data, const Inventory& bag, const ItemDef& item,
+                      bool wornItself)
+{
+    if (item.Slot == GearSlot::Consumable) {
+        std::string line;
+        if (item.Heal > 0)
+            line += "Heal " + std::to_string(item.Heal);
+        if (item.Focus > 0) {
+            if (!line.empty())
+                line += "  ";
+            line += "Focus +" + std::to_string(item.Focus);
+        }
+        return line;
+    }
+    if (wornItself)
+        return {};
+    const std::string& wornId = bag.Equipped(item.Slot);
+    const ItemDef* worn = wornId.empty() ? nullptr : data.FindItem(wornId);
+    std::string line;
+    bool any = false;
+    for (const StatDef& stat : data.GetStats()) {
+        const i32 delta = item.Bonus.Get(stat.Id) - (worn != nullptr ? worn->Bonus.Get(stat.Id) : 0);
+        if (delta == 0)
+            continue;
+        any = true;
+        if (!line.empty())
+            line += "  ";
+        line += stat.Name;
+        if (delta > 0)
+            line += " +";
+        else
+            line += " ";
+        line += std::to_string(delta);
+    }
+    if (!any)
+        return "No change";
+    return line;
 }
 
 } // namespace
@@ -393,6 +549,15 @@ f32 DrawFoeAlerts(Emerald::Renderer2D& renderer, const Database& data, const Com
 AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options)
     : Emerald::Application(spec), m_Play(std::move(options)), m_Data(PlaytestDataDirectory(m_Play))
 {
+}
+
+void AscensionApp::ClearPresented()
+{
+    m_Shown.clear();
+    m_Pending.clear();
+    m_ShownAge = 0.0f;
+    m_TurnHold = 0.0f;
+    m_Aiming = false;
 }
 
 void AscensionApp::Note(std::string line)
@@ -403,9 +568,71 @@ void AscensionApp::Note(std::string line)
         m_Transcript << line << '\n';
         m_Transcript.flush();
     }
-    m_Log.push_back(std::move(line));
+    m_Log.push_back(line);
     while (m_Log.size() > kLogLines)
         m_Log.erase(m_Log.begin());
+    if (m_Shown.empty()) {
+        m_Shown = std::move(line);
+        m_ShownAge = 0.0f;
+        return;
+    }
+    m_Pending.push_back(std::move(line));
+}
+
+void AscensionApp::PacePresented(f32 dt)
+{
+    if (!m_Data.IsLoaded())
+        return;
+    const f32 hold =
+        static_cast<f32>(m_Data.GetBattleUi().Style.MessageMinMilliseconds) / 1000.0f;
+    m_ShownAge += dt;
+    if (!m_Pending.empty() && (m_Shown.empty() || m_ShownAge >= hold)) {
+        m_Shown = m_Pending.front();
+        m_Pending.erase(m_Pending.begin());
+        m_ShownAge = 0.0f;
+    }
+    const bool scripting = m_KeyCursor < m_Play.Keys.size();
+    if (scripting || m_Paused || m_Battle == nullptr || m_Talk || m_Camp || m_Picking || m_Aiming)
+        return;
+    if (m_Battle->Result() != BattleResult::Ongoing || m_Battle->Actor() != CombatantSide::Enemy)
+        return;
+    m_TurnHold += dt;
+    if (m_TurnHold < hold)
+        return;
+    ActOneEnemy();
+}
+
+void AscensionApp::ActOneEnemy()
+{
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
+        return;
+    if (m_Battle->Actor() != CombatantSide::Enemy)
+        return;
+    const i32 markedBefore = m_Battle->TargetIndex();
+    const ActionResult act = m_Battle->EnemyAct();
+    Note(act);
+    NoteMarked(markedBefore);
+    FinishAction(act, false);
+    m_TurnHold = 0.0f;
+}
+
+bool AscensionApp::SkipPresented()
+{
+    if (m_ApplyingScript || m_Pending.empty())
+        return false;
+    m_Shown = m_Pending.front();
+    m_Pending.erase(m_Pending.begin());
+    m_ShownAge = 0.0f;
+    return true;
+}
+
+void AscensionApp::SettleFoes()
+{
+    const bool scripting = m_ApplyingScript || m_KeyCursor < m_Play.Keys.size();
+    if (scripting)
+        ResolveFoe();
+    else
+        m_TurnHold = 0.0f;
 }
 
 void AscensionApp::Note(const ActionResult& result)
@@ -707,6 +934,7 @@ void AscensionApp::BeginSpawnFight()
         return;
     }
     m_Log.clear();
+    ClearPresented();
     m_StartError.clear();
     m_XpAwarded = false;
     m_VitalsSettled = false;
@@ -714,6 +942,7 @@ void AscensionApp::BeginSpawnFight()
     m_Talk = false;
     m_Picking = false;
     m_CommandRow = 0;
+    m_ShopAsk = ShopAsk::None;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady()) {
         m_MapFight.Active = false;
         return;
@@ -780,7 +1009,7 @@ void AscensionApp::BeginSpawnFight()
     } else {
         Note("You move first.");
     }
-    ResolveFoe();
+    SettleFoes();
 }
 
 void AscensionApp::MaybeSettle()
@@ -892,6 +1121,7 @@ void AscensionApp::BeginFight()
         return;
     }
     m_Log.clear();
+    ClearPresented();
     m_StartError.clear();
     // R and N start the fight over. A unique drop already in m_Found is not granted again.
     m_XpAwarded = false;
@@ -900,6 +1130,7 @@ void AscensionApp::BeginFight()
     m_Talk = false;
     m_Picking = false;
     m_CommandRow = 0;
+    m_ShopAsk = ShopAsk::None;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady())
         return;
     std::string fightId = m_DirectEnemy;
@@ -973,7 +1204,7 @@ void AscensionApp::BeginFight()
     } else {
         Note("You move first.");
     }
-    ResolveFoe();
+    SettleFoes();
     if (m_AnnounceResume) {
         Note("Resumed.");
         m_AnnounceResume = false;
@@ -1626,8 +1857,13 @@ void AscensionApp::HandleOverland(std::string_view action)
         return;
     }
     if (m_Camp) {
+        if (action == kCancel && m_ShopAsk != ShopAsk::None) {
+            m_ShopAsk = ShopAsk::None;
+            return;
+        }
         if (action == kInteract || action == kCancel || action == kMenu) {
             m_Camp = false;
+            m_ShopAsk = ShopAsk::None;
             return;
         }
         HandleCamp(action);
@@ -1642,6 +1878,7 @@ void AscensionApp::HandleOverland(std::string_view action)
         m_Camp = true;
         m_CampColumn = 0;
         m_CampRow = 0;
+        m_ShopAsk = ShopAsk::None;
         m_Picking = false;
         return;
     }
@@ -1782,7 +2019,8 @@ void AscensionApp::UseHotkey(int digit)
         Note(used);
         NoteMarked(markedBefore);
         FinishAction(used, true);
-        ResolveFoe();
+        m_Aiming = false;
+        SettleFoes();
         return;
     }
     const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
@@ -1855,7 +2093,7 @@ void AscensionApp::UseCommand(int row)
         Note(waited);
         NoteMarked(markedBefore);
         FinishAction(waited, true);
-        ResolveFoe();
+        SettleFoes();
         return;
     }
     ++cursor;
@@ -1871,14 +2109,67 @@ void AscensionApp::UseCommand(int row)
         const ActionResult fled = m_Battle->Flee();
         Note(fled);
         FinishAction(fled, false);
-        ResolveFoe();
+        SettleFoes();
     }
+}
+
+void AscensionApp::ConfirmCommand()
+{
+    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
+        return;
+    if (m_Battle->Actor() != CombatantSide::Player) {
+        ActOneEnemy();
+        return;
+    }
+    if (m_Aiming) {
+        m_Aiming = false;
+        UseCommand(m_CommandRow);
+        return;
+    }
+    int skills = static_cast<int>(m_Battle->PlayerSkillIds().size());
+    if (skills > kMaxHotkeys)
+        skills = kMaxHotkeys;
+    if (m_CommandRow >= 0 && m_CommandRow < skills) {
+        m_Aiming = true;
+        return;
+    }
+    UseCommand(m_CommandRow);
 }
 
 void AscensionApp::HandleBattle(std::string_view action)
 {
     if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing)
         return;
+    if (action == kConfirm && SkipPresented())
+        return;
+    if (action == kCancel) {
+        if (m_Aiming)
+            m_Aiming = false;
+        else if (m_Picking)
+            m_Picking = false;
+        return;
+    }
+    if (m_Aiming && m_Battle->Actor() == CombatantSide::Player) {
+        const bool aimHorizontal = action == kMoveWest || action == kMoveEast ||
+                                   action == kCyclePrev || action == kCycleNext;
+        if (aimHorizontal) {
+            const int step = (action == kMoveEast || action == kCycleNext) ? 1 : -1;
+            const i32 markedBefore = m_Battle->TargetIndex();
+            m_Battle->CycleTarget(step);
+            NoteMarked(markedBefore);
+            return;
+        }
+        if (action == kConfirm) {
+            ConfirmCommand();
+            return;
+        }
+        const int aimed = SlotIndex(action);
+        if (aimed >= 0) {
+            m_Aiming = false;
+            UseHotkey(aimed);
+        }
+        return;
+    }
     const bool vertical = action == kMoveNorth || action == kMoveSouth;
     const bool horizontal = action == kMoveWest || action == kMoveEast || action == kCyclePrev ||
                             action == kCycleNext;
@@ -1919,7 +2210,7 @@ void AscensionApp::HandleBattle(std::string_view action)
         Note(waited);
         NoteMarked(markedBefore);
         FinishAction(waited, true);
-        ResolveFoe();
+        SettleFoes();
         return;
     }
     if (action == kFlee) {
@@ -1932,11 +2223,11 @@ void AscensionApp::HandleBattle(std::string_view action)
         const ActionResult fled = m_Battle->Flee();
         Note(fled);
         FinishAction(fled, false);
-        ResolveFoe();
+        SettleFoes();
         return;
     }
     if (action == kConfirm) {
-        UseCommand(m_CommandRow);
+        ConfirmCommand();
         return;
     }
     const int digit = SlotIndex(action);
@@ -2129,6 +2420,7 @@ void AscensionApp::HandleAction(std::string_view action)
         m_Camp = true;
         m_CampColumn = 0;
         m_CampRow = 0;
+        m_ShopAsk = ShopAsk::None;
         m_Picking = false;
         return;
     }
@@ -2157,12 +2449,17 @@ void AscensionApp::HandleAction(std::string_view action)
         if (m_Camp) {
             m_CampColumn = 0;
             m_CampRow = 0;
+            m_ShopAsk = ShopAsk::None;
         }
         m_Picking = false;
         m_Talk = false;
         return;
     }
     if (action == kCancel && m_Camp) {
+        if (m_ShopAsk != ShopAsk::None) {
+            m_ShopAsk = ShopAsk::None;
+            return;
+        }
         m_Camp = false;
         return;
     }
@@ -2350,6 +2647,7 @@ void AscensionApp::OnUpdate(f32 dt)
     // than a Linux replay. The script is the input; data is whatever it started with.
     if (m_KeyCursor < m_Play.Keys.size())
         return;
+    PacePresented(dt);
     m_ReloadWait += dt;
     if (m_ReloadWait < kPollSeconds)
         return;
@@ -2649,6 +2947,631 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
     DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
 
+struct FightFrame {
+    Emerald::Vec2 Left{};
+    Emerald::Vec2 LeftSize{};
+    Emerald::Vec2 Right{};
+    Emerald::Vec2 RightSize{};
+    Emerald::Vec2 Bottom{};
+    Emerald::Vec2 BottomSize{};
+    f32 HintTop = 0.0f;
+    f32 TextFloor = 0.0f;
+};
+
+FightFrame MakeFightFrame(const BattleUi& ui, f32 width, f32 height)
+{
+    FightFrame frame;
+    const f32 margin = static_cast<f32>(ui.Margin);
+    const f32 top = static_cast<f32>(ui.PanelTop);
+    const f32 party = static_cast<f32>(ui.PartyWidth);
+    const f32 gutter = static_cast<f32>(ui.Gutter);
+    const f32 bottomH = static_cast<f32>(ui.BottomHeight);
+    const f32 inset = static_cast<f32>(ui.BottomInset);
+    const f32 split = static_cast<f32>(ui.SplitGap);
+    frame.Bottom = {margin, height - inset - bottomH};
+    frame.BottomSize = {width - margin * 2.0f, bottomH};
+    const f32 sideH = frame.Bottom.y - split - top;
+    frame.Left = {margin, top};
+    frame.LeftSize = {party, sideH > 0.0f ? sideH : 0.0f};
+    frame.Right = {margin + party + gutter, top};
+    const f32 rightW = width - margin - frame.Right.x;
+    frame.RightSize = {rightW > 0.0f ? rightW : 0.0f, frame.LeftSize.y};
+    frame.HintTop = height - 36.0f;
+    frame.TextFloor = frame.HintTop - static_cast<f32>(ui.Style.HintClearance);
+    return frame;
+}
+
+const SkillDef* SkillForRow(const Database& data, std::span<const HeroGrant> grants,
+                            std::string_view id)
+{
+    for (const HeroGrant& grant : grants) {
+        if (grant.Skill.Kind == SkillKind::Active && grant.Skill.Id == id)
+            return &grant.Skill;
+    }
+    return data.FindSkill(id);
+}
+
+void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    const BattleUi& ui = m_Data.GetBattleUi();
+    const UiStyle& style = ui.Style;
+    const FightFrame frame = MakeFightFrame(ui, width, height);
+    const Emerald::Vec4 ink = Paint(style.Ink);
+    const Emerald::Vec4 dim = Paint(style.Dim);
+    const Emerald::Vec4 frameColor = Paint(style.Frame);
+    const Emerald::Vec4 panel = Paint(style.Panel);
+    const Emerald::Vec4 highlight = Paint(style.Highlight);
+    const Emerald::Vec4 error = Paint(style.Error);
+    const Emerald::Vec4 hp = Paint(style.Hp);
+    const Emerald::Vec4 focusColor = Paint(style.Focus);
+    const f32 pad = static_cast<f32>(style.PanelPad);
+    const f32 lineGap = static_cast<f32>(style.LineGap);
+    const f32 groupGap = static_cast<f32>(style.GroupGap);
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 barH = static_cast<f32>(style.BarHeight);
+
+    const CombatantState& player = m_Battle->Player();
+    const CombatantState& enemy = m_Battle->Enemy();
+    const std::span<const CombatantState> pack = m_Battle->Enemies();
+    const i32 packCount = static_cast<i32>(pack.size());
+    const bool ongoing = m_Battle->Result() == BattleResult::Ongoing;
+    const bool playerTurn = ongoing && m_Battle->Actor() == CombatantSide::Player;
+    const i32 actorSlot = ongoing ? m_Battle->ActorIndex() : -1;
+    const bool fightOver = !ongoing;
+    const i32 encounterTotal = static_cast<i32>(m_Data.GetEncounters().size());
+    const std::string zone = FightZone(m_Data, m_EnemyIndex, !m_DirectEnemy.empty());
+
+    const bool pickingClass = fightOver && m_Hero.ChoosingStarter();
+    const bool spending = fightOver && !pickingClass && m_Hero.ClassPool() > 0;
+    const bool choosingPath = fightOver && m_Hero.ChoicePending() && !pickingClass && !spending;
+    const bool pickingSkill =
+        fightOver && m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+    const bool choosing = choosingPath || pickingClass || spending || pickingSkill;
+
+    const std::vector<HeroGrant> grants =
+        CurrentGrants(m_Data, m_Hero.ClassId(), m_Inventory, m_Hero.PickedIds());
+    const std::span<const std::string> skillIds = m_Battle->PlayerSkillIds();
+    int shownSkills = 0;
+    const SkillDef* aimed = nullptr;
+    if (m_Aiming && playerTurn && m_CommandRow >= 0 &&
+        m_CommandRow < static_cast<i32>(skillIds.size()) && m_CommandRow < kMaxHotkeys)
+        aimed = SkillForRow(m_Data, grants, skillIds[static_cast<usize>(m_CommandRow)]);
+    const bool aimSelf = aimed != nullptr && aimed->Target == SkillTarget::Self;
+    const bool aimAll = aimed != nullptr && aimed->Target == SkillTarget::AllEnemies;
+    const bool aimOne = aimed != nullptr && !aimSelf && !aimAll;
+
+    const Emerald::Vec4 leftEdge = (playerTurn || aimSelf) ? highlight : frameColor;
+    const bool foeSide = (!playerTurn && ongoing) || aimOne || aimAll;
+    const Emerald::Vec4 rightEdge = foeSide ? highlight : frameColor;
+    DrawPanel(renderer, frame.Left, frame.LeftSize, panel, leftEdge);
+    DrawPanel(renderer, frame.Right, frame.RightSize, panel, rightEdge);
+    DrawPanel(renderer, frame.Bottom, frame.BottomSize, panel, frameColor);
+
+    const f32 fig = static_cast<f32>(ui.FigureSize);
+    const Emerald::Vec2 figSize{fig * 4.0f, fig * 6.5f};
+    const Emerald::Vec2 figAt{frame.Left.x + pad, frame.Left.y + pad};
+    const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
+    if (playerTurn || aimSelf)
+        DrawHalo(renderer, figAt, figSize, highlight);
+    if (m_Gallery.IsEmpty() ||
+        !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, m_Hero.ClassId(), figAt, figSize, white))
+        DrawFigure(renderer, figAt, fig, Paint(style.Figure));
+
+    const f32 textX = figAt.x + figSize.x + rowGap;
+    const f32 textRight = frame.Left.x + frame.LeftSize.x - pad;
+    const f32 textW = textRight > textX ? textRight - textX : 0.0f;
+    f32 y = figAt.y;
+    std::string title = player.Name;
+    if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
+        title = heroClass->Name;
+    const std::string titleLine = FitLine(title, style.TitleScale, textW);
+    const f32 titleH = Emerald::DebugTextLineHeight(style.TitleScale);
+    if (playerTurn || aimSelf) {
+        const f32 band = Emerald::MeasureDebugText(titleLine, style.TitleScale).x;
+        renderer.FillRect({textX, y}, {band, titleH}, highlight);
+        Emerald::DrawDebugText(renderer, {textX, y}, titleLine, panel, style.TitleScale);
+    } else {
+        Emerald::DrawDebugText(renderer, {textX, y}, titleLine, ink, style.TitleScale);
+    }
+    y += titleH + lineGap;
+    const std::string hpText = PoolText("HP", player.Hp, player.MaxHp);
+    Emerald::DrawDebugText(renderer, {textX, y}, FitLine(hpText, style.BodyScale, textW), ink,
+                           style.BodyScale);
+    y += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
+    const f32 playerHp =
+        player.MaxHp > 0 ? static_cast<f32>(player.Hp) / static_cast<f32>(player.MaxHp) : 0.0f;
+    f32 barW = static_cast<f32>(style.BarWidth);
+    if (barW > textW)
+        barW = textW;
+    DrawBar(renderer, {textX, y}, barW, barH, playerHp, hp);
+    y += barH + lineGap;
+    const std::string focusText = PoolText("FOCUS", player.Focus, player.MaxFocus);
+    Emerald::DrawDebugText(renderer, {textX, y}, FitLine(focusText, style.BodyScale, textW),
+                           focusColor, style.BodyScale);
+    y += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
+    const f32 playerFocus = player.MaxFocus > 0
+                                ? static_cast<f32>(player.Focus) / static_cast<f32>(player.MaxFocus)
+                                : 0.0f;
+    DrawBar(renderer, {textX, y}, barW, barH, playerFocus, focusColor);
+    y += barH;
+    const std::string playerStatus = StatusLine(m_Data, player);
+    if (!playerStatus.empty()) {
+        y += lineGap;
+        const f32 statusH = Emerald::DebugTextLineHeight(style.DetailScale);
+        if (y + statusH <= frame.Left.y + frame.LeftSize.y - pad)
+            Emerald::DrawDebugText(renderer, {frame.Left.x + pad, y},
+                                   FitLine(playerStatus, style.DetailScale, frame.LeftSize.x - pad * 2.0f),
+                                   error, style.DetailScale);
+        y += statusH;
+    }
+    const f32 heroBottom = figAt.y + figSize.y > y ? figAt.y + figSize.y : y;
+    const f32 menuY = heroBottom + groupGap;
+    const f32 menuX = frame.Left.x + pad;
+    const f32 menuW = frame.LeftSize.x - pad * 2.0f;
+    const f32 menuFloor = frame.Left.y + frame.LeftSize.y - pad;
+
+    std::vector<MenuLine> rows;
+    if (choosing) {
+        if (pickingClass) {
+            const std::vector<std::string> starters = m_Hero.StarterIds();
+            for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* starter = m_Data.FindClass(starters[i]);
+                MenuLine row;
+                row.Text = std::to_string(static_cast<int>(i) + 1) + "  " +
+                           (starter != nullptr ? starter->Name : starters[i]);
+                if (starter != nullptr)
+                    row.Detail = m_Data.Describe(*starter);
+                rows.push_back(std::move(row));
+            }
+        } else if (spending) {
+            const std::span<const StatDef> stats = m_Data.GetStats();
+            const StatBlock attributes = m_Hero.Attributes();
+            for (usize index = 0; index < stats.size() && index < static_cast<usize>(kMaxHotkeys);
+                 ++index) {
+                const StatDef& stat = stats[index];
+                MenuLine row;
+                row.Text = std::to_string(static_cast<int>(index) + 1) + "  " + stat.Name + "  " +
+                           std::to_string(attributes.Get(stat.Id));
+                row.Detail = stat.Description;
+                rows.push_back(std::move(row));
+            }
+            if (m_Hero.ChoicePending() && rows.size() < static_cast<usize>(kMaxHotkeys)) {
+                MenuLine reset;
+                reset.Text = std::to_string(static_cast<int>(rows.size()) + 1) + "  RESET BUILD";
+                reset.Detail = "Clears skill ranks. Class points return to the pool.";
+                rows.push_back(std::move(reset));
+            }
+        } else if (pickingSkill) {
+            const std::vector<std::string> options = m_Hero.PickOptions();
+            for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const SkillGrant* offered = OfferedGrant(m_Data, m_Hero.ClassId(), options[i]);
+                const SkillDef* skill =
+                    offered != nullptr ? &offered->Resolved : m_Data.FindSkill(options[i]);
+                const std::string name = SkillName(m_Data, options[i]);
+                MenuLine row;
+                row.Text = std::to_string(static_cast<int>(i) + 1) + "  " + name;
+                if (skill != nullptr)
+                    row.Detail = m_Data.DescribeSkill(*skill, m_Hero.RankOf(skill->Id));
+                if (ClassHasActive(m_Data, m_Hero.ClassId(), options[i])) {
+                    if (!row.Detail.empty())
+                        row.Detail = "Upgrades " + name + ". " + row.Detail;
+                    else
+                        row.Detail = "Upgrades " + name;
+                }
+                rows.push_back(std::move(row));
+            }
+        } else {
+            const std::vector<std::string> choices = m_Hero.ChoiceIds();
+            for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* evolution = m_Data.FindClass(choices[i]);
+                MenuLine row;
+                row.Text = std::to_string(static_cast<int>(i) + 1) + "  " +
+                           (evolution != nullptr ? evolution->Name : choices[i]);
+                if (evolution != nullptr)
+                    row.Detail = m_Data.Describe(*evolution);
+                rows.push_back(std::move(row));
+            }
+            if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
+                MenuLine reset;
+                reset.Text = std::to_string(static_cast<int>(rows.size()) + 1) + "  RESET BUILD";
+                reset.Detail = "Clears skill ranks. Class points return to the pool.";
+                rows.push_back(std::move(reset));
+            }
+        }
+        DrawMenu(renderer, rows, m_ChoiceRow, {menuX, menuY}, menuW, menuFloor, style);
+    } else if (m_Picking) {
+        const std::vector<i32> picked = m_Inventory.ConsumableSlots();
+        for (usize drink = 0; drink < picked.size(); ++drink) {
+            const ItemStack& stack = m_Inventory.BagAt(picked[drink]);
+            const ItemDef* item = m_Data.FindItem(stack.Id);
+            MenuLine row;
+            if (drink < static_cast<usize>(kMaxHotkeys))
+                row.Text = std::to_string(static_cast<int>(drink) + 1) + "  ";
+            if (item == nullptr) {
+                row.Text += stack.Id;
+            } else {
+                row.Text += item->Name + "  X" + std::to_string(stack.Count);
+                if (item->Heal > 0)
+                    row.Detail = "Heal " + std::to_string(item->Heal);
+                if (item->Focus > 0) {
+                    if (!row.Detail.empty())
+                        row.Detail += "  ";
+                    row.Detail += "Focus +" + std::to_string(item->Focus);
+                }
+            }
+            rows.push_back(std::move(row));
+        }
+        DrawMenu(renderer, rows, m_PickRow, {menuX, menuY}, menuW, menuFloor, style);
+    } else {
+        const i32 skillCap = static_cast<i32>(skillIds.size()) < kMaxHotkeys
+                                 ? static_cast<i32>(skillIds.size())
+                                 : kMaxHotkeys;
+        for (i32 index = 0; index < skillCap; ++index) {
+            const std::string& id = skillIds[static_cast<usize>(index)];
+            const SkillDef* skill = SkillForRow(m_Data, grants, id);
+            MenuLine row;
+            row.Text = std::to_string(index + 1) + "  ";
+            if (skill == nullptr) {
+                row.Text += id;
+            } else {
+                row.Text += skill->Name + " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   " +
+                            std::to_string(skill->FocusCost) + " FOCUS";
+                row.Enabled = !fightOver && playerTurn && player.Focus >= skill->FocusCost;
+                row.Detail = m_Data.DescribeSkill(*skill, m_Hero.RankOf(skill->Id));
+            }
+            rows.push_back(std::move(row));
+            ++shownSkills;
+        }
+        if (!fightOver && !m_Picking) {
+            MenuLine wait;
+            wait.Text = "WAIT";
+            wait.Detail = "Pass the turn. Focus returns.";
+            wait.Enabled = playerTurn;
+            rows.push_back(std::move(wait));
+            if (!m_Inventory.ConsumableSlots().empty()) {
+                MenuLine items;
+                items.Text = "ITEMS";
+                items.Detail = "Open the drinks.";
+                items.Enabled = playerTurn;
+                rows.push_back(std::move(items));
+            }
+            if (m_MapFight.Active && m_MapFight.AllowFlee) {
+                MenuLine flee;
+                flee.Text = "FLEE";
+                flee.Detail = "Leave this fight.";
+                flee.Enabled = playerTurn;
+                rows.push_back(std::move(flee));
+            }
+        }
+        DrawMenu(renderer, rows, m_CommandRow, {menuX, menuY}, menuW, menuFloor, style);
+    }
+
+    const f32 foeFloor = frame.Right.y + frame.RightSize.y - pad;
+    const f32 foeX = frame.Right.x + pad;
+    const f32 foeW = frame.RightSize.x - pad * 2.0f;
+    f32 foeY = frame.Right.y + pad;
+    foeY = DrawZone(renderer, zone, {foeX, foeY}, foeW, style.DetailScale, dim, lineGap);
+    if (packCount <= 1) {
+        const Emerald::Vec2 foeAt{foeX, foeY};
+        const bool acting = ongoing && !playerTurn;
+        if (acting || aimOne)
+            DrawHalo(renderer, foeAt, figSize, highlight);
+        DrawFoeBody(renderer, m_Data, &m_Gallery, enemy, foeAt, fig, enemy.Alive(),
+                    Paint(style.Foe));
+        const f32 nameX = foeAt.x + figSize.x + rowGap;
+        const f32 nameW = foeX + foeW > nameX ? foeX + foeW - nameX : 0.0f;
+        std::string foeTitle = enemy.Name;
+        if (m_DirectEnemy.empty() && encounterTotal > 0)
+            foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
+        if (aimOne)
+            foeTitle = "> " + foeTitle;
+        const std::string foeLine = FitLine(foeTitle, style.TitleScale, nameW);
+        const f32 nameH = Emerald::DebugTextLineHeight(style.TitleScale);
+        if (acting || aimOne) {
+            const f32 band = Emerald::MeasureDebugText(foeLine, style.TitleScale).x;
+            renderer.FillRect({nameX, foeY}, {band, nameH}, highlight);
+            Emerald::DrawDebugText(renderer, {nameX, foeY}, foeLine, panel, style.TitleScale);
+        } else {
+            Emerald::DrawDebugText(renderer, {nameX, foeY}, foeLine, enemy.Alive() ? ink : dim,
+                                   style.TitleScale);
+        }
+        f32 nameY = foeY + nameH + lineGap;
+        const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
+        if (foe != nullptr && foe->Boss) {
+            std::string bossLine = "BOSS";
+            if (enemy.Phase >= 2)
+                bossLine += "  PHASE " + std::to_string(enemy.Phase);
+            Emerald::DrawDebugText(renderer, {nameX, nameY}, FitLine(bossLine, style.BodyScale, nameW),
+                                   error, style.BodyScale);
+            nameY += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
+        }
+        Emerald::DrawDebugText(renderer, {nameX, nameY},
+                               FitLine(PoolText("HP", enemy.Hp, enemy.MaxHp), style.BodyScale, nameW),
+                               ink, style.BodyScale);
+        nameY += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
+        const f32 enemyHp =
+            enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
+        f32 foeBar = barW;
+        if (foeBar > nameW)
+            foeBar = nameW;
+        DrawBar(renderer, {nameX, nameY}, foeBar, barH, enemyHp, enemy.Alive() ? hp : dim);
+        nameY += barH + lineGap;
+        f32 below = foeAt.y + figSize.y + groupGap;
+        if (nameY + groupGap > below)
+            below = nameY + groupGap;
+        below = DrawFoeAlerts(renderer, m_Data, enemy, {foeX, below}, foeW, style.DetailScale, error,
+                              lineGap, foeFloor);
+        foeY = below;
+    } else {
+        std::string packTitle = m_Battle->EncounterName();
+        if (m_DirectEnemy.empty() && encounterTotal > 0)
+            packTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
+        Emerald::DrawDebugText(renderer, {foeX, foeY}, FitLine(packTitle, style.BodyScale, foeW), ink,
+                               style.BodyScale);
+        foeY += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
+        if (aimAll) {
+            const std::string all = FitLine("ALL FOES", style.BodyScale, foeW);
+            const f32 allH = Emerald::DebugTextLineHeight(style.BodyScale);
+            const f32 band = Emerald::MeasureDebugText(all, style.BodyScale).x;
+            renderer.FillRect({foeX, foeY}, {band, allH}, highlight);
+            Emerald::DrawDebugText(renderer, {foeX, foeY}, all, panel, style.BodyScale);
+            foeY += allH + groupGap;
+        } else {
+            foeY += groupGap;
+        }
+        const i32 columns = packCount > 0 ? packCount : 1;
+        const f32 gaps = static_cast<f32>(columns - 1) * groupGap;
+        f32 columnW = columns > 0 ? (foeW - gaps) / static_cast<f32>(columns) : foeW;
+        if (columnW < 1.0f)
+            columnW = 1.0f;
+        f32 columnFig = fig;
+        if (columnFig * 4.0f > columnW)
+            columnFig = columnW / 4.0f;
+        if (columnFig < 8.0f)
+            columnFig = 8.0f;
+        const Emerald::Vec2 columnFigSize{columnFig * 4.0f, columnFig * 6.5f};
+        const int packScale = ui.PackScale;
+        f32 lowest = foeY;
+        for (i32 column = 0; column < packCount; ++column) {
+            const CombatantState& member = pack[static_cast<usize>(column)];
+            const f32 columnX = foeX + static_cast<f32>(column) * (columnW + groupGap);
+            const bool targeted = column == m_Battle->TargetIndex();
+            const bool acting = column == actorSlot;
+            const bool aimedHere = aimAll ? member.Alive() : (aimOne && targeted);
+            const Emerald::Vec2 memberAt{columnX, foeY};
+            if (acting || aimedHere)
+                DrawHalo(renderer, memberAt, columnFigSize, highlight);
+            else if (targeted && member.Alive())
+                DrawHalo(renderer, memberAt, columnFigSize, frameColor);
+            DrawFoeBody(renderer, m_Data, &m_Gallery, member, memberAt, columnFig, member.Alive(),
+                        Paint(style.Foe));
+            f32 textY = memberAt.y + columnFigSize.y + rowGap;
+            const Emerald::Vec4 memberInk = member.Alive() ? ink : dim;
+            std::string memberName = member.Name;
+            if (aimOne && targeted)
+                memberName = "> " + memberName;
+            const std::string name = FitLine(memberName, packScale, columnW);
+            const f32 nameH = Emerald::DebugTextLineHeight(packScale);
+            if (acting || aimedHere) {
+                const f32 band = Emerald::MeasureDebugText(name, packScale).x;
+                renderer.FillRect({columnX, textY}, {band, nameH}, highlight);
+                Emerald::DrawDebugText(renderer, {columnX, textY}, name, panel, packScale);
+            } else {
+                Emerald::DrawDebugText(renderer, {columnX, textY}, name,
+                                       targeted ? frameColor : memberInk, packScale);
+            }
+            textY += nameH + lineGap;
+            const EnemyDef* memberDef = m_Data.FindEnemy(member.Id);
+            if (memberDef != nullptr && memberDef->Boss && textY + nameH <= foeFloor) {
+                std::string bossLine = "BOSS";
+                if (member.Phase >= 2)
+                    bossLine += " " + std::to_string(member.Phase);
+                Emerald::DrawDebugText(renderer, {columnX, textY}, FitLine(bossLine, packScale, columnW),
+                                       error, packScale);
+                textY += nameH + lineGap;
+            }
+            if (textY + nameH <= foeFloor) {
+                Emerald::DrawDebugText(
+                    renderer, {columnX, textY},
+                    FitLine(PoolText("HP", member.Hp, member.MaxHp), packScale, columnW), memberInk,
+                    packScale);
+                textY += nameH + lineGap;
+            }
+            if (textY + barH <= foeFloor) {
+                DrawBar(renderer, {columnX, textY}, columnW, barH,
+                        member.MaxHp > 0 ? static_cast<f32>(member.Hp) / static_cast<f32>(member.MaxHp)
+                                         : 0.0f,
+                        member.Alive() ? hp : dim);
+                textY += barH + lineGap;
+            }
+            textY = DrawFoeAlerts(renderer, m_Data, member, {columnX, textY}, columnW, packScale,
+                                  error, lineGap, foeFloor);
+            if (textY > lowest)
+                lowest = textY;
+        }
+        foeY = lowest;
+    }
+
+    if (ongoing && ui.TurnPreview > 0) {
+        std::vector<TurnSeat> preview;
+        m_Battle->FillTurnPreview(preview, ui.TurnPreview);
+        if (!preview.empty()) {
+            std::string strip;
+            for (const TurnSeat& seat : preview) {
+                if (!strip.empty())
+                    strip += "   ";
+                if (seat.Side == CombatantSide::Player) {
+                    strip += "YOU";
+                    continue;
+                }
+                if (seat.Index >= 0 && seat.Index < packCount)
+                    strip += pack[static_cast<usize>(seat.Index)].Name;
+            }
+            const f32 stripH = Emerald::DebugTextLineHeight(style.DetailScale);
+            if (!strip.empty() && foeY + groupGap + stripH <= foeFloor) {
+                Emerald::DrawDebugText(renderer, {foeX, foeY + groupGap},
+                                       FitLine(strip, style.DetailScale, foeW), dim, style.DetailScale);
+            }
+        }
+    }
+
+    f32 floor = frame.TextFloor;
+    if (floor > frame.Bottom.y + frame.BottomSize.y - pad)
+        floor = frame.Bottom.y + frame.BottomSize.y - pad;
+    f32 promptY = 0.0f;
+    const bool showAim = m_Aiming && playerTurn;
+    if (showAim) {
+        const PromptMetrics metrics = MeasurePrompts(m_Data.GetPrompts());
+        const f32 promptH = metrics.Icon > 0.0f ? metrics.Icon
+                                                : Emerald::DebugTextLineHeight(metrics.TextScale);
+        promptY = frame.HintTop - static_cast<f32>(style.HintClearance) - promptH;
+        const f32 aimFloor = promptY - static_cast<f32>(style.HintClearance);
+        if (aimFloor < floor)
+            floor = aimFloor;
+    }
+
+    std::string banner = "YOUR TURN";
+    Emerald::Vec4 bannerColor = frameColor;
+    if (pickingClass)
+        banner = "CHOOSE A CLASS";
+    else if (spending)
+        banner = "SPEND CLASS POINTS";
+    else if (pickingSkill)
+        banner = "CHOOSE A SKILL";
+    else if (choosing)
+        banner = "CHOOSE A PATH";
+    else if (m_Picking)
+        banner = "CHOOSE AN ITEM";
+    else if (m_Battle->Result() == BattleResult::Victory)
+        banner = "VICTORY";
+    else if (m_Battle->Result() == BattleResult::Defeat) {
+        banner = "DEFEAT";
+        bannerColor = error;
+    } else if (m_Battle->Result() == BattleResult::Fled)
+        banner = "FLED";
+    else if (!playerTurn && ongoing) {
+        std::string actingName = enemy.Name;
+        if (actorSlot >= 0 && actorSlot < packCount)
+            actingName = pack[static_cast<usize>(actorSlot)].Name;
+        banner = actingName + "'S TURN";
+    }
+
+    std::string message = m_Shown;
+    const bool loadError = !m_Data.GetLastError().empty();
+    if (loadError)
+        message = m_Data.GetLastError();
+    else if (message.empty() && showAim) {
+        if (aimSelf)
+            message = "YOU  " + PoolText("HP", player.Hp, player.MaxHp);
+        else if (aimAll)
+            message = "ALL FOES";
+        else
+            message = enemy.Name + "  " + PoolText("HP", enemy.Hp, enemy.MaxHp);
+    } else if (message.empty() && spending)
+        message = "Pool " + std::to_string(m_Hero.ClassPool());
+    else if (message.empty() && pickingClass)
+        message = "Any starter. Class points stay in the pool.";
+    else if (message.empty() && choosing)
+        message = "The next fight waits.";
+
+    const f32 bannerH = Emerald::DebugTextLineHeight(style.BannerScale);
+    const f32 messageH = Emerald::DebugTextLineHeight(style.MessageScale);
+    const f32 bottomX = frame.Bottom.x + pad;
+    const f32 bottomW = frame.BottomSize.x - pad * 2.0f;
+    f32 bottomY = frame.Bottom.y + pad;
+    if (bottomY + bannerH <= floor) {
+        Emerald::DrawDebugText(renderer, {bottomX, bottomY},
+                               FitLine(banner, style.BannerScale, bottomW), bannerColor,
+                               style.BannerScale);
+        bottomY += bannerH + lineGap;
+    }
+    if (!message.empty() && bottomY + messageH <= floor) {
+        Emerald::DrawDebugText(renderer, {bottomX, bottomY},
+                               FitLine(message, style.MessageScale, bottomW), loadError ? error : ink,
+                               style.MessageScale);
+    }
+
+    if (loadError)
+        return;
+    if (showAim) {
+        std::vector<HintChip> ask;
+        AddHint(ask, kConfirm, "CONFIRM");
+        AddHint(ask, kCancel, "CANCEL");
+        DrawHints(renderer, 48.0f, promptY, width - 48.0f, ask, false);
+    }
+
+    const std::string_view slots[] = {kSlot1, kSlot2, kSlot3, kSlot4, kSlot5, kSlot6, kSlot7, kSlot8};
+    std::vector<HintChip> hints;
+    if (m_Picking && !choosing) {
+        AddHint(hints, kMoveNorth, "");
+        AddHint(hints, kMoveSouth, "MOVE");
+        AddHint(hints, kSlot1, "DRINK");
+        AddHint(hints, kConfirm, "DRINK");
+        AddHint(hints, kMenu, "CLOSE");
+    } else if (pickingClass || spending || pickingSkill || choosing) {
+        std::vector<std::string> names;
+        if (pickingClass) {
+            const std::vector<std::string> starters = m_Hero.StarterIds();
+            for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* starter = m_Data.FindClass(starters[i]);
+                names.push_back(starter != nullptr ? starter->Name : starters[i]);
+            }
+        } else if (spending) {
+            for (const StatDef& stat : m_Data.GetStats()) {
+                if (names.size() >= static_cast<usize>(kMaxHotkeys))
+                    break;
+                names.push_back(stat.Name);
+            }
+            if (m_Hero.ChoicePending() && names.size() < static_cast<usize>(kMaxHotkeys))
+                names.push_back("RESET BUILD");
+        } else if (pickingSkill) {
+            const std::vector<std::string> options = m_Hero.PickOptions();
+            for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
+                names.push_back(SkillName(m_Data, options[i]));
+        } else {
+            const std::vector<std::string> choices = m_Hero.ChoiceIds();
+            for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
+                const ClassDef* evolution = m_Data.FindClass(choices[i]);
+                names.push_back(evolution != nullptr ? evolution->Name : choices[i]);
+            }
+            if (choices.size() < static_cast<usize>(kMaxHotkeys))
+                names.push_back("RESET BUILD");
+        }
+        for (usize i = 0; i < names.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
+            AddHint(hints, slots[i], names[i]);
+        AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
+        AddHint(hints, kQuit, "QUIT");
+    } else {
+        if (shownSkills > 0)
+            AddHint(hints, kSlot1, shownSkills == 1 ? "SKILL" : "SKILLS");
+        const int drinkKeys = static_cast<int>(m_Inventory.ConsumableSlots().size());
+        const int drinkFirst = shownSkills;
+        if (drinkKeys > 0 && drinkFirst < kMaxHotkeys)
+            AddHint(hints, slots[drinkFirst], "ITEM");
+        if (!fightOver && packCount > 1) {
+            AddHint(hints, kMoveWest, "");
+            AddHint(hints, kMoveEast, "TARGET");
+        }
+        if (!fightOver)
+            AddHint(hints, kMenu, "ITEMS");
+        if (!fightOver && m_MapFight.Active && m_MapFight.AllowFlee)
+            AddHint(hints, kFlee, "FLEE");
+        AddHint(hints, kWait, "WAIT");
+        if (fightOver && !m_OnMap)
+            AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
+        AddHint(hints, kRetry, "FIGHT");
+        if (!m_OnMap)
+            AddHint(hints, kNext, "NEXT FOE");
+        AddHint(hints, kSave, "SAVE");
+        AddHint(hints, kDebugRespawnFoes, "FOES");
+        AddHint(hints, kDebugNewGame, "NEW");
+        AddHint(hints, kQuit, "QUIT");
+        AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
+    }
+    DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
+}
+
+
 void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 {
     const Emerald::Vec2i pixels = GetWindowSizeInPixels();
@@ -2694,14 +3617,6 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         return;
     }
 
-    const Emerald::Vec2 left{28.0f, 24.0f};
-    const Emerald::Vec2 leftSize{600.0f, height - 188.0f};
-    const Emerald::Vec2 right{648.0f, 24.0f};
-    const Emerald::Vec2 rightSize{width - 676.0f, height - 188.0f};
-    DrawPanel(renderer, left, leftSize);
-    DrawPanel(renderer, right, rightSize);
-    DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
-
     if (m_Talk && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
         DrawTalk(renderer, width, height);
         FinishFrame(renderer, width);
@@ -2712,554 +3627,34 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         FinishFrame(renderer, width);
         return;
     }
-    if (!m_Data.IsLoaded() || !m_StartError.empty() || (m_Battle == nullptr && !BetweenFights())) {
-        Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 28.0f}, "ASCENSION", kFrame, 3);
-        // No fight yet. A load error keeps its file and field. A fight block (a path still
-        // open, a class to pick, points to spend) keeps the sentence NextFightBlock produced.
-        const std::string message =
-            StartupFailureText(m_StartError, m_Data.GetLastError(), m_Hero.NextFightBlock());
-        Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 80.0f}, Upper(message), kError,
-                               2, leftSize.x - 48.0f);
-        FinishFrame(renderer, width);
-        return;
-    }
 
-    if (BetweenFights()) {
+    const bool failed = !m_Data.IsLoaded() || !m_StartError.empty() ||
+                        (m_Battle == nullptr && !BetweenFights());
+    if (failed || BetweenFights()) {
+        const Emerald::Vec2 left{28.0f, 24.0f};
+        const Emerald::Vec2 leftSize{600.0f, height - 188.0f};
+        const Emerald::Vec2 right{648.0f, 24.0f};
+        const Emerald::Vec2 rightSize{width - 676.0f, height - 188.0f};
+        DrawPanel(renderer, left, leftSize);
+        DrawPanel(renderer, right, rightSize);
+        DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
+        if (failed) {
+            Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 28.0f}, "ASCENSION", kFrame, 3);
+            // No fight yet. A load error keeps its file and field. A fight block (a path still
+            // open, a class to pick, points to spend) keeps the sentence NextFightBlock produced.
+            const std::string message =
+                StartupFailureText(m_StartError, m_Data.GetLastError(), m_Hero.NextFightBlock());
+            Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 80.0f}, Upper(message), kError,
+                                   2, leftSize.x - 48.0f);
+            FinishFrame(renderer, width);
+            return;
+        }
         DrawBetween(renderer, width, height);
         FinishFrame(renderer, width);
         return;
     }
 
-    const CombatantState& player = m_Battle->Player();
-    const CombatantState& enemy = m_Battle->Enemy();
-    const std::span<const CombatantState> pack = m_Battle->Enemies();
-    const i32 packCount = static_cast<i32>(pack.size());
-    const i32 actorSlot = m_Battle->Result() == BattleResult::Ongoing ? m_Battle->ActorIndex() : -1;
-    const i32 encounterTotal = static_cast<i32>(m_Data.GetEncounters().size());
-    const std::string zone = FightZone(m_Data, m_EnemyIndex, !m_DirectEnemy.empty());
-    const bool playerTurn =
-        m_Battle->Result() == BattleResult::Ongoing && m_Battle->Actor() == CombatantSide::Player;
-
-    const Emerald::Vec2 figureAt{left.x + 28.0f, left.y + 28.0f};
-    const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
-    if (m_Gallery.IsEmpty() ||
-        !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, m_Hero.ClassId(), figureAt,
-                 {16.0f * 4.0f, 16.0f * 6.5f}, white))
-        DrawFigure(renderer, figureAt, 16.0f, kFigure);
-    f32 y = left.y + 24.0f;
-    std::string title = player.Name;
-    if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
-        title = heroClass->Name;
-    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(title), kInk, 3);
-    y += Emerald::DebugTextLineHeight(3) + 8.0f;
-    std::string levelLine = "Level " + std::to_string(m_Hero.Level()) + "   XP ";
-    if (m_Hero.AtMaxLevel())
-        levelLine += "max";
-    else
-        levelLine += std::to_string(m_Hero.Xp()) + "/" + std::to_string(m_Hero.NextLevelXp());
-    levelLine += "   GOLD " + std::to_string(m_Inventory.Gold());
-    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(levelLine), kFrame, 2);
-    y += Emerald::DebugTextLineHeight(2) + 4.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y},
-                           Upper(PoolText("HP", player.Hp, player.MaxHp)), kInk, 2);
-    y += Emerald::DebugTextLineHeight(2) + 4.0f;
-    const f32 playerHp =
-        player.MaxHp > 0 ? static_cast<f32>(player.Hp) / static_cast<f32>(player.MaxHp) : 0.0f;
-    DrawBar(renderer, {left.x + 140.0f, y}, 280.0f, playerHp, kHp);
-    y += 22.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 140.0f, y},
-                           Upper(PoolText("FOCUS", player.Focus, player.MaxFocus)), kFocus, 2);
-    y += Emerald::DebugTextLineHeight(2) + 4.0f;
-    const f32 playerFocus = player.MaxFocus > 0
-                                ? static_cast<f32>(player.Focus) / static_cast<f32>(player.MaxFocus)
-                                : 0.0f;
-    DrawBar(renderer, {left.x + 140.0f, y}, 280.0f, playerFocus, kFocus);
-    const std::string playerStatus = StatusLine(m_Data, player);
-    if (!playerStatus.empty()) {
-        y += 18.0f;
-        Emerald::DrawDebugText(renderer, {left.x + 140.0f, y}, Upper(playerStatus), kError, 1);
-    }
-
-    const bool fightOver = m_Battle->Result() != BattleResult::Ongoing;
-    const bool pickingClass = fightOver && m_Hero.ChoosingStarter();
-    const bool spending = fightOver && !pickingClass && m_Hero.ClassPool() > 0;
-    const bool choosingPath = fightOver && m_Hero.ChoicePending() && !pickingClass && !spending;
-    const bool pickingSkill =
-        fightOver && m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
-    const bool choosing = choosingPath || pickingClass || spending || pickingSkill;
-    y = left.y + 188.0f;
-    if (!choosing) {
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(WornLine(m_Data, m_Inventory)),
-                               kDim, 1, leftSize.x - 56.0f);
-    }
-    y = left.y + 210.0f;
-    int shownSkills = 0;
-    if (choosing) {
-        const char* heading = "CHOOSE A PATH";
-        if (pickingClass)
-            heading = "CHOOSE A CLASS";
-        else if (spending)
-            heading = "SPEND CLASS POINTS";
-        else if (pickingSkill)
-            heading = "CHOOSE A SKILL";
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, heading, kFrame, 2);
-        y += Emerald::DebugTextLineHeight(2) + 2.0f;
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "THE NEXT FIGHT WAITS.", kInk, 1);
-        y += Emerald::DebugTextLineHeight(1) + 8.0f;
-        if (pickingClass) {
-            const std::vector<std::string> starters = m_Hero.StarterIds();
-            for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                const ClassDef* starter = m_Data.FindClass(starters[i]);
-                const bool marked = static_cast<int>(i) == m_ChoiceRow;
-                const std::string name = std::string(marked ? "> " : "  ") +
-                                         std::to_string(static_cast<int>(i) + 1) + "  " +
-                                         (starter != nullptr ? starter->Name : starters[i]);
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name),
-                                       marked ? kFrame : kInk, 2);
-                y += Emerald::DebugTextLineHeight(2) + 2.0f;
-                if (starter != nullptr) {
-                    y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                               Upper(m_Data.Describe(*starter)), kDim, 1,
-                                               leftSize.x - 56.0f);
-                    y += 8.0f;
-                }
-            }
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                   "ANY STARTER. CLASS POINTS STAY IN THE POOL.", kDim, 1,
-                                   leftSize.x - 56.0f);
-        } else if (spending) {
-            const std::span<const StatDef> stats = m_Data.GetStats();
-            const StatBlock attributes = m_Hero.Attributes();
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                   "POOL " + std::to_string(m_Hero.ClassPool()), kInk, 2);
-            y += Emerald::DebugTextLineHeight(2) + 4.0f;
-            for (usize index = 0; index < stats.size(); ++index) {
-                const StatDef& stat = stats[index];
-                const bool marked = static_cast<int>(index) == m_ChoiceRow;
-                const std::string line = std::string(marked ? "> " : "  ") +
-                                         std::to_string(static_cast<int>(index) + 1) + "  " +
-                                         Upper(stat.Name) + "  " +
-                                         std::to_string(attributes.Get(stat.Id));
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, marked ? kFrame : kInk,
-                                       2);
-                y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            }
-            if (m_Hero.ChoicePending() && stats.size() < static_cast<usize>(kMaxHotkeys)) {
-                const int resetRow = static_cast<int>(stats.size());
-                const bool marked = m_ChoiceRow == resetRow;
-                const std::string line = std::string(marked ? "> " : "  ") +
-                                         std::to_string(resetRow + 1) + "  RESET BUILD";
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, marked ? kFrame : kDim,
-                                       1);
-            }
-        } else if (pickingSkill) {
-            const std::vector<std::string> options = m_Hero.PickOptions();
-            for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                const SkillGrant* offered = OfferedGrant(m_Data, m_Hero.ClassId(), options[i]);
-                const SkillDef* skill =
-                    offered != nullptr ? &offered->Resolved : m_Data.FindSkill(options[i]);
-                const std::string name = SkillName(m_Data, options[i]);
-                const bool marked = static_cast<int>(i) == m_ChoiceRow;
-                const std::string line = std::string(marked ? "> " : "  ") +
-                                         std::to_string(static_cast<int>(i) + 1) + "  " + name;
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line),
-                                       marked ? kFrame : kInk, 2);
-                y += Emerald::DebugTextLineHeight(2) + 2.0f;
-                if (skill != nullptr) {
-                    y = Emerald::DrawDebugText(
-                        renderer, {left.x + 28.0f, y},
-                        Upper(m_Data.DescribeSkill(*skill, m_Hero.RankOf(skill->Id))), kDim, 1,
-                        leftSize.x - 56.0f);
-                    y += 2.0f;
-                }
-                if (ClassHasActive(m_Data, m_Hero.ClassId(), options[i])) {
-                    Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper("Upgrades " + name),
-                                           kInk, 1);
-                    y += Emerald::DebugTextLineHeight(1) + 8.0f;
-                } else {
-                    y += 6.0f;
-                }
-            }
-        } else {
-            const std::vector<std::string> choices = m_Hero.ChoiceIds();
-            for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                const ClassDef* evolution = m_Data.FindClass(choices[i]);
-                if (evolution == nullptr)
-                    continue;
-                const bool marked = static_cast<int>(i) == m_ChoiceRow;
-                const std::string name = std::string(marked ? "> " : "  ") +
-                                         std::to_string(static_cast<int>(i) + 1) + "  " +
-                                         evolution->Name;
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(name),
-                                       marked ? kFrame : kInk, 2);
-                y += Emerald::DebugTextLineHeight(2) + 2.0f;
-                y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                           Upper(m_Data.Describe(*evolution)), kDim, 1,
-                                           leftSize.x - 56.0f);
-                y += 2.0f;
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                       Upper(AddsLine(m_Data, *evolution)), kInk, 1);
-                y += Emerald::DebugTextLineHeight(1) + 8.0f;
-            }
-            if (choices.size() < static_cast<usize>(kMaxHotkeys)) {
-                const bool marked = m_ChoiceRow == static_cast<int>(choices.size());
-                const std::string resetName = std::string(marked ? "> " : "  ") +
-                                              std::to_string(static_cast<int>(choices.size()) + 1) +
-                                              "  RESET BUILD";
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, resetName,
-                                       marked ? kFrame : kInk, 2);
-                y += Emerald::DebugTextLineHeight(2) + 2.0f;
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                       "CLEARS SKILL RANKS. CLASS POINTS RETURN TO THE POOL.", kDim,
-                                       1, leftSize.x - 56.0f);
-            }
-        }
-    } else if (m_Picking) {
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "DRINKS", kFrame, 2);
-        y += Emerald::DebugTextLineHeight(2) + 4.0f;
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                               "DRINK THE MARKED ROW, OR ITS NUMBER.", kDim, 1,
-                               leftSize.x - 56.0f);
-        y += Emerald::DebugTextLineHeight(1) + 6.0f;
-        const std::vector<i32> picked = m_Inventory.ConsumableSlots();
-        for (usize drink = 0; drink < picked.size(); ++drink) {
-            const bool marked = static_cast<i32>(drink) == m_PickRow;
-            const ItemStack& stack = m_Inventory.BagAt(picked[drink]);
-            const ItemDef* item = m_Data.FindItem(stack.Id);
-            std::string rowText = marked ? "> " : "  ";
-            if (drink < static_cast<usize>(kMaxHotkeys))
-                rowText += std::to_string(static_cast<int>(drink) + 1) + "  ";
-            if (item == nullptr) {
-                rowText += stack.Id;
-            } else {
-                rowText += item->Name;
-                rowText += " x" + std::to_string(stack.Count);
-                if (item->Heal > 0)
-                    rowText += "   heal " + std::to_string(item->Heal);
-                if (item->Focus > 0)
-                    rowText += "   focus +" + std::to_string(item->Focus);
-            }
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(rowText),
-                                   marked ? kFrame : kInk, 1, leftSize.x - 56.0f);
-            y += Emerald::DebugTextLineHeight(1) + 2.0f;
-        }
-    } else {
-        Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "SKILLS", kFrame, 2);
-        y += Emerald::DebugTextLineHeight(2) + 8.0f;
-        // The same list, in the same order, that Battle builds its hotkeys from.
-        const std::vector<HeroGrant> grants =
-            CurrentGrants(m_Data, m_Hero.ClassId(), m_Inventory, m_Hero.PickedIds());
-        usize hotkey = 0;
-        for (const HeroGrant& grant : grants) {
-            if (grant.Skill.Kind != SkillKind::Active)
-                continue;
-            if (hotkey >= static_cast<usize>(kMaxHotkeys))
-                break;
-            const usize shown = hotkey++;
-            const SkillDef& skill = grant.Skill;
-            ++shownSkills;
-            const bool ready = playerTurn && player.Focus >= skill.FocusCost;
-            const bool cursor = !fightOver && !m_Picking;
-            const bool marked = cursor && static_cast<i32>(shown) == m_CommandRow;
-            const Emerald::Vec4 color = marked ? kFrame : (fightOver || ready ? kInk : kDim);
-            std::string line = cursor ? (marked ? "> " : "  ") : "";
-            line += std::to_string(static_cast<int>(shown) + 1) + "  " + skill.Name;
-            line += " (" + std::to_string(m_Hero.RankOf(skill.Id)) + ")   ";
-            line += std::to_string(skill.FocusCost) + " focus";
-            line += SourceTag(m_Data, grant);
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(line), color, 2);
-            y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            y = Emerald::DrawDebugText(renderer, {left.x + 28.0f, y},
-                                       Upper(m_Data.DescribeSkill(skill, m_Hero.RankOf(skill.Id))),
-                                       kDim, 1, leftSize.x - 56.0f);
-            y += 4.0f;
-        }
-        const std::vector<i32> drinks = m_Inventory.ConsumableSlots();
-        int shownDrinks = 0;
-        for (usize drink = 0; drink < drinks.size(); ++drink) {
-            const int key = shownSkills + static_cast<int>(drink) + 1;
-            if (key > kMaxHotkeys)
-                break;
-            const ItemStack& stack = m_Inventory.BagAt(drinks[drink]);
-            const ItemDef* item = m_Data.FindItem(stack.Id);
-            if (item == nullptr)
-                continue;
-            ++shownDrinks;
-            const Emerald::Vec4 drinkColor = playerTurn && !fightOver ? kInk : kDim;
-            std::string drinkLine =
-                std::to_string(key) + "  " + item->Name + " x" + std::to_string(stack.Count);
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(drinkLine), drinkColor, 2);
-            y += Emerald::DebugTextLineHeight(2) + 4.0f;
-        }
-        if (shownDrinks < static_cast<int>(drinks.size())) {
-            Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, "EVERY DRINK IS ON THE LIST",
-                                   kFrame, 1);
-            y += Emerald::DebugTextLineHeight(1) + 2.0f;
-        }
-        if (!fightOver && !m_Picking) {
-            int row = shownSkills;
-            const char* commands[3];
-            int commandCount = 0;
-            commands[commandCount++] = "WAIT";
-            if (!drinks.empty())
-                commands[commandCount++] = "ITEMS";
-            if (m_MapFight.Active && m_MapFight.AllowFlee)
-                commands[commandCount++] = "FLEE";
-            for (int index = 0; index < commandCount; ++index) {
-                const bool marked = m_CommandRow == row + index;
-                const std::string line = std::string(marked ? "> " : "  ") + commands[index];
-                Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, line, marked ? kFrame : kInk,
-                                       2);
-                y += Emerald::DebugTextLineHeight(2) + 2.0f;
-            }
-        }
-        for (const HeroGrant& passiveGrant : grants) {
-            if (passiveGrant.Skill.Kind != SkillKind::Passive)
-                continue;
-            Emerald::DrawDebugText(
-                renderer, {left.x + 28.0f, y},
-                Upper(PassiveLine(m_Data, passiveGrant.Skill) + SourceTag(m_Data, passiveGrant)),
-                kFrame, 1);
-            y += Emerald::DebugTextLineHeight(1) + 2.0f;
-        }
-    }
-
-    if (packCount <= 1) {
-        DrawFoeBody(renderer, m_Data, &m_Gallery, enemy, {right.x + 28.0f, right.y + 28.0f}, 16.0f,
-                    enemy.Alive(), kFoe);
-        y = right.y + 24.0f;
-        y = DrawZone(renderer, zone, {right.x + 140.0f, y}, 1);
-        const EnemyDef* foe = m_Data.FindEnemy(enemy.Id);
-        std::string foeTitle = enemy.Name;
-        if (m_DirectEnemy.empty() && encounterTotal > 0) {
-            foeTitle +=
-                "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
-        }
-        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, Upper(foeTitle), kInk, 3);
-        y += Emerald::DebugTextLineHeight(3) + 4.0f;
-        if (foe != nullptr && foe->Boss) {
-            std::string bossLine = "BOSS";
-            if (enemy.Phase >= 2)
-                bossLine += "  PHASE " + std::to_string(enemy.Phase);
-            Emerald::DrawDebugText(renderer, {right.x + 140.0f, y}, bossLine, kError, 2);
-            y += Emerald::DebugTextLineHeight(2) + 4.0f;
-        } else {
-            y += 4.0f;
-        }
-        Emerald::DrawDebugText(renderer, {right.x + 140.0f, y},
-                               Upper(PoolText("HP", enemy.Hp, enemy.MaxHp)), kInk, 2);
-        y += Emerald::DebugTextLineHeight(2) + 4.0f;
-        const f32 enemyHp =
-            enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
-        DrawBar(renderer, {right.x + 140.0f, y}, 280.0f, enemyHp, kHp);
-        y += 22.0f;
-        y = DrawFoeAlerts(renderer, m_Data, enemy, {right.x + 28.0f, y}, rightSize.x - 56.0f, 2);
-        y += 8.0f;
-        if (foe != nullptr) {
-            y = Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(m_Data.Describe(*foe)),
-                                       kDim, 2, rightSize.x - 56.0f);
-            y += 10.0f;
-        }
-    } else {
-        y = right.y + 16.0f;
-        y = DrawZone(renderer, zone, {right.x + 16.0f, y}, 1);
-        std::string packTitle = m_Battle->EncounterName();
-        if (m_DirectEnemy.empty() && encounterTotal > 0) {
-            packTitle +=
-                "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
-        }
-        Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(packTitle), kInk, 2);
-        y += Emerald::DebugTextLineHeight(2) + 8.0f;
-
-        const f32 columnGap = 8.0f;
-        const f32 columnsWidth = rightSize.x - 24.0f;
-        const f32 columnSpan = columnsWidth - columnGap * static_cast<f32>(packCount - 1);
-        const f32 columnWidth = columnSpan / static_cast<f32>(packCount);
-        const int columnScale = packCount >= 3 ? 1 : 2;
-        const f32 figureSize = packCount >= 3 ? 7.0f : 11.0f;
-        const f32 cardTop = y;
-        const f32 cardHeight = packCount >= 3 ? 200.0f : 252.0f;
-        f32 columnX = right.x + 12.0f;
-        for (i32 column = 0; column < packCount; ++column) {
-            const CombatantState& member = pack[static_cast<usize>(column)];
-            const bool selected = column == m_Battle->TargetIndex();
-            const bool acting = column == actorSlot;
-            const Emerald::Vec4 ink = member.Alive() ? kInk : kDim;
-            if (selected)
-                renderer.DrawRect({columnX, cardTop}, {columnWidth, cardHeight}, kFrame);
-            DrawFoeBody(renderer, m_Data, &m_Gallery, member, {columnX + 8.0f, cardTop + 8.0f},
-                        figureSize, member.Alive(), kFoe);
-            f32 textY = cardTop + 12.0f + figureSize * 6.6f;
-            const f32 textX = columnX + 8.0f;
-            const f32 textWrap = columnWidth - 16.0f;
-            Emerald::DrawDebugText(renderer, {textX, textY}, Upper(member.Name),
-                                   selected ? kFrame : ink, columnScale, textWrap);
-            textY += Emerald::DebugTextLineHeight(columnScale) + 2.0f;
-            const EnemyDef* memberDef = m_Data.FindEnemy(member.Id);
-            if (memberDef != nullptr && memberDef->Boss) {
-                std::string bossLine = "BOSS";
-                if (member.Phase >= 2)
-                    bossLine += "  P" + std::to_string(member.Phase);
-                Emerald::DrawDebugText(renderer, {textX, textY}, bossLine, kError, 1);
-                textY += Emerald::DebugTextLineHeight(1) + 2.0f;
-            }
-            Emerald::DrawDebugText(renderer, {textX, textY},
-                                   Upper(PoolText("HP", member.Hp, member.MaxHp)), ink, 1);
-            textY += Emerald::DebugTextLineHeight(1) + 2.0f;
-            const f32 memberHp = member.MaxHp > 0
-                                     ? static_cast<f32>(member.Hp) / static_cast<f32>(member.MaxHp)
-                                     : 0.0f;
-            DrawBar(renderer, {textX, textY}, textWrap, memberHp, member.Alive() ? kHp : kDim);
-            textY += 18.0f;
-            textY = DrawFoeAlerts(renderer, m_Data, member, {textX, textY}, textWrap, 1);
-            std::string mark;
-            if (acting)
-                mark = "ACTS";
-            if (selected) {
-                if (!mark.empty())
-                    mark += "  ";
-                mark += "TARGET";
-            }
-            if (!member.Alive()) {
-                if (!mark.empty())
-                    mark += "  ";
-                mark += "DOWN";
-            }
-            if (!mark.empty()) {
-                Emerald::DrawDebugText(renderer, {textX, textY}, mark, selected ? kFrame : kDim, 1,
-                                       textWrap);
-            }
-            columnX += columnWidth + columnGap;
-        }
-        y = cardTop + cardHeight + 10.0f;
-        const EnemyDef* marked = m_Data.FindEnemy(enemy.Id);
-        if (marked != nullptr) {
-            y = Emerald::DrawDebugText(renderer, {right.x + 16.0f, y},
-                                       Upper(m_Data.Describe(*marked)), kDim, 1,
-                                       rightSize.x - 32.0f);
-            y += 8.0f;
-        }
-    }
-    std::string order = "Acts with you";
-    if (enemy.Stats.Agility > player.Stats.Agility)
-        order = "Acts first";
-    else if (enemy.Stats.Agility < player.Stats.Agility)
-        order = "Acts second";
-    const std::string orderLine = "AGILITY " + std::to_string(enemy.Stats.Agility) + "  " + order;
-    if (packCount <= 1)
-        Emerald::DrawDebugText(renderer, {right.x + 28.0f, y}, Upper(orderLine), kDim, 2);
-    else
-        Emerald::DrawDebugText(renderer, {right.x + 16.0f, y}, Upper(orderLine), kDim, 1);
-
-    std::string banner = "YOUR TURN";
-    Emerald::Vec4 bannerColor = kFrame;
-    if (pickingClass) {
-        banner = "CHOOSE A CLASS";
-    } else if (spending) {
-        banner = "SPEND CLASS POINTS";
-    } else if (pickingSkill) {
-        banner = "CHOOSE A SKILL";
-    } else if (choosing) {
-        banner = "CHOOSE A PATH";
-    } else if (m_Picking) {
-        banner = "CHOOSE AN ITEM";
-    } else if (m_Battle->Result() == BattleResult::Victory) {
-        banner = "VICTORY";
-    } else if (m_Battle->Result() == BattleResult::Defeat) {
-        banner = "DEFEAT";
-        bannerColor = kError;
-    } else if (m_Battle->Result() == BattleResult::Fled) {
-        banner = "FLED";
-    } else if (!playerTurn) {
-        std::string actingName = enemy.Name;
-        if (actorSlot >= 0 && actorSlot < packCount)
-            actingName = pack[static_cast<usize>(actorSlot)].Name;
-        banner = Upper(actingName) + " ACTS";
-    }
-    Emerald::DrawDebugText(renderer, {48.0f, height - 132.0f}, banner, bannerColor, 2);
-
-    f32 logY = height - 96.0f;
-    for (const std::string& line : m_Log) {
-        Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(line), kDim, 1, width - 96.0f);
-        logY += Emerald::DebugTextLineHeight(1) + 1.0f;
-    }
-
-    if (!m_Data.GetLastError().empty()) {
-        Emerald::DrawDebugText(renderer, {48.0f, height - 36.0f}, Upper(m_Data.GetLastError()),
-                               kError, 1, width - 96.0f);
-    } else {
-        const std::string_view slots[] = {kSlot1, kSlot2, kSlot3, kSlot4,
-                                          kSlot5, kSlot6, kSlot7, kSlot8};
-        std::vector<HintChip> hints;
-        if (m_Picking && !choosing) {
-            AddHint(hints, kMoveNorth, "");
-            AddHint(hints, kMoveSouth, "MOVE");
-            AddHint(hints, kSlot1, "DRINK");
-            AddHint(hints, kConfirm, "DRINK");
-            AddHint(hints, kMenu, "CLOSE");
-        } else if (pickingClass || spending || pickingSkill || choosing) {
-            std::vector<std::string> names;
-            if (pickingClass) {
-                const std::vector<std::string> starters = m_Hero.StarterIds();
-                for (usize i = 0; i < starters.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                    const ClassDef* starter = m_Data.FindClass(starters[i]);
-                    names.push_back(starter != nullptr ? starter->Name : starters[i]);
-                }
-            } else if (spending) {
-                for (const StatDef& stat : m_Data.GetStats()) {
-                    if (names.size() >= static_cast<usize>(kMaxHotkeys))
-                        break;
-                    names.push_back(stat.Name);
-                }
-                if (m_Hero.ChoicePending() && names.size() < static_cast<usize>(kMaxHotkeys))
-                    names.push_back("RESET BUILD");
-            } else if (pickingSkill) {
-                const std::vector<std::string> options = m_Hero.PickOptions();
-                for (usize i = 0; i < options.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
-                    names.push_back(SkillName(m_Data, options[i]));
-            } else {
-                const std::vector<std::string> choices = m_Hero.ChoiceIds();
-                for (usize i = 0; i < choices.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                    const ClassDef* evolution = m_Data.FindClass(choices[i]);
-                    names.push_back(evolution != nullptr ? evolution->Name : choices[i]);
-                }
-                if (choices.size() < static_cast<usize>(kMaxHotkeys))
-                    names.push_back("RESET BUILD");
-            }
-            for (usize i = 0; i < names.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
-                AddHint(hints, slots[i], names[i]);
-            AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
-            AddHint(hints, kQuit, "QUIT");
-        } else {
-            if (shownSkills > 0)
-                AddHint(hints, kSlot1, shownSkills == 1 ? "SKILL" : "SKILLS");
-            const int drinkKeys = static_cast<int>(m_Inventory.ConsumableSlots().size());
-            const int drinkFirst = shownSkills;
-            if (drinkKeys > 0 && drinkFirst < kMaxHotkeys)
-                AddHint(hints, slots[drinkFirst], "ITEM");
-            if (!fightOver && packCount > 1) {
-                AddHint(hints, kMoveWest, "");
-                AddHint(hints, kMoveEast, "TARGET");
-            }
-            if (!fightOver)
-                AddHint(hints, kMenu, "ITEMS");
-            if (!fightOver && m_MapFight.Active && m_MapFight.AllowFlee)
-                AddHint(hints, kFlee, "FLEE");
-            AddHint(hints, kWait, "WAIT");
-            if (fightOver && !m_OnMap)
-                AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
-            AddHint(hints, kRetry, "FIGHT");
-            if (!m_OnMap)
-                AddHint(hints, kNext, "NEXT FOE");
-            AddHint(hints, kSave, "SAVE");
-            AddHint(hints, kDebugRespawnFoes, "FOES");
-            AddHint(hints, kDebugNewGame, "NEW");
-            AddHint(hints, kQuit, "QUIT");
-            AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
-        }
-        DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
-    }
-
+    DrawFight(renderer, width, height);
     FinishFrame(renderer, width);
 }
 
@@ -3281,7 +3676,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
     Note(drunk);
     NoteMarked(markedBefore);
     FinishAction(drunk, false);
-    ResolveFoe();
+    SettleFoes();
     if (drunk.Accepted)
         m_Picking = false;
 }
@@ -3341,9 +3736,89 @@ void AscensionApp::ClampCamp()
         m_CampRow = 0;
 }
 
-void AscensionApp::HandleCamp(std::string_view action)
+void AscensionApp::CommitShop()
 {
     ClampCamp();
+    const ShopDef& shop = m_Data.GetShop();
+    std::string why;
+    if (m_ShopAsk == ShopAsk::Buy) {
+        if (m_CampRow < 0 || m_CampRow >= static_cast<i32>(shop.Stock.size()))
+            return;
+        const std::string& stocked = shop.Stock[static_cast<usize>(m_CampRow)];
+        const ItemDef* goods = m_Data.FindItem(stocked);
+        if (goods == nullptr) {
+            Note("That item is gone.");
+            return;
+        }
+        if (!m_Inventory.Buy(stocked, why)) {
+            Note(why);
+            return;
+        }
+        Note("Bought " + goods->Name + " for " + std::to_string(goods->Value) + " gold.");
+        return;
+    }
+    if (m_ShopAsk == ShopAsk::Unequip) {
+        if (m_CampRow < 0 || m_CampRow >= 4)
+            return;
+        const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
+                                      GearSlot::Accessory};
+        const GearSlot slot = wornSlots[m_CampRow];
+        const std::string worn = m_Inventory.Equipped(slot);
+        if (!m_Inventory.Unequip(slot, why)) {
+            Note(why);
+            return;
+        }
+        const ItemDef* piece = m_Data.FindItem(worn);
+        Note("Put " + std::string(piece != nullptr ? piece->Name : worn) + " in the bag.");
+        if (!why.empty())
+            Note(why);
+        return;
+    }
+    if (m_CampRow < 4)
+        return;
+    const i32 bagIndex = m_CampRow - 4;
+    const ItemStack stack = m_Inventory.BagAt(bagIndex);
+    const ItemDef* held = stack.Empty() ? nullptr : m_Data.FindItem(stack.Id);
+    if (m_ShopAsk == ShopAsk::Sell) {
+        if (!m_Inventory.Sell(bagIndex, why)) {
+            Note(why);
+            return;
+        }
+        const std::string sold = held != nullptr ? held->Name : stack.Id;
+        const i32 paid = held != nullptr ? SellPrice(shop, held->Value) : 0;
+        Note("Sold " + sold + " for " + std::to_string(paid) + " gold.");
+        return;
+    }
+    if (m_ShopAsk != ShopAsk::Equip)
+        return;
+    if (!m_Inventory.Equip(bagIndex, why)) {
+        Note(why);
+        return;
+    }
+    const std::string wornName = held != nullptr ? held->Name : stack.Id;
+    Note("Equipped " + wornName + ".");
+}
+
+void AscensionApp::HandleCamp(std::string_view action)
+{
+    if (action == kConfirm && SkipPresented())
+        return;
+    ClampCamp();
+    const bool move = action == kMoveNorth || action == kMoveSouth || action == kMoveWest ||
+                      action == kMoveEast || action == kCyclePrev || action == kCycleNext;
+    if (m_ShopAsk != ShopAsk::None) {
+        if (action == kCancel || move) {
+            m_ShopAsk = ShopAsk::None;
+            if (!move)
+                return;
+        } else if (action == kConfirm) {
+            CommitShop();
+            m_ShopAsk = ShopAsk::None;
+            return;
+        } else {
+            return;
+        }
+    }
     const ShopDef& shop = m_Data.GetShop();
     if (action == kMoveNorth) {
         --m_CampRow;
@@ -3362,64 +3837,25 @@ void AscensionApp::HandleCamp(std::string_view action)
     }
 
     const bool confirm = action == kConfirm;
-    std::string why;
     if (m_CampColumn == 1 && confirm) {
         if (m_CampRow < 0 || m_CampRow >= static_cast<i32>(shop.Stock.size()))
             return;
-        const std::string& stocked = shop.Stock[static_cast<usize>(m_CampRow)];
-        const ItemDef* goods = m_Data.FindItem(stocked);
-        if (goods == nullptr) {
-            Note("That item is gone.");
-            return;
-        }
-        if (!m_Inventory.Buy(stocked, why)) {
-            Note(why);
-            return;
-        }
-        Note("Bought " + goods->Name + " for " + std::to_string(goods->Value) + " gold.");
+        m_ShopAsk = ShopAsk::Buy;
         return;
     }
-
     if (m_CampColumn == 0 && m_CampRow >= 0 && m_CampRow < 4 &&
-        (confirm || action == kUnequip || (action == kContext && m_CampColumn == 0))) {
-        const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
-                                      GearSlot::Accessory};
-        const GearSlot slot = wornSlots[m_CampRow];
-        const std::string worn = m_Inventory.Equipped(slot);
-        if (!m_Inventory.Unequip(slot, why)) {
-            Note(why);
-            return;
-        }
-        const ItemDef* piece = m_Data.FindItem(worn);
-        Note("Put " + std::string(piece != nullptr ? piece->Name : worn) + " in the bag.");
-        if (!why.empty())
-            Note(why);
+        (confirm || action == kUnequip || action == kContext)) {
+        m_ShopAsk = ShopAsk::Unequip;
         return;
     }
-
     if (m_CampColumn != 0 || m_CampRow < 4)
         return;
-    const i32 bagIndex = m_CampRow - 4;
-    const ItemStack stack = m_Inventory.BagAt(bagIndex);
-    const ItemDef* held = stack.Empty() ? nullptr : m_Data.FindItem(stack.Id);
     if (action == kContext) {
-        if (!m_Inventory.Sell(bagIndex, why)) {
-            Note(why);
-            return;
-        }
-        const std::string sold = held != nullptr ? held->Name : stack.Id;
-        const i32 paid = held != nullptr ? SellPrice(shop, held->Value) : 0;
-        Note("Sold " + sold + " for " + std::to_string(paid) + " gold.");
+        m_ShopAsk = ShopAsk::Sell;
         return;
     }
-    if (!confirm)
-        return;
-    if (!m_Inventory.Equip(bagIndex, why)) {
-        Note(why);
-        return;
-    }
-    const std::string wornName = held != nullptr ? held->Name : stack.Id;
-    Note("Equipped " + wornName + ".");
+    if (confirm)
+        m_ShopAsk = ShopAsk::Equip;
 }
 
 namespace {
@@ -3438,32 +3874,6 @@ bool AssetIsLive(const Emerald::Assets& assets, Emerald::AssetId id)
 {
     const std::optional<Emerald::AssetInfo> info = assets.GetInfo(id);
     return info.has_value() && !info->Placeholder;
-}
-
-i32 TallestIcon(const Database& data)
-{
-    i32 tallest = 1;
-    for (const IconDef& icon : data.GetIcons()) {
-        if (icon.Height > tallest)
-            tallest = icon.Height;
-    }
-    return tallest;
-}
-
-// Largest integer scale whose icons fit in `room` pixels across `rows` rows. 1 when the native
-// icon is already taller than the slot.
-i32 IconScaleFor(f32 room, i32 rows, i32 pixels)
-{
-    i32 scale = 1;
-    if (rows < 1 || pixels < 1 || room <= 0.0f)
-        return scale;
-    for (i32 next = 2; next <= 4; ++next) {
-        const f32 need = static_cast<f32>(next) * static_cast<f32>(pixels) * static_cast<f32>(rows);
-        if (need > room + 0.5f)
-            break;
-        scale = next;
-    }
-    return scale;
 }
 
 void MeasureIconColumn(const Database& data, i32 scale, f32& column, f32& row)
@@ -3516,37 +3926,40 @@ void DrawItemIcon(Emerald::Renderer2D& renderer, const IconArt& art, std::string
     renderer.DrawSprite(accent, at, options);
 }
 
-// Icon, then `lead`, then the item name in the rarity color, then `tail` in `color`.
-// Returns the y of the next row.
-f32 DrawGearRow(Emerald::Renderer2D& renderer, const IconArt& art, const Emerald::Vec2& origin,
-                f32 width, const ItemDef* item, const Emerald::Vec4& nameColor,
-                std::string_view lead, std::string_view name, std::string_view tail,
-                const Emerald::Vec4& color)
+// A shop row at the text scale from the shared style. The cursor is a highlight band.
+// Facts stay off the row so the name keeps the full line height.
+f32 DrawShopRow(Emerald::Renderer2D& renderer, const IconArt& art, const Emerald::Vec2& origin,
+                f32 width, f32 rowH, f32 iconGap, i32 textScale, bool marked,
+                const Emerald::Vec4& highlight, const Emerald::Vec4& panel, const Emerald::Vec4& ink,
+                const ItemDef* item, const Emerald::Vec4& nameColor, std::string_view lead,
+                std::string_view name)
 {
-    const f32 textLine = Emerald::DebugTextLineHeight(1);
-    const f32 rowH = art.Row > textLine ? art.Row : textLine;
+    if (marked)
+        renderer.FillRect(origin, {width, rowH}, highlight);
+    const Emerald::Vec4 textColor = marked ? panel : ink;
+    const Emerald::Vec4 shownName = marked ? panel : nameColor;
     if (item != nullptr)
-        DrawItemIcon(renderer, art, item->Icon, origin, nameColor);
-    const i32 textOffset = static_cast<i32>(rowH - textLine) / 2;
-    const f32 textY = origin.y + static_cast<f32>(textOffset > 0 ? textOffset : 0);
+        DrawItemIcon(renderer, art, item->Icon, origin, shownName);
+    const f32 textLine = Emerald::DebugTextLineHeight(textScale);
+    const f32 textY = origin.y + (rowH > textLine ? (rowH - textLine) * 0.5f : 0.0f);
     f32 x = origin.x;
     if (art.Column > 0.0f)
-        x += art.Column + 4.0f;
-    const std::string leadText = Upper(lead);
-    const std::string nameText = Upper(name);
-    const std::string tailText = Upper(tail);
+        x += art.Column + iconGap;
+    const f32 remain = origin.x + width - x;
+    const std::string leadText = Upper(std::string(lead));
+    const f32 leadW = leadText.empty() ? 0.0f : Emerald::MeasureDebugText(leadText, textScale).x;
     if (!leadText.empty()) {
-        Emerald::DrawDebugText(renderer, {x, textY}, leadText, color, 1);
-        x += Emerald::MeasureDebugText(leadText, 1).x;
+        if (leadW <= remain)
+            Emerald::DrawDebugText(renderer, {x, textY}, leadText, textColor, textScale);
+        else
+            Emerald::DrawDebugText(renderer, {x, textY}, FitLine(leadText, textScale, remain),
+                                   textColor, textScale);
+        x += leadW < remain ? leadW : remain;
     }
-    if (!nameText.empty()) {
-        Emerald::DrawDebugText(renderer, {x, textY}, nameText, nameColor, 1);
-        x += Emerald::MeasureDebugText(nameText, 1).x;
-    }
-    if (!tailText.empty()) {
-        const f32 used = x - origin.x;
-        const f32 remain = width > used ? width - used : 0.0f;
-        Emerald::DrawDebugText(renderer, {x, textY}, tailText, color, 1, remain);
+    const f32 nameRoom = origin.x + width - x;
+    if (!name.empty() && nameRoom > 0.0f && leadW < remain) {
+        Emerald::DrawDebugText(renderer, {x, textY}, FitLine(name, textScale, nameRoom), shownName,
+                               textScale);
     }
     return origin.y + rowH;
 }
@@ -3568,147 +3981,259 @@ void AscensionApp::EnsureIcons()
 void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
     EnsureIcons();
-    const Emerald::Vec2 left{28.0f, 24.0f};
-    // The worn and bag lists are the tall column. The footer under it keeps a few notes and
-    // the help line. Icon scale is chosen so that column's rows fit at an integer size.
-    const f32 footer = 88.0f;
-    const f32 panelH = height - left.y - footer;
-    const Emerald::Vec2 leftSize{600.0f, panelH};
-    const Emerald::Vec2 right{648.0f, 24.0f};
-    const Emerald::Vec2 rightSize{width - 676.0f, panelH};
-    DrawPanel(renderer, left, leftSize);
-    DrawPanel(renderer, right, rightSize);
-    const f32 panelBottom = left.y + panelH;
-    const f32 bottomY = panelBottom + 8.0f;
-    const f32 bottomH = height - 16.0f - bottomY;
-    if (bottomH > 8.0f)
-        DrawPanel(renderer, {28.0f, bottomY}, {width - 56.0f, bottomH});
-
     ClampCamp();
+    const BattleUi& battleUi = m_Data.GetBattleUi();
+    const ShopUi& shopUi = m_Data.GetShopUi();
+    const UiStyle& style = battleUi.Style;
     const ShopDef& shop = m_Data.GetShop();
-    const bool bagSide = m_CampColumn == 0;
-    const f32 text2 = Emerald::DebugTextLineHeight(2);
-    f32 y = left.y + 16.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, Upper(shop.Name), kFrame, 2);
-    y += text2 + 2.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 24.0f, y},
-                           Upper(shop.Keeper + "    gold " + std::to_string(m_Inventory.Gold())),
-                           kInk, 2);
-    y += text2 + 2.0f;
-    y += 8.0f;
-    Emerald::DrawDebugText(renderer, {left.x + 24.0f, y}, "WORN AND BAG", bagSide ? kFrame : kDim,
-                           2);
-    y += text2 + 4.0f;
+    const Emerald::Vec4 ink = Paint(style.Ink);
+    const Emerald::Vec4 dim = Paint(style.Dim);
+    const Emerald::Vec4 frameColor = Paint(style.Frame);
+    const Emerald::Vec4 panel = Paint(style.Panel);
+    const Emerald::Vec4 highlight = Paint(style.Highlight);
+    const Emerald::Vec4 error = Paint(style.Error);
+    const f32 margin = static_cast<f32>(battleUi.Margin);
+    const f32 top = static_cast<f32>(battleUi.PanelTop);
+    const f32 split = static_cast<f32>(battleUi.SplitGap);
+    const f32 inset = static_cast<f32>(battleUi.BottomInset);
+    const f32 pad = static_cast<f32>(style.PanelPad);
+    const f32 lineGap = static_cast<f32>(style.LineGap);
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 groupGap = static_cast<f32>(style.GroupGap);
+    const f32 columnGap = static_cast<f32>(shopUi.ColumnGap);
+    const f32 titleH = Emerald::DebugTextLineHeight(style.TitleScale);
+    const f32 bodyH = Emerald::DebugTextLineHeight(style.BodyScale);
+    const f32 detailH = Emerald::DebugTextLineHeight(style.DetailScale);
+    const f32 hintTop = height - 36.0f;
+    f32 textFloor = hintTop - static_cast<f32>(style.HintClearance);
+    f32 promptY = 0.0f;
+    const bool asking = m_ShopAsk != ShopAsk::None;
+    if (asking) {
+        const PromptMetrics metrics = MeasurePrompts(m_Data.GetPrompts());
+        const f32 promptH = metrics.Icon > 0.0f ? metrics.Icon
+                                                : Emerald::DebugTextLineHeight(metrics.TextScale);
+        promptY = hintTop - static_cast<f32>(style.HintClearance) - promptH;
+        textFloor = promptY - static_cast<f32>(style.HintClearance);
+    }
+    const f32 detailBottom = height - inset;
+    if (textFloor > detailBottom - pad)
+        textFloor = detailBottom - pad;
 
-    const i32 bagSlots = m_Inventory.BagSlots();
-    const i32 leftRows = 4 + bagSlots;
-    const f32 sectionGap = 6.0f;
-    const f32 room = panelBottom - y - 4.0f - sectionGap;
-    const i32 scale = IconScaleFor(room, leftRows, TallestIcon(m_Data));
+    const f32 headerH = pad + titleH + pad;
+    const i32 iconScale = shopUi.IconScale < 1 ? 1 : shopUi.IconScale;
     IconArt art;
-    art.Scale = scale;
+    art.Scale = iconScale;
     if (m_Icons && AssetIsLive(GetAssets(), m_Icons.GetId()))
         art.Base = &m_Icons.Get();
     if (m_Accents && AssetIsLive(GetAssets(), m_Accents.GetId()))
         art.Accent = &m_Accents.Get();
     MeasureIconColumn(m_Data, art.Scale, art.Column, art.Row);
+    const f32 rowH = art.Row > bodyH ? art.Row : bodyH;
+    const f32 heading = detailH + lineGap;
+    i32 shownRows = shopUi.ListRows < 1 ? 1 : shopUi.ListRows;
+    const f32 listTop = top + headerH + split;
+    const f32 messageH = Emerald::DebugTextLineHeight(style.MessageScale);
+    // Name, price, and one fact stay at full size above the hint (and above a confirm
+    // row). A waiting message keeps its own line. Fewer rows, not smaller type, make room.
+    const f32 messageBlock = m_Shown.empty() ? 0.0f : lineGap + messageH;
+    const f32 need = pad + bodyH + lineGap + bodyH + lineGap + detailH + messageBlock;
+    f32 listH = pad * 2.0f + heading + static_cast<f32>(shownRows) * rowH +
+                static_cast<f32>(shownRows > 1 ? shownRows - 1 : 0) * rowGap;
+    while (shownRows > 3 && listTop + listH + split + need > textFloor) {
+        --shownRows;
+        listH = pad * 2.0f + heading + static_cast<f32>(shownRows) * rowH +
+                static_cast<f32>(shownRows > 1 ? shownRows - 1 : 0) * rowGap;
+    }
+    const f32 detailTop = listTop + listH + split;
+    const f32 span = width - margin * 2.0f;
+    const f32 colW = (span - columnGap) * 0.5f;
+    const Emerald::Vec4 fill = panel;
+    DrawPanel(renderer, {margin, top}, {span, headerH}, fill, frameColor);
+    DrawPanel(renderer, {margin, listTop}, {colW, listH}, fill, frameColor);
+    DrawPanel(renderer, {margin + colW + columnGap, listTop}, {colW, listH}, fill, frameColor);
+    const f32 detailPanelH = detailBottom - detailTop;
+    if (detailPanelH > 0.0f)
+        DrawPanel(renderer, {margin, detailTop}, {span, detailPanelH}, fill, frameColor);
 
-    const f32 iconX = left.x + 16.0f;
-    const f32 rowWidth = leftSize.x - 32.0f;
+    const std::string gold = "GOLD " + std::to_string(m_Inventory.Gold());
+    const f32 goldW = Emerald::MeasureDebugText(gold, style.BodyScale).x;
+    const f32 goldX = margin + span - pad - goldW;
+    const f32 goldY = top + pad + (titleH - bodyH) * 0.5f;
+    Emerald::DrawDebugText(renderer, {goldX, goldY}, gold, highlight, style.BodyScale);
+    const f32 nameRoom = goldX - groupGap - (margin + pad);
+    Emerald::DrawDebugText(renderer, {margin + pad, top + pad},
+                           FitLine(shop.Name, style.TitleScale, nameRoom), frameColor, style.TitleScale);
+
+    const bool bagSide = m_CampColumn == 0;
+    const f32 headY = listTop + pad;
+    Emerald::DrawDebugText(renderer, {margin + pad, headY},
+                           FitLine("WORN AND BAG", style.DetailScale, colW - pad * 2.0f),
+                           bagSide ? highlight : dim, style.DetailScale);
+    Emerald::DrawDebugText(renderer, {margin + colW + columnGap + pad, headY},
+                           FitLine("STOCK", style.DetailScale, colW - pad * 2.0f),
+                           bagSide ? dim : highlight, style.DetailScale);
+
+    const i32 bagSlots = m_Inventory.BagSlots();
+    const i32 leftCount = 4 + bagSlots;
+    const i32 rightCount = static_cast<i32>(shop.Stock.size());
+    const i32 leftFirst = WindowStart(leftCount, bagSide ? m_CampRow : 0, shownRows);
+    const i32 rightFirst = WindowStart(rightCount, bagSide ? 0 : m_CampRow, shownRows);
+    const f32 rowTop = headY + heading;
     const GearSlot wornSlots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
                                   GearSlot::Accessory};
     const char* wornLabels[] = {"WEAPON", "OFFHAND", "ARMOR", "ACCESSORY"};
-    for (i32 wornIndex = 0; wornIndex < 4; ++wornIndex) {
-        const bool marked = bagSide && m_CampRow == wornIndex;
-        const Emerald::Vec4 rowColor = marked ? kFrame : kInk;
-        std::string lead = marked ? "> " : "  ";
-        lead += wornLabels[wornIndex];
-        lead += "  ";
+    const f32 stride = rowH + rowGap;
+
+    const ItemDef* selected = nullptr;
+    bool wornItself = false;
+    bool locked = false;
+    bool fromStock = false;
+    std::string bareName;
+    for (i32 index = 0; index < shownRows; ++index) {
+        const i32 row = leftFirst + index;
+        if (row >= leftCount)
+            break;
+        const bool marked = bagSide && row == m_CampRow;
+        const Emerald::Vec4 rowInk = bagSide ? ink : dim;
         const ItemDef* piece = nullptr;
+        std::string lead;
         std::string name;
-        std::string tail;
-        if (wornSlots[wornIndex] == GearSlot::Offhand && m_Inventory.OffhandBlocked()) {
-            lead += "BOTH HANDS";
-        } else {
-            const std::string& worn = m_Inventory.Equipped(wornSlots[wornIndex]);
-            if (worn.empty()) {
-                lead += "EMPTY";
+        if (row < 4) {
+            lead = std::string(wornLabels[row]) + "  ";
+            if (wornSlots[row] == GearSlot::Offhand && m_Inventory.OffhandBlocked()) {
+                name = "BOTH HANDS";
             } else {
-                piece = m_Data.FindItem(worn);
-                if (piece == nullptr)
-                    lead += worn;
-                else {
-                    name = piece->Name;
-                    tail = GearLine(m_Data, *piece, false);
+                const std::string& worn = m_Inventory.Equipped(wornSlots[row]);
+                if (worn.empty()) {
+                    name = "EMPTY";
+                } else {
+                    piece = m_Data.FindItem(worn);
+                    name = piece != nullptr ? piece->Name : worn;
                 }
             }
-        }
-        const Emerald::Vec4 nameColor =
-            piece != nullptr ? RarityTint(m_Data, *piece, rowColor) : rowColor;
-        y = DrawGearRow(renderer, art, {iconX, y}, rowWidth, piece, nameColor, lead, name, tail,
-                        rowColor);
-    }
-    y += sectionGap;
-    for (i32 bagIndex = 0; bagIndex < bagSlots; ++bagIndex) {
-        const bool marked = bagSide && m_CampRow == bagIndex + 4;
-        const Emerald::Vec4 rowColor = marked ? kFrame : kDim;
-        const ItemStack& stack = m_Inventory.BagAt(bagIndex);
-        std::string lead = marked ? "> " : "  ";
-        const ItemDef* held = nullptr;
-        std::string name;
-        std::string tail;
-        if (stack.Empty()) {
-            lead += "EMPTY";
+            if (marked) {
+                selected = piece;
+                wornItself = piece != nullptr;
+                bareName = name;
+            }
         } else {
-            held = m_Data.FindItem(stack.Id);
-            if (held == nullptr) {
-                lead += stack.Id;
-                lead += " x" + std::to_string(stack.Count);
+            const ItemStack& stack = m_Inventory.BagAt(row - 4);
+            if (stack.Empty()) {
+                name = "EMPTY";
             } else {
-                name = held->Name;
-                tail = " x" + std::to_string(stack.Count);
-                tail += "   sell " + std::to_string(SellPrice(shop, held->Value));
-                tail += GearLine(m_Data, *held, true);
+                piece = m_Data.FindItem(stack.Id);
+                name = piece != nullptr ? piece->Name : stack.Id;
+                name += "  X" + std::to_string(stack.Count);
+            }
+            if (marked) {
+                selected = piece;
+                bareName = piece != nullptr ? piece->Name : name;
             }
         }
         const Emerald::Vec4 nameColor =
-            held != nullptr ? RarityTint(m_Data, *held, rowColor) : rowColor;
-        y = DrawGearRow(renderer, art, {iconX, y}, rowWidth, held, nameColor, lead, name, tail,
-                        rowColor);
+            piece != nullptr ? RarityTint(m_Data, *piece, rowInk) : rowInk;
+        DrawShopRow(renderer, art, {margin + pad, rowTop + static_cast<f32>(index) * stride},
+                    colW - pad * 2.0f, rowH, rowGap, style.BodyScale, marked, highlight, panel,
+                    rowInk, piece, nameColor, lead, name);
     }
-
-    y = right.y + 16.0f;
-    Emerald::DrawDebugText(renderer, {right.x + 24.0f, y}, "STOCK", bagSide ? kDim : kFrame, 2);
-    y += text2 + 8.0f;
-    const f32 stockWidth = rightSize.x - 32.0f;
-    for (i32 stockIndex = 0; stockIndex < static_cast<i32>(shop.Stock.size()); ++stockIndex) {
-        const bool marked = !bagSide && m_CampRow == stockIndex;
-        const Emerald::Vec4 rowColor = marked ? kFrame : kInk;
-        const ItemDef* goods = m_Data.FindItem(shop.Stock[static_cast<usize>(stockIndex)]);
-        const bool locked = goods != nullptr && !ItemIsOffered(*goods, m_Inventory.Defeated());
-        const Emerald::Vec4 ink = locked && !marked ? kDim : rowColor;
-        std::string lead = marked ? "> " : "  ";
-        std::string name;
-        std::string tail;
-        if (goods == nullptr) {
-            lead += shop.Stock[static_cast<usize>(stockIndex)];
-        } else {
-            name = goods->Name;
-            tail = "   " + std::to_string(goods->Value) + " gold";
-            tail += GearLine(m_Data, *goods, true);
-        }
-        const Emerald::Vec4 nameColor = goods != nullptr ? RarityTint(m_Data, *goods, ink) : ink;
-        y = DrawGearRow(renderer, art, {right.x + 16.0f, y}, stockWidth, goods, nameColor, lead,
-                        name, tail, ink);
-    }
-
-    const f32 helpY = height - 36.0f;
-    f32 logY = bottomY + 10.0f;
-    for (const std::string& note : m_Log) {
-        if (logY + Emerald::DebugTextLineHeight(1) > helpY)
+    for (i32 index = 0; index < shownRows; ++index) {
+        const i32 row = rightFirst + index;
+        if (row >= rightCount)
             break;
-        Emerald::DrawDebugText(renderer, {48.0f, logY}, Upper(note), kDim, 1, width - 96.0f);
-        logY += Emerald::DebugTextLineHeight(1) + 1.0f;
+        const bool marked = !bagSide && row == m_CampRow;
+        const ItemDef* goods = m_Data.FindItem(shop.Stock[static_cast<usize>(row)]);
+        const bool rowLocked = goods != nullptr && !ItemIsOffered(*goods, m_Inventory.Defeated());
+        const Emerald::Vec4 rowInk = !bagSide ? (rowLocked ? dim : ink) : dim;
+        std::string name = goods != nullptr ? goods->Name : shop.Stock[static_cast<usize>(row)];
+        if (rowLocked)
+            name += "  LOCKED";
+        if (marked) {
+            selected = goods;
+            locked = rowLocked;
+            fromStock = true;
+            bareName = goods != nullptr ? goods->Name : name;
+        }
+        const Emerald::Vec4 nameColor = goods != nullptr ? RarityTint(m_Data, *goods, rowInk) : rowInk;
+        DrawShopRow(renderer, art,
+                    {margin + colW + columnGap + pad, rowTop + static_cast<f32>(index) * stride},
+                    colW - pad * 2.0f, rowH, rowGap, style.BodyScale, marked, highlight, panel, rowInk,
+                    goods, nameColor, {}, name);
+    }
+
+    f32 y = detailTop + pad;
+    const f32 detailX = margin + pad;
+    const f32 detailW = span - pad * 2.0f;
+    f32 contentFloor = textFloor;
+    if (!m_Shown.empty() && contentFloor - lineGap - messageH > y)
+        contentFloor -= lineGap + messageH;
+
+    std::string headline = bareName.empty() ? "EMPTY" : bareName;
+    if (asking) {
+        const std::string thing = bareName.empty() ? std::string("THAT") : bareName;
+        if (m_ShopAsk == ShopAsk::Buy)
+            headline = "Buy " + thing + "?";
+        else if (m_ShopAsk == ShopAsk::Sell)
+            headline = "Sell " + thing + "?";
+        else if (m_ShopAsk == ShopAsk::Equip)
+            headline = "Equip " + thing + "?";
+        else
+            headline = "Take off " + thing + "?";
+    }
+    if (y + bodyH <= contentFloor) {
+        const Emerald::Vec4 nameColor =
+            !asking && selected != nullptr ? RarityTint(m_Data, *selected, ink) : ink;
+        Emerald::DrawDebugText(renderer, {detailX, y}, FitLine(headline, style.BodyScale, detailW),
+                               asking ? highlight : nameColor, style.BodyScale);
+        y += bodyH + lineGap;
+    }
+    bool showedPrice = false;
+    if (selected != nullptr && y + bodyH <= contentFloor) {
+        std::string price;
+        Emerald::Vec4 priceColor = ink;
+        if (locked) {
+            price = "Locked";
+            priceColor = error;
+        } else if (fromStock) {
+            price = std::to_string(selected->Value) + " gold";
+            if (selected->TwoHanded)
+                price += "  two handed";
+        } else if (!wornItself) {
+            price = "Sells for " + std::to_string(SellPrice(shop, selected->Value)) + " gold";
+        } else {
+            price = "Worn";
+        }
+        Emerald::DrawDebugText(renderer, {detailX, y}, FitLine(price, style.BodyScale, detailW),
+                               priceColor, style.BodyScale);
+        y += bodyH + lineGap;
+        showedPrice = true;
+    }
+    if (selected != nullptr && showedPrice) {
+        const std::string delta = GearDelta(m_Data, m_Inventory, *selected, wornItself);
+        if (!delta.empty() && y + detailH <= contentFloor) {
+            Emerald::DrawDebugText(renderer, {detailX, y}, FitLine(delta, style.DetailScale, detailW),
+                                   dim, style.DetailScale);
+            y += detailH + lineGap;
+        }
+        const std::string description = m_Data.Describe(*selected);
+        const f32 remain = contentFloor - y;
+        if (!description.empty() && remain >= detailH) {
+            const std::string shown = WrapClip(description, style.DetailScale, detailW, remain);
+            if (!shown.empty())
+                Emerald::DrawDebugText(renderer, {detailX, y}, shown, dim, style.DetailScale, detailW);
+        }
+    }
+    if (!m_Shown.empty()) {
+        const f32 messageY = textFloor - messageH;
+        if (messageY >= detailTop + pad)
+            Emerald::DrawDebugText(renderer, {detailX, messageY},
+                                   FitLine(m_Shown, style.MessageScale, detailW), ink, style.MessageScale);
+    }
+
+    if (asking) {
+        std::vector<HintChip> ask;
+        AddHint(ask, kConfirm, "CONFIRM");
+        AddHint(ask, kCancel, "CANCEL");
+        DrawHints(renderer, 48.0f, promptY, width - 48.0f, ask, false);
     }
     std::vector<HintChip> hints;
     AddHint(hints, kMoveNorth, "");
@@ -3730,6 +4255,7 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     AddHint(hints, kQuit, "QUIT");
     DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
+
 
 void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {

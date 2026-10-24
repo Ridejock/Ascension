@@ -9,6 +9,7 @@
 
 #include "Ascension/Data/Map.h"
 #include "Ascension/Data/Types.h"
+#include "Ascension/Data/Ui.h"
 #include "Ascension/Input/Controls.h"
 #include "Ascension/Input/Prompts.h"
 
@@ -40,7 +41,8 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
-// encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input, prompts), every
+// encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input, prompts,
+// battle_ui, shop_ui), every
 // data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
 // assets/icons, checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file
@@ -98,6 +100,10 @@ public:
     [[nodiscard]] const ControlRules& GetControls() const { return m_Controls; }
     // Glyph sheets and the scales hint text uses beside them.
     [[nodiscard]] const PromptRules& GetPrompts() const { return m_Prompts; }
+    // Battle type, color, and panels. The shop uses the style half of this for its type.
+    [[nodiscard]] const BattleUi& GetBattleUi() const { return m_BattleUi; }
+    // Shop list and detail. Type and color stay on GetBattleUi().
+    [[nodiscard]] const ShopUi& GetShopUi() const { return m_ShopUi; }
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
@@ -192,6 +198,8 @@ private:
     WalkRules m_Walk;
     ControlRules m_Controls;
     PromptRules m_Prompts;
+    BattleUi m_BattleUi;
+    ShopUi m_ShopUi;
     // Field names from effects.json "better". The merge reads these; it does not decide
     // higher or lower from the field's name.
     std::vector<std::string> m_HigherFields;

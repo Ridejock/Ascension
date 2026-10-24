@@ -246,6 +246,9 @@ public:
     [[nodiscard]] CombatantSide Actor();
     // Enemy slot of the combatant whose turn it is, or -1 when it is the player's turn.
     [[nodiscard]] i32 ActorIndex();
+    // The next `count` turns, the actor who goes now first. Empty when the fight is over.
+    // The round model supplies the order. A later model that has no order leaves this empty.
+    void FillTurnPreview(std::vector<TurnSeat>& out, i32 count);
     [[nodiscard]] BattleResult Result() const { return m_Result; }
     [[nodiscard]] i32 Level() const { return m_Level; }
     [[nodiscard]] const std::string& EncounterName() const { return m_EncounterName; }
