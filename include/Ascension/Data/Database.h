@@ -40,7 +40,7 @@ struct HeroGrant {
     std::vector<GrantOrigin> Origins;
 };
 
-// The JSON files in a data directory (stats, effects, skills, statuses, classes, enemies,
+// The JSON files in a data directory (stats, effects, schools, skills, statuses, classes, enemies,
 // encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input, prompts,
 // battle_ui, shop_ui), every
 // data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
@@ -75,6 +75,7 @@ public:
     [[nodiscard]] const std::string& GetLastError() const { return m_LastError; }
 
     [[nodiscard]] std::span<const StatDef> GetStats() const { return m_Stats; }
+    [[nodiscard]] std::span<const SchoolDef> GetSchools() const { return m_Schools; }
     [[nodiscard]] std::span<const SkillDef> GetSkills() const { return m_Skills; }
     [[nodiscard]] std::span<const StatusDef> GetStatuses() const { return m_Statuses; }
     [[nodiscard]] std::span<const ClassDef> GetClasses() const { return m_Classes; }
@@ -106,6 +107,7 @@ public:
     [[nodiscard]] const ShopUi& GetShopUi() const { return m_ShopUi; }
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
+    [[nodiscard]] const SchoolDef* FindSchool(std::string_view id) const;
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
     [[nodiscard]] const StatusDef* FindStatus(std::string_view id) const;
     [[nodiscard]] const ClassDef* FindClass(std::string_view id) const;
@@ -179,6 +181,7 @@ private:
     std::vector<FileWatch> m_Watches;
     bool m_ListingArmed = false;
     std::vector<StatDef> m_Stats;
+    std::vector<SchoolDef> m_Schools;
     std::vector<SkillDef> m_Skills;
     std::vector<StatusDef> m_Statuses;
     std::vector<ClassDef> m_Classes;

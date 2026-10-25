@@ -68,6 +68,217 @@
         { "level": 6, "options": ["riposte", { "skill": "shield_wall", "tune": { "ward": { "amount": 90 } } }] },
         { "level": 8, "options": ["rally", { "skill": "rage", "tune": { "focusCost": 2 } }] }
       ]
+    },
+    {
+      "id": "mage",
+      "name": "Mage",
+      "description": "A student of the arcane. At level {pathLevel}, a {name} becomes a {paths}.",
+      "starter": true,
+      "stats": {
+        "vitality": 14,
+        "strength": 3,
+        "defense": 3,
+        "agility": 7,
+        "focus": 14
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 0,
+        "defense": 1,
+        "agility": 1,
+        "focus": 2
+      },
+      "skills": ["ember", "hex", "aegis"],
+      "passives": []
+    },
+    {
+      "id": "elementalist",
+      "name": "Elementalist",
+      "description": "Feeds a flame until it answers. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "mage",
+      "evolveLevel": 5,
+      "bonus": {
+        "focus": 4,
+        "agility": 1
+      },
+      "growth": {
+        "vitality": 2,
+        "strength": 0,
+        "defense": 1,
+        "agility": 2,
+        "focus": 3
+      },
+      "skills": ["cinder"],
+      "passives": ["attunement"],
+      "picks": [
+        { "level": 6, "options": [{ "skill": "ember", "tune": { "hit": { "power": 12 } } }, { "skill": "hex", "tune": { "focusCost": 1 } }] },
+        { "level": 8, "options": [{ "skill": "cinder", "tune": { "hit": { "power": 18 } } }, { "skill": "aegis", "tune": { "ward": { "amount": 60 } } }] }
+      ]
+    },
+    {
+      "id": "warlock",
+      "name": "Warlock",
+      "description": "Pays for power with a pact. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "mage",
+      "evolveLevel": 5,
+      "bonus": {
+        "focus": 3,
+        "vitality": 3
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 1,
+        "defense": 1,
+        "agility": 1,
+        "focus": 2
+      },
+      "skills": ["wither"],
+      "passives": ["pact"],
+      "picks": [
+        { "level": 6, "options": [{ "skill": "wither", "tune": { "focusCost": 1 } }, { "skill": "hex", "tune": { "hit": { "power": 8 } } }] },
+        { "level": 8, "options": [{ "skill": "aegis", "tune": { "ward": { "amount": 55 } } }, { "skill": "ember", "tune": { "hit": { "power": 10 } } }] }
+      ]
+    },
+    {
+      "id": "rogue",
+      "name": "Rogue",
+      "description": "An assassin and a scout. At level {pathLevel}, a {name} becomes a {paths}.",
+      "starter": true,
+      "stats": {
+        "vitality": 14,
+        "strength": 6,
+        "defense": 4,
+        "agility": 11,
+        "focus": 6
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 1,
+        "defense": 1,
+        "agility": 2,
+        "focus": 1
+      },
+      "skills": ["stab", "slip", "mark", "ambush"],
+      "passives": []
+    },
+    {
+      "id": "assassin",
+      "name": "Assassin",
+      "description": "Opens a wound and stays on it. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "rogue",
+      "evolveLevel": 5,
+      "bonus": {
+        "agility": 3,
+        "strength": 2
+      },
+      "growth": {
+        "vitality": 2,
+        "strength": 2,
+        "defense": 0,
+        "agility": 3,
+        "focus": 1
+      },
+      "skills": ["rupture"],
+      "passives": ["from_shadow"],
+      "picks": [
+        { "level": 6, "options": [{ "skill": "ambush", "tune": { "focusCost": 2 } }, { "skill": "rupture", "tune": { "hit": { "power": 12 } } }] },
+        { "level": 8, "options": [{ "skill": "slip", "tune": { "ward": { "amount": 80 } } }, { "skill": "stab", "tune": { "hit": { "power": 10 } } }] }
+      ]
+    },
+    {
+      "id": "scout",
+      "name": "Scout",
+      "description": "Marks one foe and takes the shot. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "rogue",
+      "evolveLevel": 5,
+      "bonus": {
+        "agility": 2,
+        "focus": 2,
+        "vitality": 2
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 1,
+        "defense": 1,
+        "agility": 2,
+        "focus": 2
+      },
+      "skills": ["snipe"],
+      "passives": ["trail"],
+      "picks": [
+        { "level": 6, "options": [{ "skill": "mark", "tune": { "hit": { "power": 8 } } }, { "skill": "snipe", "tune": { "hit": { "power": 16 } } }] },
+        { "level": 8, "options": [{ "skill": "slip", "tune": { "ward": { "amount": 75 } } }, { "skill": "stab", "tune": { "hit": { "power": 9 } } }] }
+      ]
+    },
+    {
+      "id": "cleric",
+      "name": "Cleric",
+      "description": "Keeps the line standing, and can strike when it must. At level {pathLevel}, a {name} becomes a {paths}.",
+      "starter": true,
+      "stats": {
+        "vitality": 16,
+        "strength": 4,
+        "defense": 5,
+        "agility": 4,
+        "focus": 12
+      },
+      "growth": {
+        "vitality": 4,
+        "strength": 1,
+        "defense": 1,
+        "agility": 1,
+        "focus": 2
+      },
+      "skills": ["smite", "prayer", "sanctuary"],
+      "passives": []
+    },
+    {
+      "id": "priest",
+      "name": "Priest",
+      "description": "Mends between blows. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "cleric",
+      "evolveLevel": 5,
+      "bonus": {
+        "focus": 4,
+        "vitality": 2
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 0,
+        "defense": 1,
+        "agility": 1,
+        "focus": 3
+      },
+      "skills": ["hymn"],
+      "passives": ["litany"],
+      "picks": [
+        { "level": 6, "options": [{ "skill": "prayer", "tune": { "focusCost": 1 } }, { "skill": "hymn", "tune": { "mend": { "power": 18 } } }] },
+        { "level": 8, "options": [{ "skill": "sanctuary", "tune": { "ward": { "amount": 70 } } }, { "skill": "smite", "tune": { "hit": { "power": 12 } } }] }
+      ]
+    },
+    {
+      "id": "templar",
+      "name": "Templar",
+      "description": "Sets a guard and answers through it. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "cleric",
+      "evolveLevel": 5,
+      "bonus": {
+        "defense": 4,
+        "vitality": 3
+      },
+      "growth": {
+        "vitality": 4,
+        "strength": 1,
+        "defense": 2,
+        "agility": 1,
+        "focus": 1
+      },
+      "skills": ["censure"],
+      "passives": ["oath"],
+      "picks": [
+        { "level": 6, "options": [{ "skill": "sanctuary", "tune": { "ward": { "amount": 70 } } }, { "skill": "censure", "tune": { "hit": { "power": 14 } } }] },
+        { "level": 8, "options": ["rally", { "skill": "smite", "tune": { "hit": { "power": 11 } } }] }
+      ]
     }
   ]
 }

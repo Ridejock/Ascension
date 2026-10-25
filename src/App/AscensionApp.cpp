@@ -3216,6 +3216,11 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             } else {
                 row.Text += skill->Name + " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   " +
                             std::to_string(skill->FocusCost) + " FOCUS";
+                if (!skill->School.empty()) {
+                    const SchoolDef* school = m_Data.FindSchool(skill->School);
+                    row.Text += "  ";
+                    row.Text += school != nullptr ? school->Name : skill->School;
+                }
                 row.Enabled = !fightOver && playerTurn && player.Focus >= skill->FocusCost;
                 row.Detail = m_Data.DescribeSkill(*skill, m_Hero.RankOf(skill->Id));
             }

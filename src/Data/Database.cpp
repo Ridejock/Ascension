@@ -23,11 +23,11 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json",   "effects.json", "skills.json",     "statuses.json",
-    "classes.json", "enemies.json", "encounters.json", "items.json",
-    "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-    "tiles.json",   "walk.json",    "movers.json",     "input.json",
-    "prompts.json", "battle_ui.json", "shop_ui.json",
+    "stats.json",    "effects.json", "schools.json", "skills.json",
+    "statuses.json", "classes.json", "enemies.json", "encounters.json",
+    "items.json",    "shop.json",    "combat.json",  "progress.json",
+    "rarities.json", "tiles.json",   "walk.json",    "movers.json",
+    "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -332,6 +332,7 @@ bool ReadIdList(const Json& object, const char* key, std::vector<std::string>& o
 struct Parsed {
     std::vector<StatDef> Stats;
     std::vector<EffectDef> Effects;
+    std::vector<SchoolDef> Schools;
     std::vector<SkillDef> Skills;
     std::vector<StatusDef> Statuses;
     std::vector<ClassDef> Classes;
@@ -422,8 +423,8 @@ void MergeEffects(EffectDef& destination, const EffectDef& incoming,
     }
 }
 
-// Numeric fields take the better value. Everything else (name, target, stat, scaling, status,
-// windup) stays on `held`, which is the earliest source.
+// Numeric fields take the better value. Everything else (name, target, school, stat, scaling,
+// status, windup) stays on `held`, which is the earliest source.
 void MergeSkill(SkillDef& held, const SkillDef& incoming, const std::vector<std::string>& higher,
                 const std::vector<std::string>& lower)
 {
@@ -1281,6 +1282,47 @@ bool LoadEffects(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+// schools.json. An empty list is no schools. A skill that sets school must name one of
+// these. resource is the pool the spell spends. focus is the only pool, so the loader
+// rejects anything else instead of inventing a second bar.
+bool LoadSchools(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("schools");
+    if (list == root.end() || !list->is_array()) {
+        error = "'schools' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "school entries must be objects";
+            return false;
+        }
+        SchoolDef school;
+        if (!RequireString(entry, "id", school.Id, error))
+            return false;
+        const std::string where = "school " + Quote(school.Id);
+        auto fail = [&](std::string message) {
+            error = where + ": " + std::move(message);
+            return false;
+        };
+        if (!IsId(school.Id))
+            return fail("id must be letters, digits and _, starting with a letter");
+        if (FindId(parsed.Schools, school.Id) != nullptr)
+            return fail("there is another school with this id");
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "name", "resource"}, unknown))
+            return fail("unknown field " + Quote(unknown));
+        if (!RequireString(entry, "name", school.Name, error))
+            return fail(error);
+        if (!RequireString(entry, "resource", school.Resource, error))
+            return fail(error);
+        if (school.Resource != "focus")
+            return fail("'resource' must be \"focus\" (the only pool a spell can spend)");
+        parsed.Schools.push_back(std::move(school));
+    }
+    return true;
+}
+
 bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("skills");
@@ -1319,8 +1361,8 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (skill.Kind == SkillKind::Active) {
             if (!AllowKeys(entry,
-                           {"id", "name", "description", "kind", "target", "focusCost", "windup",
-                            "effects", "tune"},
+                           {"id", "name", "description", "kind", "target", "school", "focusCost",
+                            "windup", "effects", "tune"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string target;
@@ -1336,6 +1378,10 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 return fail("'target' must be \"self\", \"enemy\" or \"allEnemies\"");
             if (!RequireInt(entry, "focusCost", 0, 99, skill.FocusCost, error))
                 return fail(error);
+            if (!OptionalId(entry, "school", skill.School, error))
+                return fail(error);
+            if (!skill.School.empty() && FindId(parsed.Schools, skill.School) == nullptr)
+                return fail("school " + Quote(skill.School) + " does not exist");
             if (!OptionalInt(entry, "windup", 1, 9, skill.Windup, error))
                 return fail(error);
         } else if (!AllowKeys(entry, {"id", "name", "description", "kind", "effects", "tune"},
@@ -3295,6 +3341,7 @@ bool GrantsKnown(const Parsed& parsed, const std::vector<SkillGrant>& grants,
 
 struct TextScope {
     std::span<const StatDef> Stats;
+    std::span<const SchoolDef> Schools;
     std::span<const StatusDef> Statuses;
     std::span<const ClassDef> Classes;
     std::span<const EnemyDef> Enemies;
@@ -3399,6 +3446,14 @@ std::optional<std::string> SkillField(const TextScope& scope, std::string_view k
     const SkillDef& skill = *scope.Skill;
     if (key == "name")
         return skill.Name;
+    if (key == "school") {
+        if (skill.School.empty())
+            return std::nullopt;
+        const SchoolDef* school = FindId(scope.Schools, skill.School);
+        if (school == nullptr)
+            return std::nullopt;
+        return school->Name;
+    }
     if (key == "cost")
         return std::to_string(skill.FocusCost);
     if (key == "windup" && skill.Windup > 0)
@@ -3539,6 +3594,7 @@ TextScope CatalogOf(const Parsed& parsed)
 {
     TextScope scope;
     scope.Stats = parsed.Stats;
+    scope.Schools = parsed.Schools;
     scope.Statuses = parsed.Statuses;
     scope.Classes = parsed.Classes;
     scope.Enemies = parsed.Enemies;
@@ -3549,6 +3605,7 @@ TextScope CatalogOf(const Database& data)
 {
     TextScope scope;
     scope.Stats = data.GetStats();
+    scope.Schools = data.GetSchools();
     scope.Statuses = data.GetStatuses();
     scope.Classes = data.GetClasses();
     scope.Enemies = data.GetEnemies();
@@ -4538,17 +4595,17 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     parsed.Directory = files[0].parent_path();
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats,   LoadEffects, LoadSkills,     LoadStatuses,
-                              LoadClasses, LoadEnemies, LoadEncounters, LoadItems,
-                              LoadShop,    LoadCombat,  LoadProgress,   LoadRarities,
-                              LoadTiles,   LoadWalk,    LoadMovers,     LoadControls,
-                              LoadPrompts, LoadBattleUi, LoadShopUi};
+    const Loader loaders[] = {LoadStats,   LoadEffects, LoadSchools,   LoadSkills,
+                              LoadStatuses, LoadClasses, LoadEnemies,  LoadEncounters,
+                              LoadItems,    LoadShop,    LoadCombat,   LoadProgress,
+                              LoadRarities, LoadTiles,   LoadWalk,     LoadMovers,
+                              LoadControls, LoadPrompts, LoadBattleUi, LoadShopUi};
     static_assert(std::size(loaders) == std::size(kFileNames));
-    const char* names[] = {"stats.json",   "effects.json", "skills.json",     "statuses.json",
-                           "classes.json", "enemies.json", "encounters.json", "items.json",
-                           "shop.json",    "combat.json",  "progress.json",   "rarities.json",
-                           "tiles.json",   "walk.json",    "movers.json",     "input.json",
-                           "prompts.json", "battle_ui.json", "shop_ui.json"};
+    const char* names[] = {"stats.json",    "effects.json", "schools.json", "skills.json",
+                           "statuses.json", "classes.json", "enemies.json", "encounters.json",
+                           "items.json",    "shop.json",    "combat.json",  "progress.json",
+                           "rarities.json", "tiles.json",   "walk.json",    "movers.json",
+                           "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4564,11 +4621,11 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats",   "effects", "skills",     "statuses",
-                                    "classes", "enemies", "encounters", "items",
-                                    "shop",    "combat",  "progress",   "rarities",
-                                    "tiles",   "walk",    "movers",     "controls",
-                                    "prompts", "battleUi", "shopUi"};
+        const char* allowedTop[] = {"stats",   "effects", "schools",    "skills",
+                                    "statuses", "classes", "enemies",   "encounters",
+                                    "items",    "shop",    "combat",    "progress",
+                                    "rarities", "tiles",   "walk",      "movers",
+                                    "controls", "prompts", "battleUi",  "shopUi"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -4806,6 +4863,7 @@ bool Database::Load(DataError* error)
     }
 
     m_Stats = std::move(parsed.Stats);
+    m_Schools = std::move(parsed.Schools);
     m_Skills = std::move(parsed.Skills);
     m_Statuses = std::move(parsed.Statuses);
     m_Classes = std::move(parsed.Classes);
@@ -4874,6 +4932,11 @@ u32 Database::CheckForChanges(DataError* error)
 const StatDef* Database::FindStat(std::string_view id) const
 {
     return FindId(m_Stats, id);
+}
+
+const SchoolDef* Database::FindSchool(std::string_view id) const
+{
+    return FindId(m_Schools, id);
 }
 
 const SkillDef* Database::FindSkill(std::string_view id) const

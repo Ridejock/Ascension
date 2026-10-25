@@ -120,6 +120,11 @@ public:
     // Become that starter. The pooled class points are not replaced by its grant.
     bool ChooseStarter(std::string_view classId, std::string& error);
 
+    // Become that starter, keeping XP and skill uses. Kept picks belong to the previous
+    // class, so they are cleared. A custom build stays on ChooseStarter. Fails if the id
+    // is not a starter. A playtest uses this so --class can name any starter.
+    bool AdoptStarter(std::string_view classId, std::string& error);
+
     // Moves one pooled class point onto `statId` (vitality, strength, defense, agility, focus).
     bool SpendClassPoint(std::string_view statId, std::string& error);
 

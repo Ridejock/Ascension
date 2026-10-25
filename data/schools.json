@@ -1,0 +1,14 @@
+{
+  "schools": [
+    {
+      "id": "arcane",
+      "name": "Arcane",
+      "resource": "focus"
+    },
+    {
+      "id": "holy",
+      "name": "Holy",
+      "resource": "focus"
+    }
+  ]
+}

@@ -110,14 +110,26 @@ struct EffectDef {
     bool Consume = false;
 };
 
+// A spell school from schools.json. A skill that names one is a spell of that school.
+// Resource is the pool the skill's focus cost is paid from. The only pool is focus, so a
+// spell spends the same focus a physical skill spends. Adding a school is a row in that
+// file. The fight does not branch on the id.
+struct SchoolDef {
+    std::string Id;
+    std::string Name;
+    std::string Resource;
+};
+
 // A catalog skill, after its own tune and before any grant tune. Effects keep the ids a tune
-// targets. Name, target, focus cost, and windup stay here.
+// targets. Name, target, focus cost, and windup stay here. School is empty on a physical
+// skill. A spell sets it to a school id.
 struct SkillDef {
     std::string Id;
     std::string Name;
     std::string Description;
     SkillKind Kind = SkillKind::Active;
     SkillTarget Target = SkillTarget::Enemy;
+    std::string School;
     i32 FocusCost = 0;
     i32 Windup = 0; // active damage: telegraph turns before the hit. 0 hits now
     std::vector<EffectDef> Effects;

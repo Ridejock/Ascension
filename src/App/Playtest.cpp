@@ -274,6 +274,17 @@ bool ApplyClass(Hero& hero, const Database& data, std::string_view classId, std:
         error.clear();
         return true;
     }
+    // A starter is the class itself, not an evolution of whoever is current. An evolution
+    // of some other base adopts that base first, then takes the path if the level offers it.
+    if (picked->Starter)
+        return hero.AdoptStarter(picked->Id, error);
+    if (picked->IsEvolution()) {
+        const ClassDef* parent = data.FindClass(picked->EvolvesFrom);
+        if (parent != nullptr && parent->Starter && hero.ClassId() != parent->Id) {
+            if (!hero.AdoptStarter(parent->Id, error))
+                return false;
+        }
+    }
     if (!hero.ChoicePending()) {
         error = "class '" + std::string(classId) + "' is not offered";
         return false;

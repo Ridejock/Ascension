@@ -361,6 +361,52 @@ void TestBadIds()
     CheckHas(why, missingName.c_str(), "the missing folder is named");
 }
 
+void TestAdoptStarter()
+{
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for a class adopt");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    Hero hero;
+    Inventory bag;
+    PlaytestSetup setup;
+    std::string why;
+    const char* starters[] = {"mage", "rogue", "cleric"};
+    for (const char* id : starters) {
+        PlaytestOptions options;
+        options.Level = 1;
+        options.ClassId = id;
+        Check(ApplyPlaytest(hero, bag, data, options, setup, why), "a level-1 starter is adopted");
+        Check(why.empty() && hero.ClassId() == id && hero.Level() == 1, "the hero is that starter");
+    }
+
+    PlaytestOptions elementalist;
+    elementalist.Level = 6;
+    elementalist.ClassId = "elementalist";
+    Check(ApplyPlaytest(hero, bag, data, elementalist, setup, why),
+          "level 6 can take elementalist");
+    Check(hero.ClassId() == "elementalist" && !hero.ChoicePending(),
+          "elementalist closes the mage choice");
+
+    PlaytestOptions berserker;
+    berserker.Level = 6;
+    berserker.ClassId = "berserker";
+    Check(ApplyPlaytest(hero, bag, data, berserker, setup, why),
+          "a fighter evolution is still taken from fighter");
+    Check(hero.ClassId() == "berserker", "berserker is unchanged");
+
+    PlaytestOptions tooSoon;
+    tooSoon.Level = 1;
+    tooSoon.ClassId = "elementalist";
+    Check(!ApplyPlaytest(hero, bag, data, tooSoon, setup, why),
+          "an evolution before its level is not offered");
+    CheckHas(why, "not offered", "the refusal says the path is not offered");
+}
+
 void TestVarnSetupAndChoose()
 {
     Database data = Sample();
@@ -1264,6 +1310,7 @@ int main()
     TestParseExampleAndEngineFlags();
     TestArtPackFlag();
     TestBadIds();
+    TestAdoptStarter();
     TestVarnSetupAndChoose();
     TestWolfPackAndLoneEnemy();
     TestDataFolderHotReload();

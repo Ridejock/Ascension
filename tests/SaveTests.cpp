@@ -689,11 +689,9 @@ bool ClassWearsFang(const Database& data, std::string_view classId)
 
 void AddWanderer(const fs::path& classes)
 {
-    ReplaceInFile(classes,
-                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"rage\", \"tune\": "
-                  "{ \"focusCost\": 2 } }] }\n      ]\n    }\n  ]\n}",
-                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"rage\", \"tune\": "
-                  "{ \"focusCost\": 2 } }] }\n      ]\n    },\n"
+    // The shipped roster no longer ends on Guardian. Insert before the classes list closes.
+    ReplaceInFile(classes, "    }\n  ]\n}",
+                  "    },\n"
                   "    {\n"
                   "      \"id\": \"wanderer\",\n"
                   "      \"name\": \"Wanderer\",\n"
