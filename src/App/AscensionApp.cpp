@@ -1939,7 +1939,7 @@ void AscensionApp::DrawOpeningClasses(Emerald::Renderer2D& renderer, f32 width)
     const std::vector<std::string> starters = m_Hero.StarterIds();
     if (starters.empty())
         return;
-    const f32 scale = 2.0f;
+    const i32 scale = 2;
     const f32 lineH = Emerald::DebugTextLineHeight(scale);
     i32 rows = 1;
     const i32 shown = static_cast<i32>(starters.size()) < kMaxHotkeys
