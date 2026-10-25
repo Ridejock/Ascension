@@ -60,6 +60,7 @@ add_library(AscensionData STATIC
     src/Input/Controls.cpp
     src/Input/Prompts.cpp
     include/Ascension/Data/Database.h
+    include/Ascension/Data/Ui.h
     include/Ascension/Data/ArtPack.h
     include/Ascension/Data/Map.h
     include/Ascension/Data/Talk.h
