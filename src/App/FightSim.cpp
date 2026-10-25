@@ -23,6 +23,9 @@ struct BuildSpec {
     const char* ClassId;
     const char* Pick;
     const char* Practiced;
+    // The free attack practiced to rank. Null keeps Strike when the class has it, and
+    // otherwise the first damage skill. Fighter rows leave this null.
+    const char* Basic = nullptr;
 };
 
 const BuildSpec kBuilds[] = {
@@ -31,6 +34,21 @@ const BuildSpec kBuilds[] = {
     {"Berserker brace", "berserker", "brace", "cleave"},
     {"Guardian riposte", "guardian", "riposte", "shield_bash"},
     {"Guardian shield wall", "guardian", "shield_wall", "shield_bash"},
+    {"Mage", "mage", nullptr, nullptr, "spark"},
+    {"Wizard lance", "wizard", "lance", "arc", "spark"},
+    {"Wizard ward", "wizard", "ward", "arc", "spark"},
+    {"Warlock rot", "warlock", "rot", "curse", "spark"},
+    {"Warlock siphon", "warlock", "siphon", "curse", "spark"},
+    {"Rogue", "rogue", nullptr, nullptr, "stab"},
+    {"Assassin eviscerate", "assassin", "eviscerate", "execute", "stab"},
+    {"Assassin execute", "assassin", "execute", "execute", "stab"},
+    {"Scout pinpoint", "scout", "pinpoint", "sidestep", "stab"},
+    {"Scout feint", "scout", "feint", "sidestep", "stab"},
+    {"Cleric", "cleric", nullptr, nullptr, "smite"},
+    {"Priest miracle", "priest", "miracle", "prayer", "smite"},
+    {"Priest bless", "priest", "bless", "prayer", "smite"},
+    {"Templar riposte", "templar", "riposte", "judgment", "smite"},
+    {"Templar judgment", "templar", "judgment", "judgment", "smite"},
 };
 
 // The kit used to compare encounters. The Bear is met at level 7; this stays 6 so a
@@ -364,6 +382,161 @@ std::string_view OpeningBuff(const Battle& battle, const std::vector<HeroGrant>&
     return {};
 }
 
+bool HealsUser(const EffectDef& effect)
+{
+    if (effect.Trigger != EffectTrigger::OnUse || effect.Op != EffectOp::Heal)
+        return false;
+    return !effect.Aim.has_value() || *effect.Aim == EffectAim::Self;
+}
+
+bool HitsEveryFoe(const SkillDef& skill)
+{
+    if (skill.Target == SkillTarget::AllEnemies)
+        return true;
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Damage &&
+            effect.Aim.has_value() && *effect.Aim == EffectAim::AllEnemies)
+            return true;
+    }
+    return false;
+}
+
+bool StunsWindup(const SkillDef& skill)
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Op == EffectOp::StunIfWindingUp)
+            return true;
+    }
+    return false;
+}
+
+const CombatantState* FirstLiving(const Battle& battle)
+{
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Alive())
+            return &foe;
+    }
+    return nullptr;
+}
+
+i32 OpeningBlow(const Battle& battle, const Database& data, const Hero& hero,
+                const std::vector<HeroGrant>& grants, const SkillDef& skill)
+{
+    const CombatantState* foe = FirstLiving(battle);
+    if (foe == nullptr)
+        return 0;
+    const i32 dealt = StatusDealtPercent(battle.Player(), data.GetStatuses());
+    return BlowDamage(data, hero, grants, battle.Player(), skill, *foe, dealt, false);
+}
+
+// Highest ranked self heal this focus can pay. A heal with no aim still restores the user.
+std::string_view BestSelfHeal(const std::vector<HeroGrant>& grants, const Database& data,
+                              const Hero& hero, i32 focus)
+{
+    std::string_view best;
+    i32 bestPower = -1;
+    i32 bestCost = 99;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Kind != SkillKind::Active || skill.FocusCost > focus)
+            continue;
+        i32 power = 0;
+        bool heals = false;
+        for (const EffectDef& effect : skill.Effects) {
+            if (!HealsUser(effect))
+                continue;
+            heals = true;
+            power += RankedBase(hero, data, skill, effect.Power.value_or(0));
+        }
+        if (!heals)
+            continue;
+        if (power > bestPower || (power == bestPower && skill.FocusCost < bestCost)) {
+            best = skill.Id;
+            bestPower = power;
+            bestCost = skill.FocusCost;
+        }
+    }
+    return best;
+}
+
+std::string_view BestGuard(const std::vector<HeroGrant>& grants, i32 focus)
+{
+    std::string_view best;
+    i32 bestAmount = -1;
+    i32 bestCost = 99;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Kind != SkillKind::Active || skill.FocusCost > focus)
+            continue;
+        i32 amount = -1;
+        for (const EffectDef& effect : skill.Effects) {
+            if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Guard)
+                amount = effect.Amount.value_or(0);
+        }
+        if (amount < 0)
+            continue;
+        if (amount > bestAmount || (amount == bestAmount && skill.FocusCost < bestCost)) {
+            best = skill.Id;
+            bestAmount = amount;
+            bestCost = skill.FocusCost;
+        }
+    }
+    return best;
+}
+
+std::string_view BestStun(const Battle& battle, const std::vector<HeroGrant>& grants,
+                          const Database& data, const Hero& hero, i32 focus)
+{
+    std::string_view best;
+    i32 bestDamage = -1;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Kind != SkillKind::Active || skill.FocusCost > focus || !StunsWindup(skill))
+            continue;
+        const i32 damage = OpeningBlow(battle, data, hero, grants, skill);
+        if (damage > bestDamage) {
+            best = skill.Id;
+            bestDamage = damage;
+        }
+    }
+    return best;
+}
+
+// Single-target damage when any is affordable. A wide swing is the fallback, so a
+// cleave still waits while Strike can be paid.
+std::string_view BestAttack(const Battle& battle, const std::vector<HeroGrant>& grants,
+                            const Database& data, const Hero& hero, i32 focus)
+{
+    const CombatantState* foe = FirstLiving(battle);
+    if (foe == nullptr)
+        return {};
+    bool single = false;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Kind != SkillKind::Active || skill.FocusCost > focus || !SkillDealsDamage(skill))
+            continue;
+        if (!HitsEveryFoe(skill))
+            single = true;
+    }
+    std::string_view best;
+    i32 bestDamage = -1;
+    i32 bestCost = 99;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Kind != SkillKind::Active || skill.FocusCost > focus || !SkillDealsDamage(skill))
+            continue;
+        if (single && HitsEveryFoe(skill))
+            continue;
+        const i32 damage = OpeningBlow(battle, data, hero, grants, skill);
+        if (damage > bestDamage || (damage == bestDamage && skill.FocusCost < bestCost)) {
+            best = skill.Id;
+            bestDamage = damage;
+            bestCost = skill.FocusCost;
+        }
+    }
+    return best;
+}
+
 // Commit to the marked foe. A damage buff is spent only when it shortens the kill.
 // Heal or guard only when health is low, and otherwise spend the best single-target
 // attack that focus can pay. Cleave is left unused so the kill order is the thing
@@ -403,6 +576,28 @@ std::string_view ChoosePlayerSkill(const Battle& battle, const std::vector<HeroG
         return "shield_bash";
     if (CanCast(grants, "strike", focus))
         return "strike";
+
+    // Fighter returned above. Later starters spend the same rules on their own kit:
+    // interrupt a telegraph, mend or guard when the fight is not already over, then the
+    // strongest single-target blow. A wide swing is used only when nothing else hits.
+    if (winding) {
+        const std::string_view stun = BestStun(battle, grants, data, hero, focus);
+        if (!stun.empty())
+            return stun;
+    }
+    if (!finishing && percent <= 32) {
+        const std::string_view heal = BestSelfHeal(grants, data, hero, focus);
+        if (!heal.empty())
+            return heal;
+        if (player.GuardPercent <= 0) {
+            const std::string_view ward = BestGuard(grants, focus);
+            if (!ward.empty())
+                return ward;
+        }
+    }
+    const std::string_view attack = BestAttack(battle, grants, data, hero, focus);
+    if (!attack.empty())
+        return attack;
     return {};
 }
 
@@ -569,8 +764,28 @@ bool PrepareHero(const Database& data, const BuildSpec& build, bool fang,
     if (build.Pick != nullptr &&
         PickSkillOption(hero, build.Pick, error) == SkillOptionPick::Failed)
         return false;
-    for (i32 use = 0; use < kStrikeUses; ++use)
-        hero.NoteUse("strike");
+    if (build.Basic != nullptr) {
+        for (i32 use = 0; use < kStrikeUses; ++use)
+            hero.NoteUse(build.Basic);
+    } else {
+        bool hasStrike = false;
+        for (const std::string& id : hero.SkillIds()) {
+            if (id == "strike")
+                hasStrike = true;
+        }
+        if (hasStrike) {
+            for (i32 use = 0; use < kStrikeUses; ++use)
+                hero.NoteUse("strike");
+        } else if (const ClassDef* practiced = data.FindClass(hero.ClassId())) {
+            for (const SkillDef* skill : data.ActiveSkills(*practiced)) {
+                if (skill == nullptr || !SkillDealsDamage(*skill))
+                    continue;
+                for (i32 use = 0; use < kStrikeUses; ++use)
+                    hero.NoteUse(skill->Id);
+                break;
+            }
+        }
+    }
     if (build.Practiced != nullptr) {
         for (i32 use = 0; use < kPracticedUses; ++use)
             hero.NoteUse(build.Practiced);
@@ -634,7 +849,9 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
         ++row.PlayerTurns;
         std::string_view skill = ChoosePlayerSkill(battle, grants, data, hero, perTurn);
         i32 seat = ChooseSeat(battle, spec, state);
-        if (skill == "heavy_blow") {
+        const SkillDef* chosen = FindActive(grants, skill);
+        const bool interrupts = skill == "heavy_blow" || (chosen != nullptr && StunsWindup(*chosen));
+        if (interrupts) {
             const i32 winding = WindingSeat(battle);
             if (winding >= 0)
                 seat = winding;
@@ -647,8 +864,12 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
             used = battle.Wait();
         else
             used = battle.UseSkill(skill);
-        if (!used.Accepted)
-            used = battle.UseSkill("strike");
+        if (!used.Accepted) {
+            if (FindActive(grants, "strike") != nullptr)
+                used = battle.UseSkill("strike");
+            else
+                used = battle.Wait();
+        }
         if (used.Accepted && !used.SkillId.empty()) {
             hero.NoteUse(used.SkillId);
             PushRanks(battle, hero, data, {});
@@ -1133,6 +1354,11 @@ bool PlayOneRoute(const Database& data, const BuildSpec& build, const MapRoute& 
 }
 
 } // namespace
+
+i32 HarnessBuildCount()
+{
+    return static_cast<i32>(std::size(kBuilds));
+}
 
 std::vector<SimRateRow> SimulateEncounterRates(const Database& data, const SimRateQuery& query,
                                                std::string& error)

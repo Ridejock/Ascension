@@ -1888,6 +1888,87 @@ void AscensionApp::HandleOverland(std::string_view action)
     }
     if (m_ApplyingScript)
         m_ScriptDir = DirectionOfAction(action);
+    const int digit = SlotIndex(action);
+    if (digit >= 0)
+        AdoptOpeningClass(digit);
+}
+
+void AscensionApp::AdoptOpeningClass(int digit)
+{
+    if (m_Talk || m_Camp || !m_Hero.FreshStart())
+        return;
+    if (digit < 0 || digit >= kMaxHotkeys)
+        return;
+    const std::vector<std::string> starters = m_Hero.StarterIds();
+    if (digit >= static_cast<int>(starters.size()))
+        return;
+    if (starters[static_cast<usize>(digit)] == m_Hero.ClassId())
+        return;
+
+    const PoolCaps before =
+        m_Inventory.IsReady() ? HeroPools(m_Data, m_Hero, m_Inventory) : PoolCaps{};
+    const PoolPair shown = PoolsFrom(m_Vitals, before);
+    const bool full = shown.Hp >= before.MaxHp && shown.Focus >= before.MaxFocus;
+    std::string why;
+    if (!m_Hero.AdoptStarter(starters[static_cast<usize>(digit)], why)) {
+        Note(why);
+        return;
+    }
+    const PoolCaps after =
+        m_Inventory.IsReady() ? HeroPools(m_Data, m_Hero, m_Inventory) : PoolCaps{};
+    if (full || !m_Vitals.Known) {
+        FillVitals(m_Vitals, after);
+    } else {
+        if (m_Vitals.Hp > after.MaxHp)
+            m_Vitals.Hp = after.MaxHp;
+        if (m_Vitals.Hp < 0)
+            m_Vitals.Hp = 0;
+        if (m_Vitals.Focus > after.MaxFocus)
+            m_Vitals.Focus = after.MaxFocus;
+        if (m_Vitals.Focus < 0)
+            m_Vitals.Focus = 0;
+    }
+    const ClassDef* starter = m_Data.FindClass(m_Hero.ClassId());
+    Note(starter != nullptr ? starter->Name : m_Hero.ClassId());
+}
+
+void AscensionApp::DrawOpeningClasses(Emerald::Renderer2D& renderer, f32 width)
+{
+    if (m_Talk || m_Camp || !m_Hero.FreshStart())
+        return;
+    const std::vector<std::string> starters = m_Hero.StarterIds();
+    if (starters.empty())
+        return;
+    const f32 scale = 2.0f;
+    const f32 lineH = Emerald::DebugTextLineHeight(scale);
+    i32 rows = 1;
+    const i32 shown = static_cast<i32>(starters.size()) < kMaxHotkeys
+                          ? static_cast<i32>(starters.size())
+                          : kMaxHotkeys;
+    rows += shown;
+    const f32 pad = 16.0f;
+    const f32 panelW = 320.0f;
+    const f32 panelH = pad * 2.0f + lineH * static_cast<f32>(rows) + 4.0f * static_cast<f32>(rows - 1);
+    f32 x = width - panelW - 16.0f;
+    if (x < 16.0f)
+        x = 16.0f;
+    const Emerald::Vec2 origin{x, 16.0f};
+    DrawPanel(renderer, origin, {panelW, panelH});
+    f32 y = origin.y + pad;
+    Emerald::DrawDebugText(renderer, {origin.x + pad, y}, "CHOOSE A CLASS", kFrame, scale);
+    y += lineH + 4.0f;
+    for (i32 index = 0; index < shown; ++index) {
+        const std::string& id = starters[static_cast<usize>(index)];
+        const ClassDef* starter = m_Data.FindClass(id);
+        const bool current = id == m_Hero.ClassId();
+        std::string line = std::to_string(index + 1);
+        line += "  ";
+        line += starter != nullptr ? starter->Name : id;
+        if (current)
+            line = "> " + line;
+        Emerald::DrawDebugText(renderer, {origin.x + pad, y}, line, current ? kFrame : kInk, scale);
+        y += lineH + 4.0f;
+    }
 }
 
 void AscensionApp::ChooseHotkey(int digit)
@@ -3613,6 +3694,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         AddHint(debugHints, kDebugRespawnFoes, "FOES");
         AddHint(debugHints, kDebugNewGame, "NEW");
         DrawHints(renderer, 16.0f, promptY, width - 16.0f, debugHints, true);
+        DrawOpeningClasses(renderer, width);
         FinishFrame(renderer, width);
         return;
     }

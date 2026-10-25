@@ -2282,12 +2282,81 @@ void TestCarriedHp()
           "a win keeps the HP and focus that were left");
 }
 
+void TestStarterWolves()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for starter fights");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    const char* starters[] = {"mage", "rogue", "cleric"};
+    const char* basics[] = {"spark", "stab", "smite"};
+    for (i32 index = 0; index < 3; ++index) {
+        Battle battle(data, std::make_unique<AgilityRoundModel>());
+        std::string why;
+        const bool started = battle.Start(starters[index], 1, "wolf", why);
+        if (!started)
+            std::printf("    %s: %s\n", starters[index], why.c_str());
+        Check(started, "a starter can open a wolf fight");
+        if (!started)
+            continue;
+        i32 actions = 0;
+        while (battle.Result() == BattleResult::Ongoing && actions < 40) {
+            if (battle.Actor() != CombatantSide::Player) {
+                battle.EnemyAct();
+                continue;
+            }
+            ++actions;
+            const ActionResult used = battle.UseSkill(basics[index]);
+            if (!used.Accepted)
+                battle.Wait();
+        }
+        if (battle.Result() != BattleResult::Victory) {
+            std::printf("    %s left the wolf at %d hp after %d actions, hero hp %d\n",
+                        starters[index], battle.Enemy().Hp, actions, battle.Player().Hp);
+        }
+        Check(battle.Result() == BattleResult::Victory && battle.Player().Hp > 0,
+              "each starter beats a wolf with its basic attack");
+    }
+
+    const char* paths[] = {"wizard", "warlock", "assassin", "scout", "priest", "templar"};
+    const char* added[] = {"bind", "curse", "execute", "read", "prayer", "judgment"};
+    for (i32 index = 0; index < 6; ++index) {
+        Battle battle(data, std::make_unique<AgilityRoundModel>());
+        std::string why;
+        const bool started = battle.Start(paths[index], 5, "wolf", why);
+        if (!started)
+            std::printf("    %s: %s\n", paths[index], why.c_str());
+        Check(started, "an evolution can open a wolf fight");
+        if (!started)
+            continue;
+        i32 steps = 0;
+        while (battle.Result() == BattleResult::Ongoing &&
+               battle.Actor() != CombatantSide::Player && steps < 8) {
+            battle.EnemyAct();
+            ++steps;
+        }
+        Check(battle.Result() == BattleResult::Ongoing && battle.Actor() == CombatantSide::Player,
+              "the evolution reaches its turn");
+        if (battle.Actor() != CombatantSide::Player)
+            continue;
+        const ActionResult used = battle.UseSkill(added[index]);
+        if (!used.Accepted)
+            std::printf("    %s %s: %s\n", paths[index], added[index], used.Text.c_str());
+        Check(used.Accepted, "each evolution can use a skill it adds");
+    }
+}
+
 } // namespace
 
 int main()
 {
     TestFormula();
     TestWolfFight();
+    TestStarterWolves();
     TestSkillsAndGuard();
     TestDefeatAndSkip();
     TestHotReloadAndPassive();

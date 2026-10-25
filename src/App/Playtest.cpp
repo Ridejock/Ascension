@@ -274,6 +274,23 @@ bool ApplyClass(Hero& hero, const Database& data, std::string_view classId, std:
         error.clear();
         return true;
     }
+    if (!picked->IsEvolution()) {
+        if (!picked->Starter) {
+            error = "class '" + std::string(classId) + "' is not a starter";
+            return false;
+        }
+        if (!hero.AdoptStarter(classId, error))
+            return false;
+        error.clear();
+        return true;
+    }
+    const ClassDef* parent = data.FindClass(picked->EvolvesFrom);
+    const ClassDef* current = data.FindClass(hero.ClassId());
+    if (parent != nullptr && parent->Starter && current != nullptr && current->Starter &&
+        current->Id != parent->Id) {
+        if (!hero.AdoptStarter(parent->Id, error))
+            return false;
+    }
     if (!hero.ChoicePending()) {
         error = "class '" + std::string(classId) + "' is not offered";
         return false;

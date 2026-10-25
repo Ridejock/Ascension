@@ -3057,6 +3057,81 @@ void TestMaps()
     TestMapValidation();
 }
 
+void TestShippedStarters()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the starters");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    const std::vector<const ClassDef*> starters = data.Starters();
+    Check(starters.size() == 4 && starters[0] != nullptr && starters[0]->Id == "fighter" &&
+              starters[1] != nullptr && starters[1]->Id == "mage" && starters[2] != nullptr &&
+              starters[2]->Id == "rogue" && starters[3] != nullptr && starters[3]->Id == "cleric",
+          "starters are Fighter, Mage, Rogue, and Cleric, in file order");
+
+    const ClassDef* fighter = data.FindClass("fighter");
+    Check(fighter != nullptr && fighter->Skills.size() == 4 && fighter->Skills[0].Id == "strike" &&
+              fighter->Skills[1].Id == "brace" && fighter->Skills[2].Id == "heavy_blow" &&
+              fighter->Skills[3].Id == "second_wind" && fighter->Passives.empty(),
+          "fighter skills and passives are unchanged");
+
+    struct Expect {
+        const char* Id;
+        const char* Parent;
+        const char* Skill0;
+        const char* Skill1;
+        const char* Passive;
+        const char* Pick6;
+        const char* Pick8;
+    };
+    const Expect rows[] = {
+        {"wizard", "mage", "arc", "bind", "scholar", "lance", "nova"},
+        {"warlock", "mage", "curse", "siphon", "pact", "rot", "ruin"},
+        {"assassin", "rogue", "execute", "ambush", "cold_blood", "eviscerate", "vanish"},
+        {"scout", "rogue", "sidestep", "read", "trail_sense", "pinpoint", "fade"},
+        {"priest", "cleric", "prayer", "sanctuary", "grace", "miracle", "hymn"},
+        {"templar", "cleric", "judgment", "consecrate", "bulwark", "riposte", "rally"},
+    };
+    for (const Expect& row : rows) {
+        const ClassDef* klass = data.FindClass(row.Id);
+        const bool shape = klass != nullptr && klass->EvolvesFrom == row.Parent &&
+                           klass->EvolveLevel == 5 && !klass->Starter && klass->Skills.size() == 2 &&
+                           klass->Skills[0].Id == row.Skill0 && klass->Skills[1].Id == row.Skill1 &&
+                           klass->Passives.size() == 1 && klass->Passives[0].Id == row.Passive &&
+                           klass->Picks.size() == 2 && klass->Picks[0].Level == 6 &&
+                           klass->Picks[1].Level == 8 && klass->Picks[0].Options.size() == 2 &&
+                           klass->Picks[1].Options.size() == 2 &&
+                           klass->Picks[0].Options[0].Id == row.Pick6 &&
+                           klass->Picks[1].Options[0].Id == row.Pick8 &&
+                           data.FindSkill(row.Skill0) != nullptr &&
+                           data.FindSkill(row.Passive) != nullptr;
+        if (!shape)
+            std::printf("    %s did not match its evolution shape\n", row.Id);
+        Check(shape, "each evolution adds two skills, one passive, and level 6 and 8 picks");
+    }
+
+    const char* bases[] = {"mage", "rogue", "cleric"};
+    const char* basic[] = {"spark", "stab", "smite"};
+    const char* passive[] = {"attunement", "light_step", "liturgy"};
+    for (i32 index = 0; index < 3; ++index) {
+        const ClassDef* klass = data.FindClass(bases[index]);
+        const std::vector<const ClassDef*> evolutions = data.EvolutionsOf(bases[index]);
+        const bool ok = klass != nullptr && klass->Starter && !klass->IsEvolution() &&
+                        klass->Skills.size() == 4 && klass->Skills[0].Id == basic[index] &&
+                        klass->Passives.size() == 1 && klass->Passives[0].Id == passive[index] &&
+                        evolutions.size() == 2 && evolutions[0]->EvolveLevel == 5 &&
+                        evolutions[1]->EvolveLevel == 5;
+        Check(ok, "each new starter has four skills, one passive, and two level-5 paths");
+    }
+    const StatusDef* veil = data.FindStatus("veil");
+    Check(veil != nullptr && veil->DamageDealtPercent == 25 && veil->Turns == 3,
+          "veil raises damage dealt for a short while");
+}
+
 int main()
 {
     TestSample();
@@ -3073,6 +3148,7 @@ int main()
     TestSkillPicks();
     TestDescriptionsResolve();
     TestShippedDescriptions();
+    TestShippedStarters();
     TestFontGlyphs();
     TestIcons();
     TestMythicUnique();

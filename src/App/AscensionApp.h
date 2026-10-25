@@ -140,6 +140,9 @@ private:
     void DebugNewGame();
     void ApplyFreshRun(const FreshStart& fresh);
     void HandleOverland(std::string_view action);
+    // Keys 1-4 on a new run, before any XP. The current starter is a no-op.
+    void AdoptOpeningClass(int digit);
+    void DrawOpeningClasses(Emerald::Renderer2D& renderer, f32 width);
     void HandleChoice(std::string_view action);
     void HandleBattle(std::string_view action);
     // Confirm on a skill arms a target. Confirm again uses it. Cancel leaves that step.

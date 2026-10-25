@@ -329,6 +329,39 @@ bool Hero::ChooseStarter(std::string_view classId, std::string& error)
     return true;
 }
 
+bool Hero::FreshStart() const
+{
+    return m_Data != nullptr && !m_Custom && !m_ChoosingStarter && m_Xp == 0 && Level() == 1;
+}
+
+bool Hero::AdoptStarter(std::string_view classId, std::string& error)
+{
+    if (!IsReady() || m_Custom || m_ChoosingStarter) {
+        error = "a class is picked after a build reset";
+        return false;
+    }
+    const std::string picked(classId);
+    bool offered = false;
+    for (const std::string& id : StarterIds()) {
+        if (id == picked)
+            offered = true;
+    }
+    if (!offered) {
+        error = "class '" + picked + "' is not a starter";
+        return false;
+    }
+    if (m_ClassId == picked) {
+        error.clear();
+        return true;
+    }
+    m_ClassId = picked;
+    m_Practiced.clear();
+    m_Uses.clear();
+    m_Picked.clear();
+    error.clear();
+    return true;
+}
+
 bool Hero::SpendClassPoint(std::string_view statId, std::string& error)
 {
     if (m_ChoosingStarter) {
