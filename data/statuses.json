@@ -57,6 +57,22 @@
       "resists": ["stunned", "exposed"],
       "turns": 3,
       "maxStacks": 1
+    },
+    {
+      "id": "hexed",
+      "name": "Hexed",
+      "description": "Takes {taken} percent more damage for {turns} turns.",
+      "damageTakenPercent": 20,
+      "turns": 3,
+      "maxStacks": 1
+    },
+    {
+      "id": "marked",
+      "name": "Marked",
+      "description": "Takes {taken} percent more damage for {turns} turns.",
+      "damageTakenPercent": 25,
+      "turns": 3,
+      "maxStacks": 1
     }
   ]
 }

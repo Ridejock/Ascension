@@ -2282,12 +2282,58 @@ void TestCarriedHp()
           "a win keeps the HP and focus that were left");
 }
 
+void TestSpells()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    Check(data.Load(), "shipped data loads for a cast");
+    std::string error;
+    auto playerFirst = [] {
+        return std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player});
+    };
+
+    Battle mage(data, playerFirst());
+    Check(mage.Start("mage", 1, "wolf", error), "a mage fight starts");
+    Check(mage.Player().MaxHp == 56 && mage.Player().MaxFocus == 18 && mage.Player().Focus == 18,
+          "a level-1 mage has 56 health and 18 focus");
+    const ActionResult ember = mage.UseSkill("ember");
+    Check(ember.Accepted && ember.Damage == 21 && mage.Player().Focus == 18 &&
+              mage.Enemy().Hp == 19,
+          "ember spends no focus and hits for 21");
+    const ActionResult hex = mage.UseSkill("hex");
+    Check(hex.Accepted && hex.Damage == 17 && mage.Player().Focus == 16 &&
+              Holds(mage.Enemy(), "hexed"),
+          "hex spends 2 focus and leaves Hexed");
+
+    Battle cleric(data, playerFirst());
+    Check(cleric.Start("cleric", 1, "wolf", error), "a cleric fight starts");
+    cleric.SetPlayerHp(20);
+    const ActionResult prayer = cleric.UseSkill("prayer");
+    Check(prayer.Accepted && prayer.Healing == 22 && cleric.Player().Hp == 42 &&
+              cleric.Player().Focus == 14,
+          "prayer spends 2 focus and mends 22");
+
+    Battle plain(data, playerFirst());
+    Check(plain.Start("rogue", 1, "wolf", error), "a rogue fight starts");
+    const ActionResult ambush = plain.UseSkill("ambush");
+    Check(ambush.Accepted && ambush.Damage == 18, "ambush without a mark is the first cut");
+
+    Battle marked(data, playerFirst());
+    Check(marked.Start("rogue", 1, "wolf", error), "a second rogue fight starts");
+    const ActionResult mark = marked.UseSkill("mark");
+    Check(mark.Accepted && mark.Damage == 14 && marked.Player().Focus == 8 &&
+              Holds(marked.Enemy(), "marked"),
+          "mark spends 2 focus and leaves Marked");
+    const ActionResult follow = marked.UseSkill("ambush");
+    Check(follow.Accepted && follow.Damage > ambush.Damage, "ambush hits harder on a marked foe");
+}
+
 } // namespace
 
 int main()
 {
     TestFormula();
     TestWolfFight();
+    TestSpells();
     TestSkillsAndGuard();
     TestDefeatAndSkip();
     TestHotReloadAndPassive();

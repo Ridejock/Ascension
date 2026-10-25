@@ -446,6 +446,255 @@
         { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
         { "id": "mend", "trigger": "onUse", "op": "heal", "power": 12 }
       ]
+    },
+    {
+      "id": "ember",
+      "name": "Ember",
+      "description": "A {school} flame. It scales with {hit.scaling}.",
+      "kind": "active",
+      "target": "enemy",
+      "school": "arcane",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "hex",
+      "name": "Hex",
+      "description": "A {school} curse. The hit leaves {blight.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "school": "arcane",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "focus" },
+        { "id": "blight", "trigger": "onHit", "op": "applyStatus", "status": "hexed" }
+      ]
+    },
+    {
+      "id": "aegis",
+      "name": "Aegis",
+      "description": "A {school} ward. The next hit loses {ward.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "school": "arcane",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 40 }
+      ]
+    },
+    {
+      "id": "cinder",
+      "name": "Cinder",
+      "description": "A {school} burst. It scales with {hit.scaling}.",
+      "kind": "active",
+      "target": "enemy",
+      "school": "arcane",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 14, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "attunement",
+      "name": "Attunement",
+      "description": "{mind.stat} +{mind.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "mind", "trigger": "always", "op": "stat", "stat": "focus", "amount": 2 }
+      ]
+    },
+    {
+      "id": "wither",
+      "name": "Wither",
+      "description": "A {school} rot. The hit leaves {rot.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "school": "arcane",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "focus" },
+        { "id": "rot", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "pact",
+      "name": "Pact",
+      "description": "Gain {well.amount} focus at the start of each turn.",
+      "kind": "passive",
+      "effects": [
+        { "id": "well", "trigger": "onTurnStart", "op": "grantFocus", "amount": 1 }
+      ]
+    },
+    {
+      "id": "stab",
+      "name": "Stab",
+      "description": "A quick blade. It scales with {hit.scaling}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "agility" }
+      ]
+    },
+    {
+      "id": "slip",
+      "name": "Slip",
+      "description": "Step out of the next blow. It loses {ward.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 60 }
+      ]
+    },
+    {
+      "id": "mark",
+      "name": "Mark",
+      "description": "Spot a weak line. The foe is {tag.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "agility" },
+        { "id": "tag", "trigger": "onHit", "op": "applyStatus", "status": "marked" }
+      ]
+    },
+    {
+      "id": "ambush",
+      "name": "Ambush",
+      "description": "A low strike. A {cut.ifTargetHas} foe takes a deeper cut, and the hit leaves {bleed.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "agility" },
+        { "id": "cut", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "agility", "ifTargetHas": "marked" },
+        { "id": "bleed", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "rupture",
+      "name": "Rupture",
+      "description": "Tear along a {cut.ifTargetHas} wound. The hit leaves {bleed.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "agility" },
+        { "id": "cut", "trigger": "onUse", "op": "damage", "power": 14, "scaling": "agility", "ifTargetHas": "bleed" },
+        { "id": "bleed", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "from_shadow",
+      "name": "From Shadow",
+      "description": "{edge.stat} +{edge.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "edge", "trigger": "always", "op": "stat", "stat": "agility", "amount": 2 }
+      ]
+    },
+    {
+      "id": "snipe",
+      "name": "Snipe",
+      "description": "One careful shot. A {cut.ifTargetHas} foe takes a second hit.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "agility" },
+        { "id": "cut", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "agility", "ifTargetHas": "marked" }
+      ]
+    },
+    {
+      "id": "trail",
+      "name": "Trail",
+      "description": "Gain {well.amount} focus at the start of each turn.",
+      "kind": "passive",
+      "effects": [
+        { "id": "well", "trigger": "onTurnStart", "op": "grantFocus", "amount": 1 }
+      ]
+    },
+    {
+      "id": "smite",
+      "name": "Smite",
+      "description": "A {school} strike. It scales with {hit.scaling}.",
+      "kind": "active",
+      "target": "enemy",
+      "school": "holy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "prayer",
+      "name": "Prayer",
+      "description": "A {school} prayer. Higher {mend.scaling} mends more.",
+      "kind": "active",
+      "target": "self",
+      "school": "holy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 10, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "sanctuary",
+      "name": "Sanctuary",
+      "description": "A {school} guard. The next hit loses {ward.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "school": "holy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 }
+      ]
+    },
+    {
+      "id": "hymn",
+      "name": "Hymn",
+      "description": "A longer {school} prayer. It scales with {mend.scaling}.",
+      "kind": "active",
+      "target": "self",
+      "school": "holy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 14, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "litany",
+      "name": "Litany",
+      "description": "Mend {mend.power} health at the start of each turn.",
+      "kind": "passive",
+      "effects": [
+        { "id": "mend", "trigger": "onTurnStart", "op": "heal", "power": 4 }
+      ]
+    },
+    {
+      "id": "censure",
+      "name": "Censure",
+      "description": "A {school} blow that scales with {hit.scaling}.",
+      "kind": "active",
+      "target": "enemy",
+      "school": "holy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "defense" }
+      ]
+    },
+    {
+      "id": "oath",
+      "name": "Oath",
+      "description": "{def.stat} +{def.amount}. A guard that stops damage also returns {focus.amount} focus.",
+      "kind": "passive",
+      "effects": [
+        { "id": "def", "trigger": "always", "op": "stat", "stat": "defense", "amount": 3 },
+        { "id": "focus", "trigger": "onBlock", "op": "grantFocus", "amount": 1 }
+      ]
     }
   ]
 }

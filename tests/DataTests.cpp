@@ -1616,6 +1616,150 @@ void TestSkillPicks()
     }
 }
 
+void TestSchools()
+{
+    {
+        TempCopy copy;
+        fs::remove(copy.Path / "schools.json");
+        TestRejected(copy.Path, "schools.json", "could not be read",
+                     "a missing schools file is an error");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "schools.json",
+                  "{ \"schools\": [ { \"id\": \"arcane\", \"name\": \"Arcane\", \"resource\": "
+                  "\"mana\" } ] }\n");
+        TestRejected(copy.Path, "schools.json", "focus",
+                     "a school resource other than focus fails");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(
+            copy.Path / "skills.json", "\"target\": \"enemy\",\n      \"focusCost\": 0,",
+            "\"target\": \"enemy\",\n      \"school\": \"arcane\",\n      \"focusCost\": 0,");
+        TestRejected(copy.Path, "skills.json", "does not exist",
+                     "a skill school has to name a school");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "schools.json",
+                  "{ \"schools\": [ { \"id\": \"arcane\", \"name\": \"Arcane\", \"resource\": "
+                  "\"focus\" } ] }\n");
+        ReplaceInFile(copy.Path / "skills.json",
+                      "\"description\": \"A straightforward blow.\",\n      \"kind\": \"active\",\n"
+                      "      \"target\": \"enemy\",\n      \"focusCost\": 0,",
+                      "\"description\": \"A {school} blow.\",\n      \"kind\": \"active\",\n"
+                      "      \"target\": \"enemy\",\n      \"school\": \"arcane\",\n"
+                      "      \"focusCost\": 0,");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a skill can name a school");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        const SchoolDef* arcane = data.FindSchool("arcane");
+        const SkillDef* strike = data.FindSkill("strike");
+        Check(arcane != nullptr && arcane->Name == "Arcane" && arcane->Resource == "focus",
+              "the school row keeps its name and resource");
+        Check(strike != nullptr && strike->School == "arcane" &&
+                  data.DescribeSkill(*strike).find("Arcane") != std::string::npos,
+              "strike's school fills {school}");
+        Check(data.FindSkill("brace") != nullptr && data.FindSkill("brace")->School.empty(),
+              "a skill that omits school stays physical");
+    }
+}
+
+void TestShippedStarters()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the starters");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    const auto starters = data.Starters();
+    Check(starters.size() == 4 && starters[0]->Id == "fighter" && starters[1]->Id == "mage" &&
+              starters[2]->Id == "rogue" && starters[3]->Id == "cleric",
+          "starters are fighter, mage, rogue, and cleric, in that order");
+    const SchoolDef* arcane = data.FindSchool("arcane");
+    const SchoolDef* holy = data.FindSchool("holy");
+    Check(data.GetSchools().size() == 2 && arcane != nullptr && arcane->Resource == "focus" &&
+              holy != nullptr && holy->Name == "Holy" && holy->Resource == "focus",
+          "arcane and holy both spend focus");
+    const SkillDef* ember = data.FindSkill("ember");
+    const SkillDef* strike = data.FindSkill("strike");
+    const SkillDef* prayer = data.FindSkill("prayer");
+    const SkillDef* stab = data.FindSkill("stab");
+    Check(ember != nullptr && ember->School == "arcane" && prayer != nullptr &&
+              prayer->School == "holy" && stab != nullptr && stab->School.empty() &&
+              strike != nullptr && strike->School.empty(),
+          "ember and prayer are spells, and strike and stab are not");
+    if (ember == nullptr)
+        return;
+    Check(data.DescribeSkill(*ember).find("Arcane") != std::string::npos,
+          "ember's description names its school");
+
+    const ClassDef* mage = data.FindClass("mage");
+    const ClassDef* elementalist = data.FindClass("elementalist");
+    const ClassDef* warlock = data.FindClass("warlock");
+    const ClassDef* rogue = data.FindClass("rogue");
+    const ClassDef* assassin = data.FindClass("assassin");
+    const ClassDef* scout = data.FindClass("scout");
+    const ClassDef* cleric = data.FindClass("cleric");
+    const ClassDef* priest = data.FindClass("priest");
+    const ClassDef* templar = data.FindClass("templar");
+    Check(mage != nullptr && elementalist != nullptr && warlock != nullptr && rogue != nullptr &&
+              assassin != nullptr && scout != nullptr && cleric != nullptr && priest != nullptr &&
+              templar != nullptr,
+          "the three new trees are in the class list");
+    if (mage == nullptr || elementalist == nullptr || warlock == nullptr || rogue == nullptr ||
+        assassin == nullptr || scout == nullptr || cleric == nullptr || priest == nullptr ||
+        templar == nullptr)
+        return;
+    Check(mage->Stats.Vitality + mage->Stats.Strength + mage->Stats.Defense + mage->Stats.Agility +
+                      mage->Stats.Focus ==
+                  41 &&
+              rogue->Stats.Vitality + rogue->Stats.Strength + rogue->Stats.Defense +
+                      rogue->Stats.Agility + rogue->Stats.Focus ==
+                  41 &&
+              cleric->Stats.Vitality + cleric->Stats.Strength + cleric->Stats.Defense +
+                      cleric->Stats.Agility + cleric->Stats.Focus ==
+                  41,
+          "each new base spends the same 41 attribute points as the fighter");
+    const auto magePaths = data.EvolutionsOf("mage");
+    const auto roguePaths = data.EvolutionsOf("rogue");
+    const auto clericPaths = data.EvolutionsOf("cleric");
+    Check(magePaths.size() == 2 && magePaths[0]->Id == "elementalist" &&
+              magePaths[0]->EvolveLevel == 5 && magePaths[1]->Id == "warlock" &&
+              magePaths[1]->EvolveLevel == 5 && roguePaths.size() == 2 &&
+              roguePaths[0]->Id == "assassin" && roguePaths[1]->Id == "scout" &&
+              clericPaths.size() == 2 && clericPaths[0]->Id == "priest" &&
+              clericPaths[1]->Id == "templar",
+          "each new starter evolves at level 5 into the pair named in the file");
+    Check(elementalist->Skills.size() == 1 && elementalist->Passives.size() == 1 &&
+              warlock->Skills.size() == 1 && warlock->Passives.size() == 1 &&
+              assassin->Skills.size() == 1 && scout->Skills.size() == 1 &&
+              priest->Skills.size() == 1 && templar->Skills.size() == 1,
+          "each evolution adds one skill and one passive");
+    const auto fighterPaths = data.EvolutionsOf("fighter");
+    Check(fighterPaths.size() == 2 && fighterPaths[0]->Id == "berserker" &&
+              fighterPaths[1]->Id == "guardian",
+          "fighter still evolves into berserker, then guardian");
+    const std::string fighterText = data.Describe(*data.FindClass("fighter"));
+    const std::string mageText = data.Describe(*mage);
+    const std::string rogueText = data.Describe(*rogue);
+    const std::string clericText = data.Describe(*cleric);
+    Check(fighterText.find("a Berserker or a Guardian") != std::string::npos,
+          "fighter still reads a Berserker or a Guardian");
+    Check(mageText.find("an Elementalist or a Warlock") != std::string::npos,
+          "mage reads an Elementalist or a Warlock");
+    Check(rogueText.find("an Assassin or a Scout") != std::string::npos,
+          "rogue reads an Assassin or a Scout");
+    Check(clericText.find("a Priest or a Templar") != std::string::npos,
+          "cleric reads a Priest or a Templar");
+}
+
 void TestShippedDescriptions()
 {
     Database data(ASCENSION_SHIPPED_DATA_DIR);
@@ -3072,6 +3216,8 @@ int main()
     TestItemGrants();
     TestSkillPicks();
     TestDescriptionsResolve();
+    TestSchools();
+    TestShippedStarters();
     TestShippedDescriptions();
     TestFontGlyphs();
     TestIcons();

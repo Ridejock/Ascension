@@ -236,9 +236,9 @@ i32 AppliedTakenPercent(const Database& data, const SkillDef& skill, const Comba
 // has applied the status it asks for, which is the second rend or the second bash.
 i32 BlowDamage(const Database& data, const Hero& hero, const std::vector<HeroGrant>& grants,
                const CombatantState& player, const SkillDef& attack, const CombatantState& foe,
-               i32 dealtPercent, bool steady)
+               i32 dealtPercent, bool steady, i32 extraTaken = 0, std::string_view asIf = {})
 {
-    i32 taken = StatusTakenPercent(foe, data.GetStatuses());
+    i32 taken = StatusTakenPercent(foe, data.GetStatuses()) + extraTaken;
     if (steady)
         taken += AppliedTakenPercent(data, attack, foe);
     const CombatRules& rules = data.GetRules();
@@ -247,7 +247,8 @@ i32 BlowDamage(const Database& data, const Hero& hero, const std::vector<HeroGra
         if (effect.Trigger != EffectTrigger::OnUse || effect.Op != EffectOp::Damage)
             continue;
         if (effect.IfTargetHas.has_value()) {
-            const bool held = Holds(foe, *effect.IfTargetHas);
+            const bool held =
+                Holds(foe, *effect.IfTargetHas) || (!asIf.empty() && *effect.IfTargetHas == asIf);
             const bool coming = steady && AppliesStatus(attack, *effect.IfTargetHas);
             if (!held && !coming)
                 continue;
@@ -291,11 +292,29 @@ const SkillDef* SustainedAttack(const std::vector<HeroGrant>& grants, i32 focus)
         return FindActive(grants, "shield_bash");
     if (CanCast(grants, "strike", focus))
         return FindActive(grants, "strike");
-    return nullptr;
+    const SkillDef* best = nullptr;
+    i32 bestPower = -1;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Kind != SkillKind::Active || skill.Target != SkillTarget::Enemy ||
+            skill.FocusCost > focus || !SkillDealsDamage(skill))
+            continue;
+        i32 power = 0;
+        for (const EffectDef& effect : skill.Effects) {
+            if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Damage)
+                power += effect.Power.value_or(0);
+        }
+        if (power > bestPower) {
+            best = &skill;
+            bestPower = power;
+        }
+    }
+    return best;
 }
 
 i32 AttacksToClear(const Battle& battle, const Database& data, const Hero& hero,
-                   const std::vector<HeroGrant>& grants, const SkillDef& attack, i32 dealtPercent)
+                   const std::vector<HeroGrant>& grants, const SkillDef& attack, i32 dealtPercent,
+                   i32 extraTaken = 0)
 {
     const CombatantState& player = battle.Player();
     i32 hits = 0;
@@ -303,8 +322,9 @@ i32 AttacksToClear(const Battle& battle, const Database& data, const Hero& hero,
         if (!foe.Alive())
             continue;
         const i32 opening =
-            BlowDamage(data, hero, grants, player, attack, foe, dealtPercent, false);
-        const i32 steady = BlowDamage(data, hero, grants, player, attack, foe, dealtPercent, true);
+            BlowDamage(data, hero, grants, player, attack, foe, dealtPercent, false, extraTaken);
+        const i32 steady =
+            BlowDamage(data, hero, grants, player, attack, foe, dealtPercent, true, extraTaken);
         hits += HitsToFell(foe.Hp, opening, steady);
     }
     return hits;
@@ -364,10 +384,166 @@ std::string_view OpeningBuff(const Battle& battle, const std::vector<HeroGrant>&
     return {};
 }
 
+bool HitsOneFoe(const SkillDef& skill)
+{
+    if (skill.Kind != SkillKind::Active || skill.Target != SkillTarget::Enemy ||
+        !SkillDealsDamage(skill))
+        return false;
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Op != EffectOp::Damage || !effect.Aim.has_value())
+            continue;
+        if (*effect.Aim == EffectAim::AllEnemies || *effect.Aim == EffectAim::RandomEnemy)
+            return false;
+    }
+    return true;
+}
+
+bool StunsAWindup(const SkillDef& skill)
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Op == EffectOp::StunIfWindingUp)
+            return true;
+    }
+    return false;
+}
+
+bool HasHeal(const SkillDef& skill)
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Trigger == EffectTrigger::OnUse && effect.Op == EffectOp::Heal)
+            return true;
+    }
+    return false;
+}
+
+bool HasGuard(const SkillDef& skill)
+{
+    for (const EffectDef& effect : skill.Effects) {
+        if (effect.Op == EffectOp::Guard)
+            return true;
+    }
+    return false;
+}
+
+const CombatantState* MarkedLiving(const Battle& battle)
+{
+    const auto foes = battle.Enemies();
+    const i32 index = battle.TargetIndex();
+    if (index >= 0 && index < static_cast<i32>(foes.size()) &&
+        foes[static_cast<usize>(index)].Alive())
+        return &foes[static_cast<usize>(index)];
+    for (const CombatantState& foe : foes) {
+        if (foe.Alive())
+            return &foe;
+    }
+    return nullptr;
+}
+
+const SkillDef* BestHit(const Battle& battle, const Database& data, const Hero& hero,
+                        const std::vector<HeroGrant>& grants, i32 focus, i32 dealtPercent)
+{
+    const CombatantState* foe = MarkedLiving(battle);
+    if (foe == nullptr)
+        return nullptr;
+    const CombatantState& player = battle.Player();
+    const SkillDef* best = nullptr;
+    i32 bestDamage = -1;
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (!HitsOneFoe(skill) || skill.FocusCost > focus)
+            continue;
+        const i32 damage = BlowDamage(data, hero, grants, player, skill, *foe, dealtPercent, false);
+        if (damage > bestDamage) {
+            best = &skill;
+            bestDamage = damage;
+        }
+    }
+    return best;
+}
+
+// Used when the build has none of the fighter buttons. A spell and a blade share this
+// path: the highest single-target hit, a status that makes that hit land harder, and a
+// heal or a guard when health is low. All-enemy swings stay unused, same as Cleave.
+std::string_view FallbackSkill(const Battle& battle, const std::vector<HeroGrant>& grants,
+                               const Database& data, const Hero& hero, i32 focus)
+{
+    const CombatantState& player = battle.Player();
+    const i32 percent = HpPercent(player.Hp, player.MaxHp);
+    const bool finishing = FoeIsFinishing(battle);
+    bool winding = false;
+    for (const CombatantState& foe : battle.Enemies()) {
+        if (foe.Alive() && !foe.WindupSkill.empty())
+            winding = true;
+    }
+    if (winding) {
+        for (const HeroGrant& grant : grants) {
+            const SkillDef& skill = grant.Skill;
+            if (skill.FocusCost <= focus && skill.Target == SkillTarget::Enemy &&
+                StunsAWindup(skill))
+                return skill.Id;
+        }
+    }
+    if (!finishing && percent <= 32) {
+        for (const HeroGrant& grant : grants) {
+            const SkillDef& skill = grant.Skill;
+            if (skill.FocusCost <= focus && skill.Target == SkillTarget::Self && HasHeal(skill))
+                return skill.Id;
+        }
+    }
+    if (!finishing && percent <= 32 && player.GuardPercent <= 0) {
+        for (const HeroGrant& grant : grants) {
+            const SkillDef& skill = grant.Skill;
+            if (skill.FocusCost <= focus && skill.Target == SkillTarget::Self && HasGuard(skill))
+                return skill.Id;
+        }
+    }
+    const i32 dealt = StatusDealtPercent(player, data.GetStatuses()) +
+                      CommittedDealt(battle, data, grants, focus);
+    const CombatantState* foe = MarkedLiving(battle);
+    const SkillDef* attack = BestHit(battle, data, hero, grants, focus, dealt);
+    if (attack == nullptr || foe == nullptr)
+        return {};
+    const CombatantState& playerNow = battle.Player();
+    for (const EffectDef& effect : attack->Effects) {
+        if (!effect.IfTargetHas.has_value() || Holds(*foe, *effect.IfTargetHas))
+            continue;
+        const SkillDef* setup = nullptr;
+        for (const HeroGrant& grant : grants) {
+            const SkillDef& skill = grant.Skill;
+            if (skill.Id == attack->Id || skill.Kind != SkillKind::Active ||
+                skill.FocusCost > focus || skill.Target == SkillTarget::AllEnemies)
+                continue;
+            if (AppliesStatus(skill, *effect.IfTargetHas))
+                setup = &skill;
+        }
+        if (setup == nullptr)
+            continue;
+        const i32 plain = BlowDamage(data, hero, grants, playerNow, *attack, *foe, dealt, false);
+        const i32 bonus = BlowDamage(data, hero, grants, playerNow, *attack, *foe, dealt, false, 0,
+                                     *effect.IfTargetHas);
+        if (bonus > plain)
+            return setup->Id;
+    }
+    const i32 plainHits = AttacksToClear(battle, data, hero, grants, *attack, dealt);
+    for (const HeroGrant& grant : grants) {
+        const SkillDef& skill = grant.Skill;
+        if (skill.Id == attack->Id || skill.FocusCost > focus ||
+            skill.Target == SkillTarget::AllEnemies)
+            continue;
+        const i32 extra = AppliedTakenPercent(data, skill, *foe);
+        if (extra <= 0)
+            continue;
+        const i32 buffed = AttacksToClear(battle, data, hero, grants, *attack, dealt, extra);
+        if (buffed + 1 < plainHits)
+            return skill.Id;
+    }
+    return attack->Id;
+}
+
 // Commit to the marked foe. A damage buff is spent only when it shortens the kill.
 // Heal or guard only when health is low, and otherwise spend the best single-target
 // attack that focus can pay. Cleave is left unused so the kill order is the thing
-// being measured.
+// being measured. A build with none of those buttons uses FallbackSkill.
 std::string_view ChoosePlayerSkill(const Battle& battle, const std::vector<HeroGrant>& grants,
                                    const Database& data, const Hero& hero, i32 perTurn)
 {
@@ -403,7 +579,7 @@ std::string_view ChoosePlayerSkill(const Battle& battle, const std::vector<HeroG
         return "shield_bash";
     if (CanCast(grants, "strike", focus))
         return "strike";
-    return {};
+    return FallbackSkill(battle, grants, data, hero, focus);
 }
 
 i32 FocusSeat(const Battle& battle, std::string_view first, std::string_view second)
@@ -424,6 +600,12 @@ i32 FocusSeat(const Battle& battle, std::string_view first, std::string_view sec
     if (secondSeat >= 0)
         return secondSeat;
     return fallback;
+}
+
+bool StunsNamed(const std::vector<HeroGrant>& grants, std::string_view id)
+{
+    const SkillDef* skill = FindActive(grants, id);
+    return skill != nullptr && StunsAWindup(*skill);
 }
 
 i32 WindingSeat(const Battle& battle)
@@ -634,7 +816,7 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
         ++row.PlayerTurns;
         std::string_view skill = ChoosePlayerSkill(battle, grants, data, hero, perTurn);
         i32 seat = ChooseSeat(battle, spec, state);
-        if (skill == "heavy_blow") {
+        if (skill == "heavy_blow" || StunsNamed(grants, skill)) {
             const i32 winding = WindingSeat(battle);
             if (winding >= 0)
                 seat = winding;

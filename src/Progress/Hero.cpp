@@ -329,6 +329,30 @@ bool Hero::ChooseStarter(std::string_view classId, std::string& error)
     return true;
 }
 
+bool Hero::AdoptStarter(std::string_view classId, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the hero is not ready";
+        return false;
+    }
+    if (m_Custom || m_ChoosingStarter) {
+        error = "a custom build picks a starter with ChooseStarter";
+        return false;
+    }
+    const std::string picked(classId);
+    const ClassDef* starter = m_Data->FindClass(picked);
+    if (starter == nullptr || !starter->Starter || starter->IsEvolution()) {
+        error = "class '" + picked + "' is not a starter";
+        return false;
+    }
+    if (m_ClassId != picked) {
+        m_ClassId = picked;
+        m_Picked.clear();
+    }
+    error.clear();
+    return true;
+}
+
 bool Hero::SpendClassPoint(std::string_view statId, std::string& error)
 {
     if (m_ChoosingStarter) {
