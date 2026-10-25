@@ -128,4 +128,7 @@ struct RouteRow {
 // one row. 0 when every row was built. Losses are still 0: the table is the result.
 [[nodiscard]] int RunPlaytestSim(const PlaytestOptions& options);
 
+// Rows in the headless rate table. The fighter line stays first.
+[[nodiscard]] i32 HarnessBuildCount();
+
 } // namespace Ascension

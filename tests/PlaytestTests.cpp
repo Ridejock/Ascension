@@ -822,6 +822,23 @@ const SimRateRow* FindRate(const std::vector<SimRateRow>& rows, std::string_view
 // Alpha's Fang adds strength on top of the charm's agility, and its Bloodlust button
 // is spent only when that status shortens the kill. A fang row must still clear, and
 // it must not finish with less health or in more turns than the same build without it.
+bool FighterLine(std::string_view build)
+{
+    return build == "Fighter" || build.starts_with("Berserker") || build.starts_with("Guardian");
+}
+
+// The clear-and-fang rule was written for the fighter line. Other starters stay in the
+// table so a loss is visible, and the wolf fight test covers that they can fight.
+std::vector<SimRateRow> FighterLineRows(const std::vector<SimRateRow>& rows)
+{
+    std::vector<SimRateRow> kept;
+    for (const SimRateRow& row : rows) {
+        if (FighterLine(row.Build))
+            kept.push_back(row);
+    }
+    return kept;
+}
+
 void CheckFangNotWorse(const std::vector<SimRateRow>& rows, const char* fight)
 {
     for (const SimRateRow& fang : rows) {
@@ -839,6 +856,70 @@ void CheckFangNotWorse(const std::vector<SimRateRow>& rows, const char* fight)
         Check(fang.SumHp >= plain->SumHp, (label + " fang health is not lower").c_str());
         Check(fang.SumTurns <= plain->SumTurns, (label + " fang does not take more turns").c_str());
     }
+}
+
+bool ListsId(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& held : ids) {
+        if (held == id)
+            return true;
+    }
+    return false;
+}
+
+void TestStarterAdopt()
+{
+    Database data(fs::path(ASCENSION_SOURCE_DIR) / "data");
+    DataError loadError;
+    Check(data.Load(&loadError), "shipped data loads for starter adoption");
+    if (!loadError.Message.empty())
+        std::printf("    %s\n", loadError.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+
+    Hero hero;
+    Inventory bag;
+    PlaytestSetup setup;
+    std::string why;
+    PlaytestOptions mage;
+    mage.Level = 1;
+    mage.ClassId = "mage";
+    Check(ApplyPlaytest(hero, bag, data, mage, setup, why), "level 1 mage is a starter");
+    if (!why.empty())
+        std::printf("    %s\n", why.c_str());
+    Check(hero.ClassId() == "mage" && hero.FreshStart() && ListsId(hero.SkillIds(), "spark"),
+          "mage starts at level 1 with spark");
+
+    PlaytestOptions wizard;
+    wizard.Level = 6;
+    wizard.ClassId = "wizard";
+    Check(ApplyPlaytest(hero, bag, data, wizard, setup, why), "level 6 wizard is offered");
+    if (!why.empty())
+        std::printf("    %s\n", why.c_str());
+    Check(hero.ClassId() == "wizard" && !hero.ChoicePending() && !hero.FreshStart(),
+          "wizard closes the mage choice");
+
+    Hero fresh;
+    Check(fresh.Start(data, why) && fresh.FreshStart() && fresh.ClassId() == "fighter",
+          "a new hero is still the first starter");
+    Check(fresh.AdoptStarter("fighter", why) && fresh.ClassId() == "fighter",
+          "adopting the current starter leaves it");
+    Check(fresh.AdoptStarter("rogue", why) && fresh.ClassId() == "rogue" &&
+              ListsId(fresh.SkillIds(), "stab"),
+          "a fresh hero can become a rogue");
+    fresh.GrantXp(1);
+    Check(!fresh.FreshStart(), "the first XP closes the opening class list");
+
+    Hero picking;
+    Inventory empty;
+    PlaytestOptions opened;
+    opened.Level = 5;
+    opened.ClassId = "mage";
+    Check(ApplyPlaytest(picking, empty, data, opened, setup, why), "a level 5 mage is ready");
+    const std::vector<std::string> paths = picking.ChoiceIds();
+    Check(picking.ChoicePending() && paths.size() == 2 && paths[0] == "wizard" &&
+              paths[1] == "warlock",
+          "a level 5 mage chooses wizard then warlock");
 }
 
 void TestSimRates()
@@ -911,31 +992,36 @@ void TestSimRates()
     query.Slip = 0;
     const std::vector<SimRateRow> wolves = SimulateEncounterRates(data, query, error);
     Check(error.empty(), "the wolf rate table builds");
-    Check(static_cast<i32>(wolves.size()) == 30, "five builds, three wolf focuses, fang on or off");
+    const i32 builds = HarnessBuildCount();
+    Check(builds > 5, "the harness covers more than the fighter line");
+    Check(static_cast<i32>(wolves.size()) == builds * 3 * 2,
+          "each build, three wolf focuses, fang on or off");
     const SimRateRow* dire = FindRate(wolves, "Fighter", "dire wolf", false);
     const SimRateRow* wolfOpen = FindRate(wolves, "Fighter", "default", false);
     Check(dire != nullptr && dire->Ok && dire->Runs == 1, "dire-wolf focus is one fight");
     Check(wolfOpen != nullptr && wolfOpen->Ok && wolfOpen->Runs == 2,
           "wolf default targeting uses the seeds");
-    CheckFangNotWorse(wolves, "wolf pack");
+    for (const SimRateRow& row : wolves)
+        Check(row.Ok && row.Error.empty(), "each wolf row was played");
+    CheckFangNotWorse(FighterLineRows(wolves), "wolf pack");
 
     query.EncounterId = "barrow_sentry";
     query.Runs = 5;
     query.Slip = 100;
     const std::vector<SimRateRow> sentry = SimulateEncounterRates(data, query, error);
     Check(error.empty(), "the sentry rate table builds");
-    Check(static_cast<i32>(sentry.size()) == 10, "five builds and the fang, one sentry row each");
+    Check(static_cast<i32>(sentry.size()) == builds * 2, "each build and the fang, one sentry row");
     for (const SimRateRow& row : sentry)
         Check(row.Ok && row.Runs == 1, "one foe does not change with the seed");
-    CheckFangNotWorse(sentry, "sentry");
+    CheckFangNotWorse(FighterLineRows(sentry), "sentry");
 
     query.EncounterId = "bear";
     const std::vector<SimRateRow> bears = SimulateEncounterRates(data, query, error);
     Check(error.empty(), "the bear rate table builds");
-    Check(static_cast<i32>(bears.size()) == 10, "five builds and the fang, one bear row each");
+    Check(static_cast<i32>(bears.size()) == builds * 2, "each build and the fang, one bear row");
     for (const SimRateRow& row : bears)
         Check(row.Ok && row.Runs == 1 && row.Error.empty(), "the bear is one fight");
-    CheckFangNotWorse(bears, "bear");
+    CheckFangNotWorse(FighterLineRows(bears), "bear");
 
     query.EncounterId = "not_a_fight";
     const std::vector<SimRateRow> missing = SimulateEncounterRates(data, query, error);
@@ -1264,6 +1350,7 @@ int main()
     TestParseExampleAndEngineFlags();
     TestArtPackFlag();
     TestBadIds();
+    TestStarterAdopt();
     TestVarnSetupAndChoose();
     TestWolfPackAndLoneEnemy();
     TestDataFolderHotReload();

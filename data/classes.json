@@ -68,6 +68,217 @@
         { "level": 6, "options": ["riposte", { "skill": "shield_wall", "tune": { "ward": { "amount": 90 } } }] },
         { "level": 8, "options": ["rally", { "skill": "rage", "tune": { "focusCost": 2 } }] }
       ]
+    },
+    {
+      "id": "mage",
+      "name": "Mage",
+      "description": "A student of the barrow spark. At level {pathLevel}, a {name} becomes a {paths}.",
+      "starter": true,
+      "stats": {
+        "vitality": 14,
+        "strength": 3,
+        "defense": 3,
+        "agility": 6,
+        "focus": 9
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 1,
+        "defense": 1,
+        "agility": 2,
+        "focus": 2
+      },
+      "skills": ["spark", "hex", "ward", "kindle"],
+      "passives": ["attunement"]
+    },
+    {
+      "id": "wizard",
+      "name": "Wizard",
+      "description": "Binds a telegraph and breaks the line with a wide spark. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "mage",
+      "evolveLevel": 5,
+      "bonus": {
+        "focus": 4,
+        "agility": 1
+      },
+      "growth": {
+        "vitality": 2,
+        "strength": 1,
+        "defense": 1,
+        "agility": 2,
+        "focus": 3
+      },
+      "skills": ["arc", "bind"],
+      "passives": ["scholar"],
+      "picks": [
+        { "level": 6, "options": ["lance", { "skill": "ward", "tune": { "ward": { "amount": 70 }, "focusCost": 1 } }] },
+        { "level": 8, "options": ["nova", { "skill": "kindle", "tune": { "next": { "amount": 80 } } }] }
+      ]
+    },
+    {
+      "id": "warlock",
+      "name": "Warlock",
+      "description": "Opens a wound and drinks what it takes. Offered at level {evolveLevel}.",
+      "evolvesFrom": "mage",
+      "evolveLevel": 5,
+      "bonus": {
+        "focus": 3,
+        "vitality": 3
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 1,
+        "defense": 1,
+        "agility": 1,
+        "focus": 3
+      },
+      "skills": ["curse", "siphon"],
+      "passives": ["pact"],
+      "picks": [
+        { "level": 6, "options": ["rot", { "skill": "siphon", "tune": { "mend": { "power": 10 } } }] },
+        { "level": 8, "options": ["ruin", { "skill": "curse", "tune": { "hit": { "power": 8 }, "focusCost": 1 } }] }
+      ]
+    },
+    {
+      "id": "rogue",
+      "name": "Rogue",
+      "description": "A killer in the dark who scouts the draw. At level {pathLevel}, a {name} becomes a {paths}.",
+      "starter": true,
+      "stats": {
+        "vitality": 14,
+        "strength": 6,
+        "defense": 3,
+        "agility": 10,
+        "focus": 4
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 2,
+        "defense": 1,
+        "agility": 2,
+        "focus": 1
+      },
+      "skills": ["stab", "feint", "mark", "shadowstep"],
+      "passives": ["light_step"]
+    },
+    {
+      "id": "assassin",
+      "name": "Assassin",
+      "description": "Ends a marked foe from the dark. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "rogue",
+      "evolveLevel": 5,
+      "bonus": {
+        "strength": 4,
+        "agility": 2
+      },
+      "growth": {
+        "vitality": 2,
+        "strength": 3,
+        "defense": 1,
+        "agility": 2,
+        "focus": 1
+      },
+      "skills": ["execute", "ambush"],
+      "passives": ["cold_blood"],
+      "picks": [
+        { "level": 6, "options": ["eviscerate", { "skill": "execute", "tune": { "finish": { "power": 24 } } }] },
+        { "level": 8, "options": ["vanish", { "skill": "stab", "tune": { "hit": { "power": 10 } } }] }
+      ]
+    },
+    {
+      "id": "scout",
+      "name": "Scout",
+      "description": "Reads the draw, slips the next hit, and keeps the range. Offered at level {evolveLevel}.",
+      "evolvesFrom": "rogue",
+      "evolveLevel": 5,
+      "bonus": {
+        "agility": 4,
+        "focus": 2
+      },
+      "growth": {
+        "vitality": 2,
+        "strength": 1,
+        "defense": 1,
+        "agility": 4,
+        "focus": 1
+      },
+      "skills": ["sidestep", "read"],
+      "passives": ["trail_sense"],
+      "picks": [
+        { "level": 6, "options": ["pinpoint", { "skill": "feint", "tune": { "slip": { "amount": 75 } } }] },
+        { "level": 8, "options": ["fade", { "skill": "read", "tune": { "hit": { "power": 8 }, "focusCost": 1 } }] }
+      ]
+    },
+    {
+      "id": "cleric",
+      "name": "Cleric",
+      "description": "Keeps a wound from winning the fight. At level {pathLevel}, a {name} becomes a {paths}.",
+      "starter": true,
+      "stats": {
+        "vitality": 16,
+        "strength": 5,
+        "defense": 5,
+        "agility": 4,
+        "focus": 8
+      },
+      "growth": {
+        "vitality": 3,
+        "strength": 1,
+        "defense": 2,
+        "agility": 1,
+        "focus": 2
+      },
+      "skills": ["smite", "mend", "bless", "rebuke"],
+      "passives": ["liturgy"]
+    },
+    {
+      "id": "priest",
+      "name": "Priest",
+      "description": "Prayer first, and the line stays standing. Offered when a {from} reaches level {evolveLevel}.",
+      "evolvesFrom": "cleric",
+      "evolveLevel": 5,
+      "bonus": {
+        "focus": 4,
+        "vitality": 3
+      },
+      "growth": {
+        "vitality": 4,
+        "strength": 1,
+        "defense": 1,
+        "agility": 1,
+        "focus": 2
+      },
+      "skills": ["prayer", "sanctuary"],
+      "passives": ["grace"],
+      "picks": [
+        { "level": 6, "options": ["miracle", { "skill": "bless", "tune": { "next": { "amount": 50 } } }] },
+        { "level": 8, "options": ["hymn", { "skill": "prayer", "tune": { "mend": { "power": 18 }, "focusCost": 2 } }] }
+      ]
+    },
+    {
+      "id": "templar",
+      "name": "Templar",
+      "description": "Meets the blow with oath iron and a blessed rim. Offered at level {evolveLevel}.",
+      "evolvesFrom": "cleric",
+      "evolveLevel": 5,
+      "bonus": {
+        "strength": 3,
+        "defense": 4,
+        "vitality": 2
+      },
+      "growth": {
+        "vitality": 4,
+        "strength": 2,
+        "defense": 2,
+        "agility": 1,
+        "focus": 0
+      },
+      "skills": ["judgment", "consecrate"],
+      "passives": [{ "skill": "bulwark", "tune": { "def": { "amount": 2 } } }],
+      "picks": [
+        { "level": 6, "options": ["riposte", { "skill": "judgment", "tune": { "hit": { "power": 14 } } }] },
+        { "level": 8, "options": ["rally", { "skill": "smite", "tune": { "hit": { "power": 14 } } }] }
+      ]
     }
   ]
 }

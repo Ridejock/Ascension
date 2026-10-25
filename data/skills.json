@@ -446,6 +446,476 @@
         { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
         { "id": "mend", "trigger": "onUse", "op": "heal", "power": 12 }
       ]
+    },
+    {
+      "id": "spark",
+      "name": "Spark",
+      "description": "A barrow spark. Higher {hit.scaling} hits harder.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "hex",
+      "name": "Hex",
+      "description": "A small spark that leaves the foe {mark.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "focus" },
+        { "id": "mark", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
+      "id": "ward",
+      "name": "Ward",
+      "description": "A shell of focus. The next hit loses {ward.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 }
+      ]
+    },
+    {
+      "id": "kindle",
+      "name": "Kindle",
+      "description": "Feed the next blow. It hits {next.amount} percent harder.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 1,
+      "effects": [
+        { "id": "next", "trigger": "onUse", "op": "empower", "amount": 50 }
+      ]
+    },
+    {
+      "id": "attunement",
+      "name": "Attunement",
+      "description": "{mind.stat} +{mind.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "mind", "trigger": "always", "op": "stat", "stat": "focus", "amount": 1 }
+      ]
+    },
+    {
+      "id": "arc",
+      "name": "Arc",
+      "description": "A wide spark.",
+      "kind": "active",
+      "target": "allEnemies",
+      "focusCost": 4,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "focus", "target": "allEnemies" }
+      ]
+    },
+    {
+      "id": "bind",
+      "name": "Bind",
+      "description": "A spark that stuns a foe who is winding up.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "focus" },
+        { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
+      ]
+    },
+    {
+      "id": "scholar",
+      "name": "Scholar",
+      "description": "{mind.stat} +{mind.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "mind", "trigger": "always", "op": "stat", "stat": "focus", "amount": 2 }
+      ]
+    },
+    {
+      "id": "lance",
+      "name": "Lance",
+      "description": "One focused spear of light. Higher {hit.scaling} drives it further.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 18, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "nova",
+      "name": "Nova",
+      "description": "The spark breaks outward and leaves every foe {mark.status}.",
+      "kind": "active",
+      "target": "allEnemies",
+      "focusCost": 4,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 11, "scaling": "focus", "target": "allEnemies" },
+        { "id": "mark", "trigger": "onHit", "op": "applyStatus", "status": "exposed", "target": "allEnemies" }
+      ]
+    },
+    {
+      "id": "curse",
+      "name": "Curse",
+      "description": "A dark spark that leaves a {cut.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 5, "scaling": "focus" },
+        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "siphon",
+      "name": "Siphon",
+      "description": "Drink from the wound and knit {mend.power}. Higher {mend.scaling} mends more.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 6, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "pact",
+      "name": "Pact",
+      "description": "Gain {well.amount} {well.stat} for every {well.per} percent of health that is missing, up to {well.max}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "well", "trigger": "always", "op": "statPerMissingHp", "stat": "focus", "amount": 1, "per": 10, "max": 4 }
+      ]
+    },
+    {
+      "id": "rot",
+      "name": "Rot",
+      "description": "Tear a dark wound, {cut.status} twice over. A foe that is already bleeding takes a deeper cut.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "focus" },
+        { "id": "gash", "trigger": "onUse", "op": "damage", "power": 14, "scaling": "focus", "ifTargetHas": "bleed" },
+        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" },
+        { "id": "cut2", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "ruin",
+      "name": "Ruin",
+      "description": "Spend a {finish.ifTargetHas} wound. The cut closes as the blow lands.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "focus" },
+        { "id": "finish", "trigger": "onUse", "op": "damage", "power": 20, "scaling": "focus", "ifTargetHas": "bleed", "consume": true }
+      ]
+    },
+    {
+      "id": "stab",
+      "name": "Stab",
+      "description": "A short blade from the dark. Higher {hit.scaling} places it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "agility" }
+      ]
+    },
+    {
+      "id": "feint",
+      "name": "Feint",
+      "description": "Slip the next hit. It loses {slip.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 1,
+      "effects": [
+        { "id": "slip", "trigger": "onUse", "op": "guard", "amount": 50 }
+      ]
+    },
+    {
+      "id": "mark",
+      "name": "Mark",
+      "description": "Open a line and leave the foe {open.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 5, "scaling": "agility" },
+        { "id": "open", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
+      "id": "shadowstep",
+      "name": "Shadowstep",
+      "description": "Step into {shade.status}. Blows deal {shade.status.dealt} percent more damage.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "shade", "trigger": "onUse", "op": "applyStatus", "status": "veil" }
+      ]
+    },
+    {
+      "id": "light_step",
+      "name": "Light Step",
+      "description": "{step.stat} +{step.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "step", "trigger": "always", "op": "stat", "stat": "agility", "amount": 2 }
+      ]
+    },
+    {
+      "id": "execute",
+      "name": "Execute",
+      "description": "A killing stroke. A foe that is {finish.ifTargetHas} takes the full cut and loses it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" },
+        { "id": "finish", "trigger": "onUse", "op": "damage", "power": 18, "scaling": "strength", "ifTargetHas": "exposed", "consume": true }
+      ]
+    },
+    {
+      "id": "ambush",
+      "name": "Ambush",
+      "description": "Strike from the dark and take {shade.status}. Higher {hit.scaling} lands it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "agility" },
+        { "id": "shade", "trigger": "onUse", "op": "applyStatus", "status": "veil", "target": "self" }
+      ]
+    },
+    {
+      "id": "cold_blood",
+      "name": "Cold Blood",
+      "description": "{edge.stat} +{edge.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "edge", "trigger": "always", "op": "stat", "stat": "strength", "amount": 2 }
+      ]
+    },
+    {
+      "id": "eviscerate",
+      "name": "Eviscerate",
+      "description": "A deep cut that leaves {cut.status}. A foe that is {gash.ifTargetHas} takes more.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "strength" },
+        { "id": "gash", "trigger": "onUse", "op": "damage", "power": 12, "scaling": "strength", "ifTargetHas": "exposed" },
+        { "id": "cut", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
+      ]
+    },
+    {
+      "id": "vanish",
+      "name": "Vanish",
+      "description": "Drop into {shade.status} and slip the next hit. It loses {slip.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "shade", "trigger": "onUse", "op": "applyStatus", "status": "veil" },
+        { "id": "slip", "trigger": "onUse", "op": "guard", "amount": 60 }
+      ]
+    },
+    {
+      "id": "sidestep",
+      "name": "Sidestep",
+      "description": "Slip the next hit. It loses {slip.amount} percent, and {shade.status} makes blows deal {shade.status.dealt} percent more.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "slip", "trigger": "onUse", "op": "guard", "amount": 40 },
+        { "id": "shade", "trigger": "onUse", "op": "applyStatus", "status": "veil" }
+      ]
+    },
+    {
+      "id": "read",
+      "name": "Read",
+      "description": "Spot the draw. A foe who is winding up is stunned.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "agility" },
+        { "id": "stun", "trigger": "onHit", "op": "stunIfWindingUp", "status": "stunned" }
+      ]
+    },
+    {
+      "id": "trail_sense",
+      "name": "Trail Sense",
+      "description": "{step.stat} +{step.amount}. Each turn starts with {breath.amount} focus.",
+      "kind": "passive",
+      "effects": [
+        { "id": "step", "trigger": "always", "op": "stat", "stat": "agility", "amount": 1 },
+        { "id": "breath", "trigger": "onTurnStart", "op": "grantFocus", "amount": 1 }
+      ]
+    },
+    {
+      "id": "pinpoint",
+      "name": "Pinpoint",
+      "description": "One clean shot from outside the swing. Higher {hit.scaling} places it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 3,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 14, "scaling": "agility" }
+      ]
+    },
+    {
+      "id": "fade",
+      "name": "Fade",
+      "description": "Take {shade.status} and slip the next hit. It loses {slip.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "shade", "trigger": "onUse", "op": "applyStatus", "status": "veil" },
+        { "id": "slip", "trigger": "onUse", "op": "guard", "amount": 50 }
+      ]
+    },
+    {
+      "id": "smite",
+      "name": "Smite",
+      "description": "A holy blow. Higher {hit.scaling} carries it.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 0,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "mend",
+      "name": "Mend",
+      "description": "Close a wound. Higher {mend.scaling} mends more.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "bless",
+      "name": "Bless",
+      "description": "The next hit loses {ward.amount} percent, and the next blow hits {next.amount} percent harder.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 40 },
+        { "id": "next", "trigger": "onUse", "op": "empower", "amount": 25 }
+      ]
+    },
+    {
+      "id": "rebuke",
+      "name": "Rebuke",
+      "description": "A sharp word that leaves the foe {mark.status}.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "focus" },
+        { "id": "mark", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
+      "id": "liturgy",
+      "name": "Liturgy",
+      "description": "A quiet prayer mends {mend.power} at the start of each turn.",
+      "kind": "passive",
+      "effects": [
+        { "id": "mend", "trigger": "onTurnStart", "op": "heal", "power": 3 }
+      ]
+    },
+    {
+      "id": "prayer",
+      "name": "Prayer",
+      "description": "A full prayer. Higher {mend.scaling} closes more.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 14, "scaling": "focus" }
+      ]
+    },
+    {
+      "id": "sanctuary",
+      "name": "Sanctuary",
+      "description": "A holy shell. The next hit loses {ward.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 70 }
+      ]
+    },
+    {
+      "id": "grace",
+      "name": "Grace",
+      "description": "{mind.stat} +{mind.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "mind", "trigger": "always", "op": "stat", "stat": "focus", "amount": 2 }
+      ]
+    },
+    {
+      "id": "miracle",
+      "name": "Miracle",
+      "description": "Knit a deep wound and set a guard. The next hit loses {ward.amount} percent.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 12, "scaling": "focus" },
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 40 }
+      ]
+    },
+    {
+      "id": "hymn",
+      "name": "Hymn",
+      "description": "A prayer that mends and feeds the next blow. It hits {next.amount} percent harder.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 3,
+      "effects": [
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8, "scaling": "focus" },
+        { "id": "next", "trigger": "onUse", "op": "empower", "amount": 40 }
+      ]
+    },
+    {
+      "id": "judgment",
+      "name": "Judgment",
+      "description": "Oath iron, swung close. It leaves the foe {mark.status}. Higher {hit.scaling} hits harder.",
+      "kind": "active",
+      "target": "enemy",
+      "focusCost": 2,
+      "effects": [
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 10, "scaling": "strength" },
+        { "id": "mark", "trigger": "onHit", "op": "applyStatus", "status": "exposed" }
+      ]
+    },
+    {
+      "id": "consecrate",
+      "name": "Consecrate",
+      "description": "Guard {ward.amount} percent of the next hit and send {back.percent} percent of what it stops back, plus a blow that scales with {back.scaling}.",
+      "kind": "active",
+      "target": "self",
+      "focusCost": 2,
+      "effects": [
+        { "id": "ward", "trigger": "onUse", "op": "guard", "amount": 50 },
+        { "id": "back", "trigger": "onUse", "op": "reflect", "percent": 40, "power": 8, "scaling": "defense" }
+      ]
     }
   ]
 }

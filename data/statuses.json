@@ -57,6 +57,14 @@
       "resists": ["stunned", "exposed"],
       "turns": 3,
       "maxStacks": 1
+    },
+    {
+      "id": "veil",
+      "name": "Veil",
+      "description": "Deals {dealt} percent more damage. Lasts {turns} turns.",
+      "damageDealtPercent": 25,
+      "turns": 3,
+      "maxStacks": 1
     }
   ]
 }

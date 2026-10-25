@@ -690,10 +690,10 @@ bool ClassWearsFang(const Database& data, std::string_view classId)
 void AddWanderer(const fs::path& classes)
 {
     ReplaceInFile(classes,
-                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"rage\", \"tune\": "
-                  "{ \"focusCost\": 2 } }] }\n      ]\n    }\n  ]\n}",
-                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"rage\", \"tune\": "
-                  "{ \"focusCost\": 2 } }] }\n      ]\n    },\n"
+                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"smite\", \"tune\": "
+                  "{ \"hit\": { \"power\": 14 } } }] }\n      ]\n    }\n  ]\n}",
+                  "{ \"level\": 8, \"options\": [\"rally\", { \"skill\": \"smite\", \"tune\": "
+                  "{ \"hit\": { \"power\": 14 } } }] }\n      ]\n    },\n"
                   "    {\n"
                   "      \"id\": \"wanderer\",\n"
                   "      \"name\": \"Wanderer\",\n"

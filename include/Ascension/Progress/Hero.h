@@ -120,6 +120,15 @@ public:
     // Become that starter. The pooled class points are not replaced by its grant.
     bool ChooseStarter(std::string_view classId, std::string& error);
 
+    // True on a new run: the class formula is in use, no XP has been gained, and a starter
+    // is not waiting to be picked after a reset. A flee at 0 XP is still a fresh start.
+    [[nodiscard]] bool FreshStart() const;
+
+    // Become that starter while the class formula is still in use. XP stays, so a later
+    // level follows the new class. Practiced uses and picks are cleared. The current class
+    // succeeds and leaves those lists alone. A reset still uses ChooseStarter.
+    bool AdoptStarter(std::string_view classId, std::string& error);
+
     // Moves one pooled class point onto `statId` (vitality, strength, defense, agility, focus).
     bool SpendClassPoint(std::string_view statId, std::string& error);
 
