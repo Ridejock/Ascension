@@ -160,7 +160,7 @@ A description may contain `{placeholders}` filled from that entity's own fields.
 |---|---|
 | Skill | `{name}` `{school}` (only when the skill sets a school) `{cost}` `{windup}` (only when windup is set). Per effect: `{id.power}` `{id.amount}` `{id.percent}` `{id.per}` `{id.max}` `{id.turns}` `{id.every}`. `{id.stat}` and `{id.scaling}` are the stat's name. `{id.status}` is the status's name, and `{id.status.dealt}` (also `taken`, `perTurn`, `turns`, `stacks`, `name`) reads that status. `{id.ifTargetHas}` is the name of the status that effect requires. |
 | Status | `{name}` `{turns}` `{stacks}` `{perTurn}` `{dealt}` `{taken}`, and only when that number is set |
-| Class | `{name}` `{evolveLevel}` `{from}` (the parent class's name). A base class uses `{paths}` (the children's names joined with " or a ") and `{pathLevel}` (their evolve level, which has to be the same) |
+| Class | `{name}` `{evolveLevel}` `{from}` (the parent class's name). A base class uses `{paths}` (the first child's name, then " or a " or " or an " from that name's first letter) and `{pathLevel}` (their evolve level, which has to be the same). A written "a" or "an" immediately before `{paths}` follows the first child the same way |
 | Enemy | `{name}` `{phaseAt}` `{summon}` (the summoned enemy's name) `{summonEvery}` |
 | Item | `{name}` `{value}` `{heal}` `{focus}` |
 

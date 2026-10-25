@@ -1746,6 +1746,18 @@ void TestShippedStarters()
     Check(fighterPaths.size() == 2 && fighterPaths[0]->Id == "berserker" &&
               fighterPaths[1]->Id == "guardian",
           "fighter still evolves into berserker, then guardian");
+    const std::string fighterText = data.Describe(*data.FindClass("fighter"));
+    const std::string mageText = data.Describe(*mage);
+    const std::string rogueText = data.Describe(*rogue);
+    const std::string clericText = data.Describe(*cleric);
+    Check(fighterText.find("a Berserker or a Guardian") != std::string::npos,
+          "fighter still reads a Berserker or a Guardian");
+    Check(mageText.find("an Elementalist or a Warlock") != std::string::npos,
+          "mage reads an Elementalist or a Warlock");
+    Check(rogueText.find("an Assassin or a Scout") != std::string::npos,
+          "rogue reads an Assassin or a Scout");
+    Check(clericText.find("a Priest or a Templar") != std::string::npos,
+          "cleric reads a Priest or a Templar");
 }
 
 void TestShippedDescriptions()

@@ -3467,6 +3467,39 @@ std::optional<std::string> SkillField(const TextScope& scope, std::string_view k
     return EffectField(scope, *effect, key.substr(dot + 1));
 }
 
+// "an" before a vowel letter, "a" otherwise. The description still writes "a {paths}";
+// ExpandText rewrites that article to match the first name. Later names carry their own.
+bool NameTakesAn(std::string_view word)
+{
+    for (char code : word) {
+        if (code == ' ')
+            continue;
+        if (code >= 'A' && code <= 'Z')
+            code = static_cast<char>(code - 'A' + 'a');
+        return code == 'a' || code == 'e' || code == 'i' || code == 'o' || code == 'u';
+    }
+    return false;
+}
+
+const char* ArticleFor(std::string_view word)
+{
+    return NameTakesAn(word) ? "an" : "a";
+}
+
+// The placeholder sits after a written "a " or "an ". Swap that word so it agrees with
+// `following`. Any other ending is left alone.
+void MatchArticle(std::string& written, std::string_view following)
+{
+    const bool an = NameTakesAn(following);
+    if (written.size() >= 4 && written.compare(written.size() - 4, 4, " an ") == 0) {
+        if (!an)
+            written.replace(written.size() - 4, 4, " a ");
+        return;
+    }
+    if (written.size() >= 3 && written.compare(written.size() - 3, 3, " a ") == 0 && an)
+        written.replace(written.size() - 3, 3, " an ");
+}
+
 std::optional<std::string> ClassField(const TextScope& scope, std::string_view key)
 {
     const ClassDef& klass = *scope.Class;
@@ -3483,9 +3516,9 @@ std::optional<std::string> ClassField(const TextScope& scope, std::string_view k
         }
         return std::nullopt;
     }
-    // A base class with evolutions. Names join as "Berserker or a Guardian" so the
-    // description's leading "a " reads "a Berserker or a Guardian". The level counts only
-    // when every child is offered at the same level.
+    // A base class with evolutions. The first name is bare ("Berserker") so the description's
+    // "a " still reads "a Berserker". Each later name brings its own article ("or a Guardian",
+    // "or an Elementalist"). The level counts only when every child shares it.
     std::string paths;
     i32 level = 0;
     bool seen = false;
@@ -3493,8 +3526,11 @@ std::optional<std::string> ClassField(const TextScope& scope, std::string_view k
     for (const ClassDef& child : scope.Classes) {
         if (child.EvolvesFrom != klass.Id)
             continue;
-        if (!paths.empty())
-            paths += " or a ";
+        if (!paths.empty()) {
+            paths += " or ";
+            paths += ArticleFor(child.Name);
+            paths += " ";
+        }
         paths += child.Name;
         if (!seen) {
             level = child.EvolveLevel;
@@ -3583,6 +3619,8 @@ bool ExpandText(std::string_view text, const TextScope& scope, std::string& out,
             why = "unknown placeholder {" + std::string(key) + "}";
             return false;
         }
+        if (key == "paths")
+            MatchArticle(out, *replacement);
         out += *replacement;
         at = close + 1;
     }
