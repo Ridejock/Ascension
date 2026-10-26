@@ -32,6 +32,9 @@
       { "kind": "rest", "tile": { "x": 1, "y": 1 } },
       { "kind": "talk", "tile": { "x": 2, "y": 1 }, "dialogue": "pell" },
       { "kind": "shop", "tile": { "x": 3, "y": 1 } }
+    ],
+    "props": [
+      { "id": "fixture_post", "tile": { "x": 2, "y": 2 }, "w": 1, "h": 1 }
     ]
   }
 }

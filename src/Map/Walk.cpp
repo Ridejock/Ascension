@@ -4,6 +4,8 @@
 #include <cmath>
 #include <utility>
 
+#include "Ascension/Data/ArtPack.h"
+
 namespace Ascension {
 
 namespace {
@@ -85,13 +87,15 @@ bool Opposite(WalkDir left, WalkDir right)
     return false;
 }
 
-bool TileWalkable(const Database& data, const MapDef& map, MapTile tile)
+bool TileWalkable(const Database& data, const MapDef& map, MapTile tile, const ArtPack* art)
 {
     const std::string* cell = map.Cell(tile.X, tile.Y);
     if (cell == nullptr)
         return false;
     const TileDef* def = data.FindTile(*cell);
-    return def != nullptr && !def->Solid;
+    if (def == nullptr || def->Solid)
+        return false;
+    return !FootprintBlocks(map, tile.X, tile.Y, art);
 }
 
 const MapLink* LinkOn(const MapDef& map, MapTile tile)
@@ -230,27 +234,29 @@ MapTile Walker::TileAhead() const
 bool Walker::CanLand(const Database& data, MapTile tile) const
 {
     const MapDef* map = data.FindMap(m_Place.MapId);
-    if (map == nullptr || !TileWalkable(data, *map, tile))
+    if (map == nullptr || !TileWalkable(data, *map, tile, m_Art))
         return false;
     if (const MapLink* link = LinkOn(*map, tile)) {
         const MapDef* target = data.FindMap(link->Map);
-        return target != nullptr && TileWalkable(data, *target, link->Arrival);
+        return target != nullptr && TileWalkable(data, *target, link->Arrival, m_Art);
     }
     return true;
 }
 
-bool Walker::Enter(const Database& data, std::string_view mapId)
+bool Walker::Enter(const Database& data, std::string_view mapId, const ArtPack* art)
 {
+    m_Art = art;
     if (!PlaceOnStart(m_Place, data, mapId))
         return false;
     SyncPose();
     return true;
 }
 
-bool Walker::Place(const Database& data, std::string_view mapId, MapTile tile)
+bool Walker::Place(const Database& data, std::string_view mapId, MapTile tile, const ArtPack* art)
 {
+    m_Art = art;
     const MapDef* map = data.FindMap(mapId);
-    if (map == nullptr || !TileWalkable(data, *map, tile))
+    if (map == nullptr || !TileWalkable(data, *map, tile, m_Art))
         return false;
     m_Place.MapId = map->Id;
     m_Place.Tile = tile;
@@ -258,10 +264,11 @@ bool Walker::Place(const Database& data, std::string_view mapId, MapTile tile)
     return true;
 }
 
-bool Walker::Adopt(const Database& data, std::string_view fallbackMapId)
+bool Walker::Adopt(const Database& data, std::string_view fallbackMapId, const ArtPack* art)
 {
+    m_Art = art;
     const MapDef* map = data.FindMap(m_Place.MapId);
-    if (map != nullptr && TileWalkable(data, *map, m_Place.Tile)) {
+    if (map != nullptr && TileWalkable(data, *map, m_Place.Tile, m_Art)) {
         SyncPose();
         return true;
     }
@@ -314,7 +321,7 @@ WalkStep Walker::CommitLanding(const Database& data, MapTile tile)
     }
     if (const MapLink* link = LinkOn(*map, tile)) {
         const MapDef* target = data.FindMap(link->Map);
-        if (target == nullptr || !TileWalkable(data, *target, link->Arrival)) {
+        if (target == nullptr || !TileWalkable(data, *target, link->Arrival, m_Art)) {
             step.Kind = WalkStepKind::Blocked;
             return step;
         }
@@ -587,8 +594,10 @@ WalkStep Walker::AdvanceSettle(const Database& data, const WalkRules& rules, Wal
     return step;
 }
 
-WalkStep Walker::Advance(const Database& data, const WalkRules& rules, WalkInput input, f32 dt)
+WalkStep Walker::Advance(const Database& data, const WalkRules& rules, WalkInput input, f32 dt,
+                         const ArtPack* art)
 {
+    m_Art = art;
     WalkStep none;
     if (!Placed())
         return none;

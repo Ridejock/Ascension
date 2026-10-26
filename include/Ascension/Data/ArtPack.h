@@ -26,9 +26,11 @@ inline constexpr u32 kArtVariantX = 73856093u;
 inline constexpr u32 kArtVariantY = 19349663u;
 
 // Which picture a manifest row replaces. The id that goes with a content slot comes
-// from data: a tile id, an enemy id, a class id, or a dialogue id. The marker slots
-// are the overland drawings that are not content ids: the hero, a rest, a shop, and
-// an exit. Nothing here names a particular tile, foe, class, NPC, or map.
+// from data: a tile id, an enemy id, a class id, a dialogue id, or a prop id placed
+// on a map. The marker slots are the overland drawings that are not content ids:
+// the hero, a rest, a shop, and an exit. Nothing here names a particular tile, foe,
+// class, NPC, map, or prop. A prop the manifest leaves out is not drawn: the
+// built-in art has no prop pictures.
 enum class ArtSlot : u8 {
     Tile,
     FoeOverland,
@@ -40,6 +42,7 @@ enum class ArtSlot : u8 {
     RestMarker,
     ShopMarker,
     ExitMarker,
+    Prop,
 };
 
 [[nodiscard]] inline bool IsArtMarker(ArtSlot slot)
@@ -61,12 +64,16 @@ struct ArtPicture {
 
 // One manifest row. Map or Theme is set only for a tile that is limited to that
 // scope. Pictures holds the one file, or the variants of a tile, in list order.
+// CellsWide and CellsHigh are the prop picture in cells. 0 means the row omitted
+// them. A tile and a marker leave both at 0.
 struct ArtImage {
     ArtSlot Slot = ArtSlot::Tile;
     std::string Id;
     std::string Map;
     std::string Theme;
     std::vector<ArtPicture> Pictures;
+    i32 CellsWide = 0;
+    i32 CellsHigh = 0;
 };
 
 // Where a picture comes from. Builtin is the CC0 art the game already draws.
@@ -76,6 +83,9 @@ enum class ArtOrigin : u8 { Builtin, Pack };
 struct ResolvedArt {
     ArtOrigin Origin = ArtOrigin::Builtin;
     ArtPicture Picture;
+    // Prop picture size in cells. 0 when the row omitted it, and for every other slot.
+    i32 CellsWide = 0;
+    i32 CellsHigh = 0;
 };
 
 // Optional pictures that replace the built-in CC0 art. The manifest lists only the
@@ -130,6 +140,27 @@ private:
 
 // The variant for a cell. The same x, y, and count always return the same index.
 [[nodiscard]] i32 ArtVariantIndex(i32 x, i32 y, i32 count);
+
+// True when a prop footprint covers this cell. A cell in that prop's open list
+// does not. The map's w and h win. When the map left a side unset, `art` supplies
+// it. A null pack, or a prop the pack does not size, blocks nothing on that side.
+[[nodiscard]] inline bool FootprintBlocks(const MapDef& map, i32 x, i32 y, const ArtPack* art)
+{
+    for (const MapProp& prop : map.Props) {
+        i32 width = prop.Width;
+        i32 height = prop.Height;
+        if (art != nullptr && (width < 1 || height < 1)) {
+            const ResolvedArt resolved = art->Find(ArtSlot::Prop, prop.Id);
+            if (width < 1)
+                width = resolved.CellsWide;
+            if (height < 1)
+                height = resolved.CellsHigh;
+        }
+        if (PropFootprintCovers(prop, width, height, x, y))
+            return true;
+    }
+    return false;
+}
 
 // `requested` is the --art-pack path, or empty when the flag was omitted.
 // A set path has to be a directory. An empty path uses `executableDirectory/artpack`

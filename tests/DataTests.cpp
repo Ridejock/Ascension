@@ -2782,9 +2782,16 @@ void CheckFixtureMaps(const char* dir, const char* what)
           "a talk point names a dialogue id");
     Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 3 && shop->Tile.Y == 1,
           "a shop point names no dialogue");
+    Check(first->Props.size() == 1 && first->Props[0].Id == "fixture_post" &&
+              first->Props[0].Tile.X == 2 && first->Props[0].Tile.Y == 2 &&
+              first->Props[0].Width == 1 && first->Props[0].Height == 1 &&
+              first->Props[0].Open.empty() && MapPropBlocks(first->Props[0], 2, 2) &&
+              !MapPropBlocks(first->Props[0], 1, 1),
+          "fixture_a's prop blocks its own cell and leaves the start open");
 
-    Check(second->Width == 4 && second->Height == 4 && !second->Hub && second->Points.empty(),
-          "fixture_b is 4 by 4 with no points");
+    Check(second->Width == 4 && second->Height == 4 && !second->Hub && second->Points.empty() &&
+              second->Props.empty(),
+          "fixture_b is 4 by 4 with no points and no props");
     const MoverDef* stand = data.FindMover("stand");
     Check(stand != nullptr && stand->Kind == MoverKind::Idle &&
               std::string(ToString(MoverKind::Idle)) == "idle",
@@ -3054,6 +3061,40 @@ void TestMapValidation()
                       "\"hub\": false, \"note\": \"x\"");
         TestRejected(copy.Path, "maps/fixture_a.json", "note", "a map rejects an unknown field");
     }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"w\": 1, \"h\": 1",
+                      "\"w\": 1, \"h\": 1, \"note\": true");
+        TestRejected(copy.Path, "maps/fixture_a.json", "note", "a prop rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                      "\"tile\": { \"x\": 2, \"y\": 2 }, \"w\": 1, \"h\": 1",
+                      "\"tile\": { \"x\": 5, \"y\": 4 }, \"w\": 2, \"h\": 1");
+        TestRejected(copy.Path, "maps/fixture_a.json", "outside",
+                     "a prop footprint outside the map fails");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                      "\"tile\": { \"x\": 2, \"y\": 2 }, \"w\": 1, \"h\": 1",
+                      "\"tile\": { \"x\": 1, \"y\": 1 }, \"w\": 1, \"h\": 1");
+        TestRejected(copy.Path, "maps/fixture_a.json", "start",
+                     "a prop footprint cannot cover the start");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"w\": 1, \"h\": 1",
+                      "\"w\": 1, \"h\": 1, \"open\": [ { \"x\": 1, \"y\": 2 } ]");
+        TestRejected(copy.Path, "maps/fixture_a.json", "outside the footprint",
+                     "an open cell outside the footprint fails");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"w\": 1, \"h\": 1", "\"w\": 1");
+        TestRejected(copy.Path, "maps/fixture_a.json", "w", "a prop names w and h together");
+    }
 }
 
 i32 CountSpawns(const Database& data, std::string_view encounter)
@@ -3104,6 +3145,30 @@ void CheckCampaignMaps(const char* dir)
           "the hub talk point is Pell's existing dialogue");
     Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 15 && shop->Tile.Y == 5,
           "the hub shop point opens the shop");
+    const MapProp* shopHouse = nullptr;
+    const MapProp* inn = nullptr;
+    const MapProp* cabin = nullptr;
+    for (const MapProp& prop : hub->Props) {
+        if (prop.Id == "shop_house")
+            shopHouse = &prop;
+        else if (prop.Id == "inn")
+            inn = &prop;
+        else if (prop.Id == "pell_cabin")
+            cabin = &prop;
+    }
+    Check(hub->Props.size() == 3 && shopHouse != nullptr && shopHouse->Tile.X == 10 &&
+              shopHouse->Tile.Y == 2 && shopHouse->Width == 13 && shopHouse->Height == 6 &&
+              MapPropBlocks(*shopHouse, 10, 2) && !MapPropBlocks(*shopHouse, 15, 5) &&
+              !MapPropBlocks(*shopHouse, 15, 7),
+          "the shop house blocks its walls and leaves the counter and the door open");
+    Check(inn != nullptr && inn->Tile.X == 3 && inn->Tile.Y == 11 && inn->Width == 11 &&
+              inn->Height == 6 && MapPropBlocks(*inn, 3, 16) && !MapPropBlocks(*inn, 8, 14) &&
+              !MapPropBlocks(*inn, 7, 11),
+          "the inn blocks its walls and leaves the rest and the door open");
+    Check(cabin != nullptr && cabin->Tile.X == 14 && cabin->Tile.Y == 10 && cabin->Width == 4 &&
+              cabin->Height == 1 && cabin->Open.empty() && MapBlocks(*hub, 14, 10) &&
+              MapBlocks(*hub, 17, 10) && !MapBlocks(*hub, 13, 9) && !MapBlocks(*hub, 13, 10),
+          "Pell's cabin blocks the grass south of the road and leaves his tile open");
     const std::string& keeper = data.GetShop().Dialogue;
     i32 keepers = 0;
     for (const MapPoint& point : hub->Points) {
@@ -3196,11 +3261,39 @@ void TestShopPicture()
           "the talk point still draws that keeper");
 }
 
+void TestPropFrame()
+{
+    MapProp prop;
+    prop.Tile.X = 4;
+    prop.Tile.Y = 6;
+    prop.Width = 3;
+    prop.Height = 2;
+    const PropFrame same = FrameProp(prop, 3, 2);
+    Check(same.X == 4.0f && same.Y == 6.0f && same.Width == 3.0f && same.Height == 2.0f &&
+              same.SortY == 7,
+          "a picture the size of the footprint starts at the placement");
+    const PropFrame tall = FrameProp(prop, 3, 5);
+    Check(tall.X == 4.0f && tall.Y == 3.0f && tall.Width == 3.0f && tall.Height == 5.0f &&
+              tall.SortY == 7,
+          "a taller picture hangs north and still sorts on the south row");
+    const PropFrame bare = FrameProp(prop, 0, 0);
+    Check(bare.Y == 6.0f && bare.Height == 2.0f && bare.SortY == 7,
+          "a picture with no cell size uses the footprint");
+    MapProp placed;
+    placed.Tile.X = 2;
+    placed.Tile.Y = 1;
+    const PropFrame packSized = FrameProp(placed, 4, 3);
+    Check(packSized.X == 2.0f && packSized.Y == 1.0f && packSized.Width == 4.0f &&
+              packSized.Height == 3.0f && packSized.SortY == 3,
+          "a placement with no footprint uses the picture size");
+}
+
 void TestMaps()
 {
     CheckFixtureMaps(ASCENSION_DATA_DIR, "sample maps load");
     CheckCampaignMaps(ASCENSION_SHIPPED_DATA_DIR);
     TestShopPicture();
+    TestPropFrame();
     TestMapReload();
     TestMapValidation();
 }

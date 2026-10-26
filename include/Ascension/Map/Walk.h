@@ -9,6 +9,8 @@
 
 namespace Ascension {
 
+class ArtPack;
+
 // North is decreasing Y. The grid's Y grows south.
 enum class WalkDir : u8 { None, North, East, South, West };
 
@@ -61,24 +63,28 @@ struct WalkPoint {
 class Walker {
 public:
     // Stands on that map's start tile. False when the id is not loaded.
-    bool Enter(const Database& data, std::string_view mapId);
+    // `art` fills a prop footprint the map left unsized. Null uses the map only.
+    bool Enter(const Database& data, std::string_view mapId, const ArtPack* art = nullptr);
 
     // After a successful reload. Stays put when that map still has this tile
     // and the tile is walkable. Otherwise that map's start. When the map itself
     // is gone, `fallbackMapId`'s start, then the first loaded map. False when
     // nothing is left to stand on; the place is cleared.
-    bool Adopt(const Database& data, std::string_view fallbackMapId);
+    bool Adopt(const Database& data, std::string_view fallbackMapId, const ArtPack* art = nullptr);
 
     // Stands on this tile. False when the map is missing or the tile is not
     // walkable. Does not take a link, including when the tile is itself one.
-    bool Place(const Database& data, std::string_view mapId, MapTile tile);
+    bool Place(const Database& data, std::string_view mapId, MapTile tile,
+               const ArtPack* art = nullptr);
 
-    // At most one committed tile. A wall or the edge of the grid is Blocked and
-    // the drawn point does not enter it. Reaching a link is Exited. Being placed
-    // on a link, including an arrival tile that is itself a link, does not take it.
+    // At most one committed tile. A wall, a prop footprint, or the edge of the
+    // grid is Blocked and the drawn point does not enter it. An open cell inside
+    // a footprint stays walkable. Reaching a link is Exited. Being placed on a
+    // link, including an arrival tile that is itself a link, does not take it.
     // dt is seconds. A negative dt is treated as zero. A long frame still commits
-    // one tile.
-    WalkStep Advance(const Database& data, const WalkRules& rules, WalkInput input, f32 dt);
+    // one tile. `art` is the same pack Enter takes.
+    WalkStep Advance(const Database& data, const WalkRules& rules, WalkInput input, f32 dt,
+                     const ArtPack* art = nullptr);
 
     // Drops a glide and stands on the committed tile.
     void Halt();
@@ -125,6 +131,8 @@ private:
     f32 m_ToY = 0.0f;
     f32 m_SettleElapsed = 0.0f;
     f32 m_SettleDuration = 0.0f;
+    // The pack for the public call in progress. Null uses map footprints only.
+    const ArtPack* m_Art = nullptr;
 };
 
 // Drawn tile of each spawn. Snap stands on the tiles. Advance glides toward the

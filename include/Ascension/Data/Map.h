@@ -93,6 +93,30 @@ struct MapPoint {
     std::string Dialogue;
 };
 
+// A rectangle of cells. X and Y are the top-left. Width grows east and Height
+// grows south. Both counts are at least 1 when a file has named the span.
+struct MapSpan {
+    i32 X = 0;
+    i32 Y = 0;
+    i32 Width = 1;
+    i32 Height = 1;
+};
+
+// One picture standing on the map. Id is the art-pack key, shared by every
+// placement that uses that picture. Tile is the top-left of the footprint.
+// Width and Height are that footprint in cells. 0 means this placement left
+// the size unset, and a pack may supply it. Open cells lie inside the
+// footprint and are not blocked: a door, a rest, a shop, a talk. The picture
+// is drawn from this tile. A picture taller than the footprint hangs north of
+// it and does not block those cells.
+struct MapProp {
+    std::string Id;
+    MapTile Tile;
+    i32 Width = 0;
+    i32 Height = 0;
+    std::vector<MapSpan> Open;
+};
+
 struct MapDef {
     std::string Id;
     // Set on the one map a loss returns to. At most one map sets it.
@@ -105,6 +129,7 @@ struct MapDef {
     std::vector<MapSpawn> Spawns;
     std::vector<MapLink> Links;
     std::vector<MapPoint> Points;
+    std::vector<MapProp> Props;
 
     [[nodiscard]] bool InBounds(i32 x, i32 y) const;
     // Null when x, y is outside the grid.
@@ -182,6 +207,73 @@ inline const MapSpawn* MapDef::FindSpawn(std::string_view id) const
             return &spawn;
     }
     return nullptr;
+}
+
+// True when (x, y) sits in the span. A span with a non-positive side covers nothing.
+inline bool SpanCovers(const MapSpan& span, i32 x, i32 y)
+{
+    if (span.Width < 1 || span.Height < 1 || x < span.X || y < span.Y)
+        return false;
+    return x - span.X < span.Width && y - span.Y < span.Height;
+}
+
+// True when the footprint covers the cell and no open span does. Width or
+// height below 1 is an unset footprint, which covers nothing. `width` and
+// `height` are the resolved size: the map's, or a pack's when the map left
+// them unset.
+inline bool PropFootprintCovers(const MapProp& prop, i32 width, i32 height, i32 x, i32 y)
+{
+    if (width < 1 || height < 1 || x < prop.Tile.X || y < prop.Tile.Y)
+        return false;
+    if (x - prop.Tile.X >= width || y - prop.Tile.Y >= height)
+        return false;
+    for (const MapSpan& hole : prop.Open) {
+        if (SpanCovers(hole, x, y))
+            return false;
+    }
+    return true;
+}
+
+inline bool MapPropBlocks(const MapProp& prop, i32 x, i32 y)
+{
+    return PropFootprintCovers(prop, prop.Width, prop.Height, x, y);
+}
+
+inline bool MapBlocks(const MapDef& map, i32 x, i32 y)
+{
+    for (const MapProp& prop : map.Props) {
+        if (MapPropBlocks(prop, x, y))
+            return true;
+    }
+    return false;
+}
+
+// Where a prop picture is drawn, in tile coordinates. The bottom-left of the
+// picture sits on the bottom-left of the footprint, so a picture taller than
+// the footprint hangs north and SortY stays on the footprint's south row.
+// A later row is drawn later. `cellsWide` and `cellsHigh` are the picture.
+// Zero uses the footprint, and a footprint that is also unset is one cell.
+struct PropFrame {
+    f32 X = 0.0f;
+    f32 Y = 0.0f;
+    f32 Width = 1.0f;
+    f32 Height = 1.0f;
+    i32 SortY = 0;
+};
+
+inline PropFrame FrameProp(const MapProp& prop, i32 cellsWide, i32 cellsHigh)
+{
+    const i32 footWide = prop.Width > 0 ? prop.Width : (cellsWide > 0 ? cellsWide : 1);
+    const i32 footHigh = prop.Height > 0 ? prop.Height : (cellsHigh > 0 ? cellsHigh : 1);
+    const i32 drawWide = cellsWide > 0 ? cellsWide : footWide;
+    const i32 drawHigh = cellsHigh > 0 ? cellsHigh : footHigh;
+    PropFrame frame;
+    frame.Width = static_cast<f32>(drawWide);
+    frame.Height = static_cast<f32>(drawHigh);
+    frame.X = static_cast<f32>(prop.Tile.X);
+    frame.Y = static_cast<f32>(prop.Tile.Y + footHigh - drawHigh);
+    frame.SortY = prop.Tile.Y + footHigh - 1;
+    return frame;
 }
 
 inline const char* ToString(MapPointKind kind)

@@ -1017,7 +1017,7 @@ bool RouteTileOpen(const Database& data, const MapDef& map, i32 x, i32 y)
     if (cell == nullptr)
         return false;
     const TileDef* tile = data.FindTile(*cell);
-    return tile != nullptr && !tile->Solid;
+    return tile != nullptr && !tile->Solid && !MapBlocks(map, x, y);
 }
 
 void ReachFromHub(const Database& data, const std::string& hubId, std::vector<Reach>& out)
