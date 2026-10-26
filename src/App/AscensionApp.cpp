@@ -1047,8 +1047,9 @@ void AscensionApp::MaybeSettle()
     // Gold is not touched. A win already granted it in AwardVictory. A loss and
     // a flee do not reach GrantGold, so the purse stays where it was.
     const MapSettle settled = ApplyOutcome(m_Data, query, m_MapMemory, wounds);
-    const bool placed =
-        settled.Return.Ok && m_Walker.Place(m_Data, settled.Return.MapId, settled.Return.Tile);
+    const bool placed = settled.Return.Ok &&
+                        m_Walker.Place(m_Data, settled.Return.MapId, settled.Return.Tile,
+                                       &m_Gallery.GetPack());
     if (!placed) {
         Note("The way back is gone.");
     } else if (result == BattleResult::Victory && settled.Return.ClearSpawn) {
@@ -1357,19 +1358,20 @@ bool AscensionApp::UseMapPoint()
 bool AscensionApp::EnterOverland(std::string_view preferred)
 {
     bool stood = false;
+    const ArtPack* art = &m_Gallery.GetPack();
     if (m_HasPlace)
-        stood = m_Walker.Place(m_Data, m_PlaceMap, m_PlaceTile);
+        stood = m_Walker.Place(m_Data, m_PlaceMap, m_PlaceTile, art);
     if (!stood && m_HasPlace)
-        stood = m_Walker.Enter(m_Data, m_PlaceMap);
+        stood = m_Walker.Enter(m_Data, m_PlaceMap, art);
     if (!stood && !preferred.empty())
-        stood = m_Walker.Enter(m_Data, preferred);
+        stood = m_Walker.Enter(m_Data, preferred, art);
     // --map names the room on its own. The hub is only the default launch, and
     // the stand-in when a saved map id is no longer in the data.
     if (!stood && (preferred.empty() || m_HasPlace)) {
         for (const MapDef& map : m_Data.GetMaps()) {
             if (!map.Hub)
                 continue;
-            stood = m_Walker.Enter(m_Data, map.Id);
+            stood = m_Walker.Enter(m_Data, map.Id, art);
             break;
         }
     }
@@ -2540,7 +2542,7 @@ void AscensionApp::StepMap(f32 dt)
     if (scriptedStep && stepDt < moveSeconds)
         stepDt = moveSeconds;
     const WalkPlace before = m_Walker.Place();
-    const WalkStep step = m_Walker.Advance(m_Data, rules, input, stepDt);
+    const WalkStep step = m_Walker.Advance(m_Data, rules, input, stepDt, &m_Gallery.GetPack());
     if (step.Kind == WalkStepKind::Exited)
         Note("Exit to " + m_Walker.Place().MapId + ".");
     else if (step.Kind == WalkStepKind::Blocked && input.Fresh)
@@ -2568,7 +2570,7 @@ void AscensionApp::StepMap(f32 dt)
 void AscensionApp::AdoptMap()
 {
     const WalkPlace before = m_Walker.Place();
-    if (!m_Walker.Adopt(m_Data, m_Play.MapId)) {
+    if (!m_Walker.Adopt(m_Data, m_Play.MapId, &m_Gallery.GetPack())) {
         Note("No map to stand on.");
         return;
     }

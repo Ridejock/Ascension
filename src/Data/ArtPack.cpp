@@ -19,6 +19,10 @@ constexpr const char* kHeroesKey = "heroes";
 constexpr const char* kNpcsKey = "npcs";
 constexpr const char* kThemesKey = "themes";
 constexpr const char* kMarkersKey = "markers";
+constexpr const char* kPropsKey = "props";
+
+// The same span a map accepts. A prop picture is at most this many cells on a side.
+constexpr i32 kMaxPropSpan = 256;
 
 constexpr i32 kMaxFrames = 256;
 constexpr i32 kMaxFrameWidth = 16384;
@@ -420,7 +424,8 @@ bool ReadPicture(const Json& value, const std::filesystem::path& root, ArtPictur
 }
 
 void AddImage(std::vector<ArtImage>& images, ArtSlot slot, const std::string& id,
-              const std::string& map, const std::string& theme, std::vector<ArtPicture> pictures)
+              const std::string& map, const std::string& theme, std::vector<ArtPicture> pictures,
+              i32 cellsWide = 0, i32 cellsHigh = 0)
 {
     ArtImage image;
     image.Slot = slot;
@@ -428,6 +433,8 @@ void AddImage(std::vector<ArtImage>& images, ArtSlot slot, const std::string& id
     image.Map = map;
     image.Theme = theme;
     image.Pictures = std::move(pictures);
+    image.CellsWide = cellsWide;
+    image.CellsHigh = cellsHigh;
     images.push_back(std::move(image));
 }
 
@@ -748,6 +755,96 @@ bool LoadMarker(const Json& entry, const std::filesystem::path& root, std::vecto
     return true;
 }
 
+bool PropPlaced(const Database& data, std::string_view id)
+{
+    for (const MapDef& map : data.GetMaps()) {
+        for (const MapProp& prop : map.Props) {
+            if (prop.Id == id)
+                return true;
+        }
+    }
+    return false;
+}
+
+bool LoadProp(const Json& entry, const std::filesystem::path& root, const Database& data,
+              std::vector<ArtImage>& images, std::string& error)
+{
+    if (!entry.is_object()) {
+        error = ManifestError(kPropsKey, "entries must be objects");
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(entry, {"id", "file", "w", "h"}, unknown)) {
+        error = ManifestError(kPropsKey, "unknown field " + Quote(unknown));
+        return false;
+    }
+    std::string id;
+    std::string why;
+    if (!ReadString(entry, "id", true, id, why)) {
+        error = ManifestError(kPropsKey, why);
+        return false;
+    }
+    const std::string where = EntryWhere("prop", id);
+    if (!IsId(id)) {
+        error = ManifestError(where, "id must be letters, digits and _, starting with a letter");
+        return false;
+    }
+    for (const ArtImage& image : images) {
+        if (image.Slot == ArtSlot::Prop && image.Id == id) {
+            error = ManifestError(where, "there is another prop with this id");
+            return false;
+        }
+    }
+    if (!PropPlaced(data, id)) {
+        error = ManifestError(where, "id does not exist");
+        return false;
+    }
+    const bool hasWidth = entry.contains("w");
+    const bool hasHeight = entry.contains("h");
+    if (hasWidth != hasHeight) {
+        error = ManifestError(where, "name 'w' and 'h', or neither");
+        return false;
+    }
+    i32 cellsWide = 0;
+    i32 cellsHigh = 0;
+    if (hasWidth && (!OptionalInt(entry, "w", 1, kMaxPropSpan, cellsWide, why) ||
+                     !OptionalInt(entry, "h", 1, kMaxPropSpan, cellsHigh, why))) {
+        error = ManifestError(where, why);
+        return false;
+    }
+    const auto file = entry.find("file");
+    if (file == entry.end()) {
+        error = ManifestError(where, "'file' is required");
+        return false;
+    }
+    ArtPicture picture;
+    if (!ReadPicture(*file, root, picture, why)) {
+        error = ManifestError(where, why);
+        return false;
+    }
+    std::vector<ArtPicture> pictures;
+    pictures.push_back(std::move(picture));
+    AddImage(images, ArtSlot::Prop, id, {}, {}, std::move(pictures), cellsWide, cellsHigh);
+    return true;
+}
+
+bool LoadProps(const Json& root, const std::filesystem::path& directory, const Database& data,
+               std::vector<ArtImage>& images, std::string& error)
+{
+    const auto list = root.find(kPropsKey);
+    if (list == root.end())
+        return true;
+    if (!list->is_array()) {
+        error = ManifestError({}, "'props' must be a list");
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!LoadProp(entry, directory, data, images, error))
+            return false;
+    }
+    return true;
+}
+
 bool LoadMarkers(const Json& root, const std::filesystem::path& directory,
                  std::vector<ArtImage>& images, std::string& error)
 {
@@ -812,7 +909,8 @@ bool ReadManifest(const std::filesystem::path& directory, const Database& data,
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(root, {kTilesKey, kFoesKey, kHeroesKey, kNpcsKey, kThemesKey, kMarkersKey},
+    if (!AllowKeys(root,
+                   {kTilesKey, kFoesKey, kHeroesKey, kNpcsKey, kThemesKey, kMarkersKey, kPropsKey},
                    unknown)) {
         error = ManifestError({}, "unknown field " + Quote(unknown));
         return false;
@@ -824,7 +922,9 @@ bool ReadManifest(const std::filesystem::path& directory, const Database& data,
         if (!LoadSection(section, root, directory, data, themes, images, error))
             return false;
     }
-    return LoadMarkers(root, directory, images, error);
+    if (!LoadMarkers(root, directory, images, error))
+        return false;
+    return LoadProps(root, directory, data, images, error);
 }
 
 ResolvedArt FromImage(const ArtImage* image, i32 x, i32 y)
@@ -837,6 +937,8 @@ ResolvedArt FromImage(const ArtImage* image, i32 x, i32 y)
     ResolvedArt resolved;
     resolved.Origin = ArtOrigin::Pack;
     resolved.Picture = image->Pictures[static_cast<usize>(index)];
+    resolved.CellsWide = image->CellsWide;
+    resolved.CellsHigh = image->CellsHigh;
     return resolved;
 }
 

@@ -4438,6 +4438,171 @@ bool LoadPoints(const Json& body, const Parsed& parsed, MapDef& map, std::string
     return true;
 }
 
+// A cell the new prop would block, and that a hero, a foe, or a door already uses.
+bool PropCellTaken(const MapDef& map, i32 x, i32 y, std::string& why)
+{
+    MapTile tile;
+    tile.X = x;
+    tile.Y = y;
+    const std::string where = Coord(tile);
+    if (SameTile(map.Start, tile)) {
+        why = where + " is the start";
+        return true;
+    }
+    for (const MapSpawn& spawn : map.Spawns) {
+        if (SameTile(spawn.Tile, tile)) {
+            why = where + " already has spawn " + Quote(spawn.Id);
+            return true;
+        }
+    }
+    for (const MapLink& link : map.Links) {
+        if (SameTile(link.Tile, tile)) {
+            why = where + " already has a link";
+            return true;
+        }
+    }
+    for (const MapPoint& point : map.Points) {
+        if (SameTile(point.Tile, tile)) {
+            why = where + " already has a " + std::string(ToString(point.Kind));
+            return true;
+        }
+    }
+    for (const MapProp& other : map.Props) {
+        if (MapPropBlocks(other, x, y)) {
+            why = where + " is inside prop " + Quote(other.Id);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ReadOpenSpan(const Json& entry, MapSpan& span, std::string& error)
+{
+    if (!entry.is_object()) {
+        error = "entries must be objects";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(entry, {"x", "y", "w", "h"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireInt(entry, "x", 0, kMaxMapSpan - 1, span.X, error) ||
+        !RequireInt(entry, "y", 0, kMaxMapSpan - 1, span.Y, error))
+        return false;
+    span.Width = 1;
+    span.Height = 1;
+    if (!OptionalInt(entry, "w", 1, kMaxMapSpan, span.Width, error) ||
+        !OptionalInt(entry, "h", 1, kMaxMapSpan, span.Height, error))
+        return false;
+    return true;
+}
+
+bool OpenInside(const MapProp& prop, const MapSpan& hole)
+{
+    const i64 left = hole.X;
+    const i64 top = hole.Y;
+    const i64 right = left + hole.Width;
+    const i64 bottom = top + hole.Height;
+    const i64 propLeft = prop.Tile.X;
+    const i64 propTop = prop.Tile.Y;
+    const i64 propRight = propLeft + prop.Width;
+    const i64 propBottom = propTop + prop.Height;
+    return left >= propLeft && top >= propTop && right <= propRight && bottom <= propBottom;
+}
+
+bool LoadProps(const Json& body, MapDef& map, std::string& error)
+{
+    const Json* props = nullptr;
+    if (!OptionalList(body, "props", props, error))
+        return false;
+    if (props == nullptr)
+        return true;
+    for (const Json& entry : *props) {
+        if (!entry.is_object()) {
+            error = "prop entries must be objects";
+            return false;
+        }
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "tile", "w", "h", "open"}, unknown)) {
+            error = "prop: unknown field " + Quote(unknown);
+            return false;
+        }
+        MapProp prop;
+        if (!RequireString(entry, "id", prop.Id, error))
+            return false;
+        const std::string where = "prop " + Quote(prop.Id);
+        if (!IsId(prop.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        std::string why;
+        if (!RequireTile(entry, "tile", prop.Tile, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!map.InBounds(prop.Tile.X, prop.Tile.Y)) {
+            error = where + ": " + Coord(prop.Tile) + " is outside the map";
+            return false;
+        }
+        const bool hasWidth = entry.contains("w");
+        const bool hasHeight = entry.contains("h");
+        if (hasWidth != hasHeight) {
+            error = where + ": name 'w' and 'h', or neither";
+            return false;
+        }
+        if (hasWidth && (!RequireInt(entry, "w", 1, kMaxMapSpan, prop.Width, why) ||
+                         !RequireInt(entry, "h", 1, kMaxMapSpan, prop.Height, why))) {
+            error = where + ": " + why;
+            return false;
+        }
+        const Json* holes = nullptr;
+        if (!OptionalList(entry, "open", holes, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (holes != nullptr) {
+            if (prop.Width < 1 || prop.Height < 1) {
+                error = where + ": 'open' needs 'w' and 'h'";
+                return false;
+            }
+            for (const Json& holeEntry : *holes) {
+                MapSpan hole;
+                if (!ReadOpenSpan(holeEntry, hole, why)) {
+                    error = where + ": 'open' " + why;
+                    return false;
+                }
+                if (!OpenInside(prop, hole)) {
+                    error = where + ": open at " + std::to_string(hole.X) + "," +
+                            std::to_string(hole.Y) + " is outside the footprint";
+                    return false;
+                }
+                prop.Open.push_back(hole);
+            }
+        }
+        if (prop.Width > 0 && prop.Height > 0) {
+            const i64 right = static_cast<i64>(prop.Tile.X) + prop.Width;
+            const i64 bottom = static_cast<i64>(prop.Tile.Y) + prop.Height;
+            if (right > map.Width || bottom > map.Height) {
+                error = where + ": footprint is outside the map";
+                return false;
+            }
+            for (i32 y = prop.Tile.Y; y < prop.Tile.Y + prop.Height; ++y) {
+                for (i32 x = prop.Tile.X; x < prop.Tile.X + prop.Width; ++x) {
+                    if (!MapPropBlocks(prop, x, y))
+                        continue;
+                    if (PropCellTaken(map, x, y, why)) {
+                        error = where + ": " + why;
+                        return false;
+                    }
+                }
+            }
+        }
+        map.Props.push_back(std::move(prop));
+    }
+    return true;
+}
+
 bool LoadMapFile(const Json& root, const std::string& stem, Parsed& parsed, std::string& error)
 {
     const auto body = root.find("map");
@@ -4446,7 +4611,8 @@ bool LoadMapFile(const Json& root, const std::string& stem, Parsed& parsed, std:
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body, {"id", "hub", "rows", "legend", "start", "spawns", "links", "points"},
+    if (!AllowKeys(*body,
+                   {"id", "hub", "rows", "legend", "start", "spawns", "links", "points", "props"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -4487,7 +4653,7 @@ bool LoadMapFile(const Json& root, const std::string& stem, Parsed& parsed, std:
         return false;
     }
     if (!LoadSpawns(*body, parsed, map, error) || !LoadLinks(*body, parsed, map, error) ||
-        !LoadPoints(*body, parsed, map, error))
+        !LoadPoints(*body, parsed, map, error) || !LoadProps(*body, map, error))
         return false;
     parsed.Maps.push_back(std::move(map));
     return true;

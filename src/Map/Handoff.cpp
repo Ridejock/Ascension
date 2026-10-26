@@ -18,7 +18,7 @@ bool TileOpen(const Database& data, const MapDef& map, MapTile tile)
     if (cell == nullptr)
         return false;
     const TileDef* def = data.FindTile(*cell);
-    return def != nullptr && !def->Solid;
+    return def != nullptr && !def->Solid && !MapBlocks(map, tile.X, tile.Y);
 }
 
 bool Shift(MapTile from, WalkDir direction, MapTile& out)

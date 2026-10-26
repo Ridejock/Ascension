@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "Ascension/Data/ArtPack.h"
 #include "Ascension/Map/Movers.h"
 #include "Ascension/Map/Walk.h"
 #include "Check.h"
@@ -735,6 +736,86 @@ void TestSpawnGlide()
           "the glide continues from the current point toward the new tile");
 }
 
+const unsigned char kPng[] = {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+    0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+    0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+    0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+    0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+
+void WritePng(const fs::path& path)
+{
+    std::error_code error;
+    fs::create_directories(path.parent_path(), error);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(kPng), static_cast<std::streamsize>(sizeof(kPng)));
+}
+
+void TestPropFootprint()
+{
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                      "\"tile\": { \"x\": 2, \"y\": 2 }, \"w\": 1, \"h\": 1",
+                      "\"tile\": { \"x\": 1, \"y\": 2 }, \"w\": 1, \"h\": 2, "
+                      "\"open\": [ { \"x\": 1, \"y\": 3 } ]");
+        Database data = Loaded(copy.Path, "a footprint map loads");
+        if (!data.IsLoaded())
+            return;
+        const MapDef* map = data.FindMap("fixture_a");
+        Check(map != nullptr && MapBlocks(*map, 1, 2) && !MapBlocks(*map, 1, 3),
+              "the footprint blocks its cell and the open cell stays clear");
+        Walker walker;
+        Check(walker.Enter(data, "fixture_a") && At(walker, "fixture_a", 1, 1),
+              "the footprint test starts on the fixture");
+        Check(Press(walker, data, WalkDir::South).Kind == WalkStepKind::Blocked &&
+                  At(walker, "fixture_a", 1, 1),
+              "a footprint blocks a step the way a wall does");
+        MapTile hole;
+        hole.X = 1;
+        hole.Y = 3;
+        Check(walker.Place(data, "fixture_a", hole) && At(walker, "fixture_a", 1, 3),
+              "an open cell inside the footprint can be stood on");
+        MapTile blocked;
+        blocked.X = 1;
+        blocked.Y = 2;
+        Check(!walker.Place(data, "fixture_a", blocked) && At(walker, "fixture_a", 1, 3),
+              "place refuses the blocked footprint cell");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                      "\"tile\": { \"x\": 2, \"y\": 2 }, \"w\": 1, \"h\": 1",
+                      "\"tile\": { \"x\": 1, \"y\": 2 }");
+        Database data = Loaded(copy.Path, "an unsized prop map loads");
+        if (!data.IsLoaded())
+            return;
+        WritePng(copy.Path / "pack" / "props" / "post.png");
+        WriteFile(copy.Path / "pack" / "manifest.json",
+                  "{ \"props\": [ { \"id\": \"fixture_post\", \"file\": \"props/post.png\", "
+                  "\"w\": 1, \"h\": 1 } ] }\n");
+        ArtPack pack;
+        DataError packError;
+        Check(pack.Load(copy.Path / "pack", data, &packError), "the prop pack loads");
+        if (!packError.Message.empty())
+            std::printf("    %s\n", packError.Message.c_str());
+        Walker open;
+        Check(open.Enter(data, "fixture_a"), "the unsized prop starts on the fixture");
+        Check(Press(open, data, WalkDir::South).Kind == WalkStepKind::Moved &&
+                  At(open, "fixture_a", 1, 2),
+              "an unsized prop does not block without a pack");
+        Walker closed;
+        Check(closed.Enter(data, "fixture_a", &pack), "the packed prop starts on the fixture");
+        WalkInput south;
+        south.Direction = WalkDir::South;
+        south.Fresh = true;
+        const f32 step = static_cast<f32>(data.GetWalk().MoveMilliseconds) / 1000.0f;
+        const WalkStep blocked = closed.Advance(data, data.GetWalk(), south, step, &pack);
+        Check(blocked.Kind == WalkStepKind::Blocked && At(closed, "fixture_a", 1, 1),
+              "a pack footprint blocks the step the map left unsized");
+    }
+}
+
 void TestBadWalkFile()
 {
     {
@@ -802,6 +883,7 @@ int main()
     TestCamera();
     TestAdopt();
     TestEdge();
+    TestPropFootprint();
     TestBadWalkFile();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;

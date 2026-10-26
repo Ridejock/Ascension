@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "ArtGallery.h"
 #include "Emerald/Renderer/DebugText.h"
@@ -148,21 +149,103 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         }
     }
 
+    // Ground is already down. Props, markers, foes, and the hero share one south-to-north
+    // order: a smaller SortY is farther north and is drawn first. A prop sorts on the south
+    // row of its footprint, so a tall picture that hangs north covers a sprite standing
+    // under that overhang, and a sprite on the footprint's south row is drawn after it.
+    struct OverlandPiece {
+        i32 SortY = 0;
+        i32 Layer = 0;
+        usize Index = 0;
+    };
+    std::vector<OverlandPiece> pieces;
+    if (packed) {
+        for (usize index = 0; index < map->Props.size(); ++index) {
+            const MapProp& prop = map->Props[index];
+            const ResolvedArt resolved = art->GetPack().Find(ArtSlot::Prop, prop.Id);
+            if (resolved.Origin != ArtOrigin::Pack)
+                continue;
+            const PropFrame placed = FrameProp(prop, resolved.CellsWide, resolved.CellsHigh);
+            const f32 right = placed.X + placed.Width;
+            const f32 bottom = placed.Y + placed.Height;
+            if (right <= static_cast<f32>(firstX) || placed.X >= static_cast<f32>(lastX) ||
+                bottom <= static_cast<f32>(firstY) || placed.Y >= static_cast<f32>(lastY))
+                continue;
+            OverlandPiece piece;
+            piece.SortY = placed.SortY;
+            piece.Layer = 0;
+            piece.Index = index;
+            pieces.push_back(piece);
+        }
+    }
     if (inner > 0.0f) {
-        const Emerald::Vec4 restColor = ByteColor(rules.RestRed, rules.RestGreen, rules.RestBlue);
-        const Emerald::Vec4 talkColor = ByteColor(rules.TalkRed, rules.TalkGreen, rules.TalkBlue);
-        const Emerald::Vec4 shopColor = ByteColor(rules.ShopRed, rules.ShopGreen, rules.ShopBlue);
-        for (const MapPoint& point : map->Points) {
+        for (usize index = 0; index < map->Points.size(); ++index) {
+            const MapPoint& point = map->Points[index];
             if (point.Tile.X < firstX || point.Tile.X >= lastX || point.Tile.Y < firstY ||
                 point.Tile.Y >= lastY)
                 continue;
+            OverlandPiece piece;
+            piece.SortY = point.Tile.Y;
+            piece.Layer = 1;
+            piece.Index = index;
+            pieces.push_back(piece);
+        }
+        for (usize index = 0; index < map->Spawns.size(); ++index) {
+            const MapSpawn& spawn = map->Spawns[index];
+            if (SpawnCleared(cleared, spawn.Id))
+                continue;
+            const MapTile at = SpawnDrawTile(spawn, places);
+            const WalkPoint drawn =
+                motion != nullptr ? motion->Sample(spawn.Id, at)
+                                  : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
+            if (drawn.X + 1.0f < static_cast<f32>(firstX) || drawn.X >= static_cast<f32>(lastX) ||
+                drawn.Y + 1.0f < static_cast<f32>(firstY) || drawn.Y >= static_cast<f32>(lastY))
+                continue;
+            OverlandPiece piece;
+            piece.SortY = static_cast<i32>(std::floor(static_cast<double>(drawn.Y)));
+            piece.Layer = 2;
+            piece.Index = index;
+            pieces.push_back(piece);
+        }
+        OverlandPiece heroPiece;
+        heroPiece.SortY = static_cast<i32>(std::floor(static_cast<double>(heroPoint.Y)));
+        heroPiece.Layer = 3;
+        pieces.push_back(heroPiece);
+    }
+    std::sort(pieces.begin(), pieces.end(),
+              [](const OverlandPiece& left, const OverlandPiece& right) {
+                  if (left.SortY != right.SortY)
+                      return left.SortY < right.SortY;
+                  if (left.Layer != right.Layer)
+                      return left.Layer < right.Layer;
+                  return left.Index < right.Index;
+              });
+
+    const Emerald::Vec4 restColor = ByteColor(rules.RestRed, rules.RestGreen, rules.RestBlue);
+    const Emerald::Vec4 talkColor = ByteColor(rules.TalkRed, rules.TalkGreen, rules.TalkBlue);
+    const Emerald::Vec4 shopColor = ByteColor(rules.ShopRed, rules.ShopGreen, rules.ShopBlue);
+    const Emerald::Vec4 spawnColor = ByteColor(rules.SpawnRed, rules.SpawnGreen, rules.SpawnBlue);
+    const Emerald::Vec4 heroColor = ByteColor(rules.HeroRed, rules.HeroGreen, rules.HeroBlue);
+    for (const OverlandPiece& piece : pieces) {
+        if (piece.Layer == 0) {
+            const MapProp& prop = map->Props[piece.Index];
+            const ResolvedArt resolved = art->GetPack().Find(ArtSlot::Prop, prop.Id);
+            const PropFrame placed = FrameProp(prop, resolved.CellsWide, resolved.CellsHigh);
+            const f32 left = (placed.X - frame.OriginX) * tile;
+            const f32 top = (placed.Y - frame.OriginY) * tile;
+            // A missing picture draws nothing. There is no built-in prop art.
+            (void)DrawArt(renderer, art, ArtSlot::Prop, prop.Id, {left, top},
+                          {placed.Width * tile, placed.Height * tile}, white);
+            continue;
+        }
+        if (piece.Layer == 1) {
+            const MapPoint& point = map->Points[piece.Index];
             const f32 left = (static_cast<f32>(point.Tile.X) - frame.OriginX) * tile + inset;
             const f32 top = (static_cast<f32>(point.Tile.Y) - frame.OriginY) * tile + inset;
             // PictureForPoint is the only choice. A keeper already standing as a
             // talk point is not drawn again on the shop. A missing sprite, or a
             // shop with no dialogue, still falls through to the shop marker.
-            const PointPicture picture =
-                PictureForPoint(*map, point, data.GetShop().Dialogue);
+            const PointPicture picture = PictureForPoint(*map, point, data.GetShop().Dialogue);
             bool drewNpc = false;
             if (packed && picture.Art == PointArt::Npc) {
                 drewNpc = DrawArt(renderer, art, ArtSlot::NpcSprite, picture.Dialogue, {left, top},
@@ -184,22 +267,14 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                     color = &shopColor;
                 DrawCell(renderer, left, top, inner, *color);
             }
+            continue;
         }
-    }
-
-    if (inner > 0.0f) {
-        const Emerald::Vec4 spawnColor =
-            ByteColor(rules.SpawnRed, rules.SpawnGreen, rules.SpawnBlue);
-        for (const MapSpawn& spawn : map->Spawns) {
-            if (SpawnCleared(cleared, spawn.Id))
-                continue;
+        if (piece.Layer == 2) {
+            const MapSpawn& spawn = map->Spawns[piece.Index];
             const MapTile at = SpawnDrawTile(spawn, places);
             const WalkPoint drawn =
                 motion != nullptr ? motion->Sample(spawn.Id, at)
                                   : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
-            if (drawn.X + 1.0f < static_cast<f32>(firstX) || drawn.X >= static_cast<f32>(lastX) ||
-                drawn.Y + 1.0f < static_cast<f32>(firstY) || drawn.Y >= static_cast<f32>(lastY))
-                continue;
             const f32 left = (drawn.X - frame.OriginX) * tile + inset;
             const f32 top = (drawn.Y - frame.OriginY) * tile + inset;
             const std::string* foeId = packed ? SpawnFoeId(data, spawn) : nullptr;
@@ -207,14 +282,10 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                 !DrawArt(renderer, art, ArtSlot::FoeOverland, *foeId, {left, top}, {inner, inner},
                          white))
                 DrawCell(renderer, left, top, inner, spawnColor);
+            continue;
         }
-    }
-
-    if (inner > 0.0f) {
         const f32 left = (heroPoint.X - frame.OriginX) * tile + inset;
         const f32 top = (heroPoint.Y - frame.OriginY) * tile + inset;
-        const Emerald::Vec4 heroColor =
-            ByteColor(rules.HeroRed, rules.HeroGreen, rules.HeroBlue);
         if (!packed || !DrawArt(renderer, art, ArtSlot::HeroMarker, "", {left, top}, {inner, inner},
                                 white))
             DrawCell(renderer, left, top, inner, heroColor);

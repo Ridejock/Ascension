@@ -473,6 +473,86 @@ void TestMarkers(const Database& data, const PackDir& dir)
                "another marker", "a repeated marker id is named");
 }
 
+void TestProps(const Database& data, const PackDir& dir)
+{
+    WritePng(dir.Path / "props" / "post.png");
+    WriteText(dir.Path / "manifest.json",
+              "{\n"
+              "  \"props\": [ { \"id\": \"fixture_post\", \"file\": \"props/post.png\", "
+              "\"w\": 2, \"h\": 3 } ]\n"
+              "}\n");
+    ArtPack pack;
+    std::string error;
+    Check(LoadPack(dir.Path, data, pack, error), "a prop manifest loads");
+    if (!error.empty())
+        std::printf("    message was: %s\n", error.c_str());
+    CheckPacked(pack, ArtSlot::Prop, "fixture_post", dir.Path / "props" / "post.png",
+                "a listed prop uses the pack file");
+    const ResolvedArt resolved = pack.Find(ArtSlot::Prop, "fixture_post");
+    Check(resolved.Origin == ArtOrigin::Pack && resolved.CellsWide == 2 &&
+              resolved.CellsHigh == 3,
+          "Find returns the prop picture size in cells");
+    CheckBuiltin(pack, ArtSlot::Prop, "no_such_prop", "an unlisted prop id is not drawn");
+    CheckBuiltin(pack, ArtSlot::Tile, "floor", "a prop list leaves tiles on the built-in art");
+
+    MapProp placement;
+    placement.Id = "fixture_post";
+    placement.Tile.X = 1;
+    placement.Tile.Y = 2;
+    MapDef map;
+    map.Props.push_back(placement);
+    Check(!MapBlocks(map, 1, 2), "an unsized placement does not block by itself");
+    Check(!FootprintBlocks(map, 1, 2, nullptr), "no pack leaves an unsized placement open");
+    Check(FootprintBlocks(map, 1, 2, &pack) && FootprintBlocks(map, 2, 4, &pack) &&
+              !FootprintBlocks(map, 3, 2, &pack) && !FootprintBlocks(map, 1, 5, &pack),
+          "the pack size is the footprint when the map omitted it");
+
+    MapProp sized;
+    sized.Id = "fixture_post";
+    sized.Tile.X = 0;
+    sized.Tile.Y = 0;
+    sized.Width = 1;
+    sized.Height = 1;
+    MapSpan door;
+    door.X = 0;
+    door.Y = 0;
+    sized.Open.push_back(door);
+    MapDef holed;
+    holed.Props.push_back(sized);
+    Check(!FootprintBlocks(holed, 0, 0, &pack) && !MapBlocks(holed, 0, 0),
+          "an open cell stays walkable even when the pack names a size");
+    sized.Open.clear();
+    MapDef walled;
+    walled.Props.push_back(sized);
+    Check(FootprintBlocks(walled, 0, 0, &pack) && !FootprintBlocks(walled, 1, 0, &pack),
+          "a map footprint wins over a wider picture");
+
+    WriteText(dir.Path / "manifest.json", "{ \"props\": [] }\n");
+    ArtPack empty;
+    Check(LoadPack(dir.Path, data, empty, error), "an empty prop list loads");
+    CheckBuiltin(empty, ArtSlot::Prop, "fixture_post", "an empty prop list draws no prop");
+
+    ExpectFail(data, dir,
+               "{ \"props\": [ { \"id\": \"no_such_prop\", \"file\": \"props/post.png\" } ] }\n",
+               "no_such_prop", "an unknown prop id is named");
+    ExpectFail(data, dir,
+               "{ \"props\": [ { \"id\": \"fixture_post\", \"file\": \"props/post.png\" }, "
+               "{ \"id\": \"fixture_post\", \"file\": \"props/post.png\" } ] }\n",
+               "another prop", "a repeated prop id is named");
+    ExpectFail(data, dir,
+               "{ \"props\": [ { \"id\": \"fixture_post\", \"file\": \"props/post.png\", "
+               "\"block\": true } ] }\n",
+               "block", "a prop rejects an unknown field");
+    ExpectFail(data, dir,
+               "{ \"props\": [ { \"id\": \"fixture_post\", \"file\": \"props/post.png\", "
+               "\"w\": 2 } ] }\n",
+               "w", "a prop names w and h together");
+    ExpectFail(data, dir, "{ \"props\": { \"id\": \"fixture_post\" } }\n", "must be a list",
+               "a props object is rejected");
+    ExpectFail(data, dir, "{ \"props\": [ { \"id\": \"fixture_post\" } ] }\n", "file",
+               "a prop needs a file");
+}
+
 } // namespace
 
 int main()
@@ -494,6 +574,7 @@ int main()
     TestStrips(data, dir);
     TestTileScope(data, dir);
     TestMarkers(data, dir);
+    TestProps(data, dir);
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
