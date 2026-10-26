@@ -1,6 +1,6 @@
-# Hub walk into the first room, using a throwaway save folder.
+# Hub walk out to the wolf, using a throwaway save folder.
 # The per-user save is not read or written. On Windows, pass --save-dir %TEMP%\ascension-step6.
-# Start is the rest. East twice talks to Pell and leaves. The shop is two west and two south.
-# Seven east and one south take the door. Two east steps onto the wolf.
+# Start is the inn rest. North to the street and east talks to Pell.
+# North into the shop opens it and closes it. East through the gate, then east on the road, steps onto the wolf.
 
 ./build/debug/bin/Ascension --save-dir /tmp/ascension-step6 --keys-file playtest/hub/walk.keys --transcript /tmp/ascension-step6-walk.txt
