@@ -253,7 +253,7 @@ Ascension.exe --level 6 --class berserker --enemy wolf_pack --keys "6 right 6" -
 That is the same Berserker against the Wolf Pack. `6` is Cleave, which logs a hit on each living Dire Wolf. `right` marks the next one and logs `Target: Dire Wolf 2.` A Varn fight that calls a second shard logs `Rubble Shard 2 joins the fight.` Those lines are in the transcript because they are the on-screen log. `playtest/bear/commands.txt` runs the headless bear and sentry tables.
 
 ```
-Ascension.exe --save-dir %TEMP%\ascension-step6 --keys "d d i down down e e a a s s i i" --transcript walk.txt
+Ascension.exe --save-dir %TEMP%\ascension-step6 --keys "w w w w w d d d d d i down down e e w d d w w w i i d s s s d d d d d d d d s d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d" --transcript walk.txt
 ```
 
 That is a throwaway save folder, not the per-user save. The hub start is the rest, so the log says `Rested.` North out of the inn and east along the street, `i` talks to Pell. Down twice and `e` takes "Just passing through.", and the next `e` ends that line. North into the shop, `i` opens it and the next `i` closes it. East through the gate is `overland`, and the road east steps onto the wolf. `playtest/hub/commands.txt` is that walk. `playtest/route/commands.txt` is the headless map route: one table for every build, with and without the optional room. `--enemy wolf` is still the single fight on the fight screen. A launch with no `--keys` stays on the map until Escape.
