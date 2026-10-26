@@ -1133,7 +1133,7 @@ void TestRoute()
         std::printf("    %s\n", walked.Error.c_str());
     const RouteExpect expect[] = {
         {RouteStepKind::Rest, "", false, "hub"},
-        {RouteStepKind::Fight, "wolf", false, "barrow_1"},
+        {RouteStepKind::Fight, "wolf", false, "overland"},
         {RouteStepKind::Fight, "bandit", false, "barrow_1"},
         {RouteStepKind::Fight, "tomb_moth", false, "barrow_2"},
         {RouteStepKind::Fight, "bone_archer", false, "barrow_2"},

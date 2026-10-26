@@ -3080,7 +3080,7 @@ void CheckCampaignMaps(const char* dir)
 
     Check(data.FindMap("fixture_a") == nullptr && data.FindMap("fixture_b") == nullptr,
           "the shipped maps are not the fixtures");
-    Check(data.GetMaps().size() == 9, "a hub and eight dungeon rooms");
+    Check(data.GetMaps().size() == 10, "a hub, the road, and eight barrow rooms");
     const MapDef* hub = data.FindMap("hub");
     i32 hubs = 0;
     for (const MapDef& map : data.GetMaps()) {
@@ -3090,19 +3090,19 @@ void CheckCampaignMaps(const char* dir)
     Check(hubs == 1 && hub != nullptr && hub->Hub, "one hub, and its id is hub");
     if (hub == nullptr)
         return;
-    Check(hub->Start.X == 3 && hub->Start.Y == 2 && hub->Spawns.empty() && hub->Links.size() == 1 &&
-              hub->Links[0].Map == "barrow_1",
-          "the hub starts on its rest and leaves through one door");
+    Check(hub->Start.X == 8 && hub->Start.Y == 14 && hub->Spawns.empty() && hub->Links.size() == 1 &&
+              hub->Links[0].Map == "overland",
+          "the hub starts on its rest and leaves through the east gate");
     const MapPoint* rest = FindPoint(*hub, MapPointKind::Rest);
     const MapPoint* talk = FindPoint(*hub, MapPointKind::Talk);
     const MapPoint* shop = FindPoint(*hub, MapPointKind::Shop);
     Check(hub->Points.size() == 3 && rest != nullptr && rest->Tile.X == hub->Start.X &&
               rest->Tile.Y == hub->Start.Y,
           "the hub rest shares the start tile");
-    Check(talk != nullptr && talk->Dialogue == "pell" && talk->Tile.X == 5 && talk->Tile.Y == 2 &&
+    Check(talk != nullptr && talk->Dialogue == "pell" && talk->Tile.X == 13 && talk->Tile.Y == 9 &&
               data.FindDialogue("pell") != nullptr,
           "the hub talk point is Pell's existing dialogue");
-    Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 3 && shop->Tile.Y == 4,
+    Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 15 && shop->Tile.Y == 5,
           "the hub shop point opens the shop");
     const std::string& keeper = data.GetShop().Dialogue;
     i32 keepers = 0;
@@ -3119,6 +3119,10 @@ void CheckCampaignMaps(const char* dir)
     }
     Check(keeper == "pell" && keepers == 1, "Pell is drawn once");
 
+    const MapDef* road = data.FindMap("overland");
+    Check(road != nullptr && !road->Hub && road->Links.size() == 2 && road->Spawns.size() == 1 &&
+              road->Spawns[0].Encounter == "wolf",
+          "the road links the village to the barrow and has the wolf");
     const char* rooms[] = {"barrow_1", "barrow_2", "barrow_3", "barrow_4",
                            "barrow_5", "barrow_6", "barrow_7", "barrow_side"};
     for (const char* id : rooms) {

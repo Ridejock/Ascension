@@ -3,13 +3,51 @@
     {
       "id": "floor",
       "solid": false,
-      "color": "#996838",
+      "color": "#7E4E2E",
       "sheet": "placeholder"
     },
     {
       "id": "wall",
       "solid": true,
       "color": "#2A2438"
+    },
+    {
+      "id": "grass",
+      "solid": false,
+      "color": "#64AC45",
+      "sheet": "placeholder"
+    },
+    {
+      "id": "path",
+      "solid": false,
+      "color": "#996838",
+      "sheet": "placeholder"
+    },
+    {
+      "id": "water",
+      "solid": true,
+      "color": "#4F6A86"
+    },
+    {
+      "id": "tree",
+      "solid": true,
+      "color": "#1E4A3A"
+    },
+    {
+      "id": "stone",
+      "solid": false,
+      "color": "#717B6C",
+      "sheet": "placeholder"
+    },
+    {
+      "id": "barrow",
+      "solid": true,
+      "color": "#212D1C"
+    },
+    {
+      "id": "rubble",
+      "solid": true,
+      "color": "#4C4458"
     }
   ]
 }
