@@ -75,6 +75,9 @@ void TestShippedControls(const Database& data)
               rules.DebugNewGameArmed == "Press again to start a new game." &&
               rules.DebugNewGame == "New game.",
           "debug notes come from input.json");
+    Check(rules.PauseTitle == "Paused" && rules.PauseContinue == "Continue" &&
+              rules.PauseQuit == "Quit game",
+          "pause menu lines come from input.json");
     Check(rules.Actions.size() == kControlActions.size(), "every control action is listed once");
     for (const std::string_view action : kControlActions)
         Check(FindControl(rules, action) != nullptr, "a required action is present");
@@ -86,6 +89,14 @@ void TestShippedControls(const Database& data)
     Check(restart != nullptr && restart->Keys.size() == 1 && restart->Keys[0] == "F9" &&
               restart->Buttons.empty(),
           "new game is F9 and has no pad button");
+    const ControlBind* pause = FindControl(rules, kPause);
+    const ControlBind* quit = FindControl(rules, kQuit);
+    Check(pause != nullptr && pause->Keys.size() == 2 && pause->Keys[0] == "P" &&
+              pause->Keys[1] == "Escape" && pause->Buttons.size() == 1 &&
+              pause->Buttons[0] == "Start",
+          "pause is P, Escape, and Start");
+    Check(quit != nullptr && quit->Keys.empty() && quit->Buttons.empty(),
+          "quit has no key or button");
 
     const PromptRules& prompts = data.GetPrompts();
     Check(prompts.IconScale == 1 && prompts.TextScale == 2, "prompt scales come from prompts.json");
@@ -161,8 +172,15 @@ void TestMapping()
     pads.OnButton(1, Emerald::GamepadButton::North, false);
     pads.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::Start, true);
-    Check(input.WasActionPressed(kPause), "start pauses");
+    Check(input.WasActionPressed(kPause) && !input.WasActionPressed(kQuit), "start pauses");
     pads.OnButton(1, Emerald::GamepadButton::Start, false);
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    keyboard.OnKeyDown(SDL_SCANCODE_ESCAPE);
+    Check(input.WasActionPressed(kPause) && !input.WasActionPressed(kQuit),
+          "escape is pause, not quit");
+    keyboard.OnKeyUp(SDL_SCANCODE_ESCAPE);
+    keyboard.BeginFrame();
     pads.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::Back, true);
     Check(input.WasActionPressed(kHelp), "back toggles help");
@@ -284,63 +302,95 @@ void TestPauseResume()
     Check(ReadActionEdges(false, false), "play samples action edges");
     Check(!ReadActionEdges(true, true), "a script does not also sample the window");
 
-    bool paused = false;
+    PauseMenu menu;
     keyboard.BeginFrame();
     pads.BeginFrame();
     keyboard.OnKeyDown(SDL_SCANCODE_P);
     Check(input.WasActionPressed(kPause), "P is the pause action");
-    paused = StepPause(input, paused, false);
-    Check(paused, "P pauses");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::Opened && menu.Open && menu.Row == 0,
+          "P opens the menu on Continue");
 
     keyboard.BeginFrame();
     pads.BeginFrame();
     Check(!input.WasActionPressed(kPause), "a held P is not a second edge");
-    paused = StepPause(input, paused, false);
-    Check(paused, "holding P stays paused");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::None && menu.Open,
+          "holding P stays on the menu");
 
     keyboard.OnKeyUp(SDL_SCANCODE_P);
     keyboard.BeginFrame();
     pads.BeginFrame();
     keyboard.OnKeyDown(SDL_SCANCODE_P);
-    paused = StepPause(input, paused, false);
-    Check(!paused, "P resumes and play returns");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::Resumed && !menu.Open,
+          "P resumes and does not quit");
 
     keyboard.OnKeyUp(SDL_SCANCODE_P);
     keyboard.BeginFrame();
     pads.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::Start, true);
     Check(input.WasActionPressed(kPause), "Start is the pause action");
-    paused = StepPause(input, paused, false);
-    Check(paused, "Start pauses");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::Opened && menu.Row == 0,
+          "Start opens the menu on Continue");
 
     pads.OnButton(1, Emerald::GamepadButton::Start, false);
     pads.BeginFrame();
     keyboard.BeginFrame();
     Check(!input.WasActionPressed(kPause), "a released Start does not resume by itself");
-    paused = StepPause(input, paused, false);
-    Check(paused, "pause waits for an edge");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::None && menu.Open,
+          "the menu waits for an edge");
 
     pads.OnButton(1, Emerald::GamepadButton::East, true);
     Check(input.WasActionPressed(kCancel) && !input.WasActionPressed(kPause),
           "East is cancel, the resume action");
-    paused = StepPause(input, paused, false);
-    Check(!paused, "East resumes and play returns");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::Resumed && !menu.Open,
+          "East resumes and does not quit");
 
     pads.OnButton(1, Emerald::GamepadButton::East, false);
     pads.BeginFrame();
     keyboard.BeginFrame();
-    pads.OnButton(1, Emerald::GamepadButton::Start, true);
-    paused = StepPause(input, paused, false);
-    Check(paused, "Start pauses again");
-    pads.OnButton(1, Emerald::GamepadButton::Start, false);
+    keyboard.OnKeyDown(SDL_SCANCODE_ESCAPE);
+    Check(input.WasActionPressed(kPause) && !input.WasActionPressed(kQuit),
+          "Escape is pause, not quit");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::Opened && menu.Row == 0,
+          "Escape opens the menu on Continue");
+    keyboard.OnKeyUp(SDL_SCANCODE_ESCAPE);
+
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    pads.OnButton(1, Emerald::GamepadButton::DPadDown, true);
+    Check(StepPauseMenu(input, menu, false) == PauseStep::None && menu.Open && menu.Row == 1,
+          "south moves to Quit game and leaves the menu open");
+    pads.OnButton(1, Emerald::GamepadButton::DPadDown, false);
+
     pads.BeginFrame();
     keyboard.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::DPadUp, true);
     Check(input.WasActionPressed(kMoveNorth), "a direction is still an edge while paused");
-    paused = StepPause(input, paused, true);
-    Check(paused, "a scripted frame does not leave pause");
-    paused = StepPause(input, paused, false);
-    Check(paused, "a direction does not resume");
+    Check(StepPauseMenu(input, menu, true) == PauseStep::None && menu.Open && menu.Row == 1,
+          "a scripted frame does not leave the menu");
+    Check(StepPauseMenu(input, menu, false) == PauseStep::None && menu.Open && menu.Row == 0,
+          "north returns to Continue and does not resume");
+    pads.OnButton(1, Emerald::GamepadButton::DPadUp, false);
+
+    pads.BeginFrame();
+    keyboard.BeginFrame();
+    pads.OnButton(1, Emerald::GamepadButton::South, true);
+    Check(StepPauseMenu(input, menu, false) == PauseStep::Resumed && !menu.Open,
+          "confirm on Continue resumes and does not quit");
+    pads.OnButton(1, Emerald::GamepadButton::South, false);
+
+    menu = {};
+    Check(ApplyPauseAction(menu, kPause) == PauseStep::Opened && menu.Row == 0,
+          "the first row is Continue");
+    Check(ApplyPauseAction(menu, kMoveSouth) == PauseStep::None && menu.Row == 1,
+          "south selects Quit game");
+    Check(ApplyPauseAction(menu, kConfirm) == PauseStep::Quit && menu.Open,
+          "confirm on Quit game asks to save and exit");
+    menu.Open = true;
+    menu.Row = 1;
+    Check(ApplyPauseAction(menu, kPause) == PauseStep::Resumed && !menu.Open,
+          "Pause again resumes from Quit game without saving");
+    Check(ApplyPauseAction(menu, kConfirm) == PauseStep::None && !menu.Open,
+          "confirm while closed does not quit");
 }
 
 void TestNewGameConfirm()
@@ -403,6 +453,15 @@ void TestRejectedData()
         Check(!data.Load(&error), "a missing confirm window fails the load");
         Check(error.Message.find("debugConfirmMilliseconds") != std::string::npos,
               "the error names the confirm window");
+    }
+    {
+        TempCopy copy;
+        ReplaceIn(copy.Path / "input.json", "\"pauseContinue\": \"Continue\",\n", "");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "a missing pause line fails the load");
+        Check(error.Message.find("pauseContinue") != std::string::npos,
+              "the error names the pause line");
     }
 }
 

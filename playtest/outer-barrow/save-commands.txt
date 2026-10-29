@@ -1,5 +1,6 @@
-# Save, quit, and load. Run from the repo root, after the debug build.
-# The first command writes a new run. The second loads it from the same folder.
+# Save, then load. Run from the repo root, after the debug build.
+# The first command writes a new run with f5. escape opens the pause menu, then the script ends.
+# The second command loads that folder. The folder is the one named by --save-dir.
 
 ./build/debug/bin/Ascension --data data --level 1 --gold 20 --save-dir /tmp/ascension-save --keys-file playtest/outer-barrow/save-quit.keys --transcript /tmp/ascension-save-quit.txt
 
