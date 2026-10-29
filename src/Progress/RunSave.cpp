@@ -133,6 +133,17 @@ void MigrateRunV2(Emerald::SaveData& data)
         data.SetBool("fight.known", false);
 }
 
+// Version 4 has a class and no personal name. Version 5 stores `name`. An empty name
+// is the default, so an old Fighter still shows as Fighter. A file that somehow has
+// no class becomes fighter; a class the file already names is left alone.
+void MigrateRunV4(Emerald::SaveData& data)
+{
+    if (!data.Has("name"))
+        data.SetString("name", "");
+    if (!data.Has("class") || data.GetString("class").empty())
+        data.SetString("class", "fighter");
+}
+
 // Version 3's position is an encounter-list index. Version 4 stores a map, a tile, and
 // spawn ids. The index waits under legacy.index until the maps are loaded. A finished
 // fight did not carry HP in version 3; drop a leftover health field so it still does not.
@@ -156,6 +167,7 @@ Emerald::SaveSystem Open(const std::filesystem::path& folder)
     system.AddMigration(1, MigrateRunV1);
     system.AddMigration(2, MigrateRunV2);
     system.AddMigration(3, MigrateRunV3);
+    system.AddMigration(4, MigrateRunV4);
     return system;
 }
 
@@ -353,6 +365,7 @@ bool ReadFight(const Emerald::SaveData& data, FightSnapshot& fight, std::string&
 
 void Store(const RunState& run, Emerald::SaveData& data)
 {
+    data.SetString("name", run.Career.Name);
     data.SetString("class", run.Career.ClassId);
     data.SetInt("xp", run.Career.Xp);
     data.SetBool("custom", run.Career.Custom);
@@ -453,6 +466,7 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
         error = "the save has no class";
         return false;
     }
+    run.Career.Name = data.GetString("name");
     run.Career.ClassId = data.GetString("class");
     run.Career.Xp = data.GetInt("xp", 0);
     run.Career.Custom = data.GetBool("custom", false);
@@ -645,7 +659,9 @@ bool RunSave::Write(const RunState& run, std::string& error) const
     Emerald::SaveData data;
     Store(run, data);
     Emerald::SaveSystem system = Open(m_Folder);
-    const std::string summary = run.Career.ClassId + " xp " + std::to_string(run.Career.Xp);
+    std::string summary = run.Career.ClassId + " xp " + std::to_string(run.Career.Xp);
+    if (!run.Career.Name.empty())
+        summary = run.Career.Name + " " + summary;
     if (!system.Save(kSlot, data, summary)) {
         error = "could not write the save";
         return false;

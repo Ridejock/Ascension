@@ -106,11 +106,13 @@ struct RunLoad {
 // the previous good copy. The folder is the per-user path unless a test passes its own.
 class RunSave {
 public:
-    // Version 4. The place is a map id and a tile, cleared spawns are string ids, and
-    // HP and focus are kept between fights, including after a flee. Found ids and
-    // dialogue flags were already optional in version 3: a missing list claimed nothing
-    // and set no talk flags, and this version still reads them that way.
-    static constexpr u32 kVersion = 4;
+    // Version 5. `name` is the hero's own name. Empty is the default, and a missing
+    // name on an older file stays empty. A missing class becomes `fighter`. The class
+    // a version 4 file already stored is kept. Version 4 is a map id and a tile,
+    // cleared spawns are string ids, and HP and focus are kept between fights,
+    // including after a flee. Found ids and dialogue flags were already optional in
+    // version 3: a missing list claimed nothing and set no talk flags.
+    static constexpr u32 kVersion = 5;
 
     explicit RunSave(std::filesystem::path folder);
 

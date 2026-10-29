@@ -78,6 +78,15 @@ void TestShippedControls(const Database& data)
     Check(rules.PauseTitle == "Paused" && rules.PauseContinue == "Continue" &&
               rules.PauseQuit == "Quit game",
           "pause menu lines come from input.json");
+    Check(rules.TitleWordmark == "Ascension" && rules.TitleTagline == "A name, a class, and the road." &&
+              rules.TitleContinue == "Continue" && rules.TitleNewGame == "New game" &&
+              rules.TitleQuit == "Quit" && rules.TitleOverwrite == "Overwrite the saved run?" &&
+              rules.TitleOverwriteYes == "Overwrite" && rules.TitleBack == "Back",
+          "title lines come from input.json");
+    Check(rules.CreateName == "Name" && rules.CreateClass == "Class" && rules.CreateBegin == "Begin" &&
+              rules.CreateNameEmpty == "Enter a name." && rules.CreateNameLong == "That name is too long." &&
+              rules.CreateNameBad == "That name cannot be used.",
+          "create lines come from input.json");
     Check(rules.Actions.size() == kControlActions.size(), "every control action is listed once");
     for (const std::string_view action : kControlActions)
         Check(FindControl(rules, action) != nullptr, "a required action is present");
@@ -467,6 +476,8 @@ void TestRejectedData()
 
 } // namespace
 
+void TestFrontDoor();
+
 int main()
 {
     SDL_Init(SDL_INIT_GAMEPAD);
@@ -484,6 +495,7 @@ int main()
     TestPauseResume();
     TestNewGameConfirm();
     TestRejectedData();
+    TestFrontDoor();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     SDL_Quit();
     return g_Failures == 0 ? 0 : 1;

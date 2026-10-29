@@ -2775,7 +2775,10 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
     if (!AllowKeys(*body,
                    {"navInitialMilliseconds", "navRepeatMilliseconds", "debugConfirmMilliseconds",
                     "debugRespawned", "debugRespawnBusy", "debugNewGameArmed", "debugNewGame",
-                    "pauseTitle", "pauseContinue", "pauseQuit", "actions"},
+                    "pauseTitle", "pauseContinue", "pauseQuit", "titleWordmark", "titleTagline",
+                    "titleContinue", "titleNewGame", "titleQuit", "titleOverwrite",
+                    "titleOverwriteYes", "titleBack", "createName", "createClass", "createBegin",
+                    "createNameEmpty", "createNameLong", "createNameBad", "actions"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2792,7 +2795,21 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
         !RequireString(*body, "debugNewGame", rules.DebugNewGame, error) ||
         !RequireString(*body, "pauseTitle", rules.PauseTitle, error) ||
         !RequireString(*body, "pauseContinue", rules.PauseContinue, error) ||
-        !RequireString(*body, "pauseQuit", rules.PauseQuit, error))
+        !RequireString(*body, "pauseQuit", rules.PauseQuit, error) ||
+        !RequireString(*body, "titleWordmark", rules.TitleWordmark, error) ||
+        !RequireString(*body, "titleTagline", rules.TitleTagline, error) ||
+        !RequireString(*body, "titleContinue", rules.TitleContinue, error) ||
+        !RequireString(*body, "titleNewGame", rules.TitleNewGame, error) ||
+        !RequireString(*body, "titleQuit", rules.TitleQuit, error) ||
+        !RequireString(*body, "titleOverwrite", rules.TitleOverwrite, error) ||
+        !RequireString(*body, "titleOverwriteYes", rules.TitleOverwriteYes, error) ||
+        !RequireString(*body, "titleBack", rules.TitleBack, error) ||
+        !RequireString(*body, "createName", rules.CreateName, error) ||
+        !RequireString(*body, "createClass", rules.CreateClass, error) ||
+        !RequireString(*body, "createBegin", rules.CreateBegin, error) ||
+        !RequireString(*body, "createNameEmpty", rules.CreateNameEmpty, error) ||
+        !RequireString(*body, "createNameLong", rules.CreateNameLong, error) ||
+        !RequireString(*body, "createNameBad", rules.CreateNameBad, error))
         return false;
     const auto list = body->find("actions");
     if (list == body->end() || !list->is_array()) {

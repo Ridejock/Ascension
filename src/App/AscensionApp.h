@@ -14,6 +14,7 @@
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/DebugRun.h"
+#include "Ascension/Progress/FrontDoor.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
 #include "Emerald/Core/Application.h"
@@ -37,6 +38,7 @@ public:
 
 protected:
     void OnStart() override;
+    void OnEvent(const SDL_Event& event) override;
     void OnUpdate(f32 dt) override;
     void OnRender2D(Emerald::Renderer2D& renderer) override;
 
@@ -140,9 +142,27 @@ private:
     // DebugRespawnFoes brings cleared foes back. An ongoing fight, or a map fight
     // that has not settled, is left alone and notes the busy line from input.json.
     void DebugRespawnFoes();
-    // DebugNewGame twice, inside debugConfirmMilliseconds, starts the run Start()
-    // would. The save file is not touched.
+    // DebugNewGame twice, inside debugConfirmMilliseconds, opens character create.
+    // From a running game, Begin replaces the run and leaves the save file alone.
+    // From the title it is New game, including the overwrite ask.
     void DebugNewGame();
+    // No save, or a save the player has not continued. Create is the other way in.
+    void ShowTitle();
+    // --class, --keys, and the other setup flags. The title is not shown.
+    void BootPreparedRun();
+    // After the hero exists: the hub, or the fight screen when --enemy was set.
+    void FinishBoot(bool resumed);
+    void ContinueSavedRun();
+    void CommitCreatedRun();
+    void PollFront(f32 dt);
+    void TakeFrontStep(FrontStep step);
+    void SyncTextInput();
+    void DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // E is Confirm and a letter. A text event for that key does not also submit.
+    [[nodiscard]] bool NameConfirmSuppressed();
+    [[nodiscard]] std::string FrontNoticeLine() const;
+    // Letters from the keyboard when this frame had no text event.
+    void TypeNameFromKeys();
     void ApplyFreshRun(const FreshStart& fresh);
     void HandleOverland(std::string_view action);
     void HandleChoice(std::string_view action);
@@ -305,8 +325,14 @@ private:
     NavHold m_Nav[6]{};
     // Last device that pressed a key or a button. prompts.json's text family until a pad is used.
     std::string m_PromptFamily;
-    // First DebugNewGame press. The second, inside the data window, starts over.
+    // First DebugNewGame press. The second, inside the data window, opens create.
     ConfirmWindow m_NewGameConfirm;
+    // Title until a save is continued, a hero is created, or a playtest flag skips it.
+    FrontDoor m_Front;
+    // ShowTitle reads the slot once. A later data reload does not ask again.
+    bool m_SaveProbed = false;
+    // Set when this frame's text event added to the name. Cleared at the end of the poll.
+    bool m_NameTyped = false;
     struct PromptPicture {
         std::string Family;
         Emerald::AssetHandle<Emerald::Texture> Texture;
