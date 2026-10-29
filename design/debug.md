@@ -29,7 +29,7 @@ A new run is the one a missing save starts. The hero is the first starter class,
 
 The line is `debugNewGame` (`New game.`).
 
-The save file is not deleted and not rewritten. The next Save or quit writes this run over it, the same way a new game becomes the file on the first save.
+The save file is not deleted and not rewritten. The next Save, or Quit game on the pause menu, writes this run over it, the same way a new game becomes the file on the first save.
 
 ## Help
 

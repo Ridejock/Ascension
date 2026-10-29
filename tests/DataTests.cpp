@@ -2547,8 +2547,10 @@ const char* kUiLabels[] = {
     "Paused.",
     "UP DOWN MOVE    E SPEAK    I CLOSE",
     "E CONTINUE    I CLOSE",
-    "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT    ESC QUIT",
-    "SPACE WAIT    R FIGHT    N NEXT FOE    F5 SAVE    ESC QUIT",
+    "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT",
+    "SPACE WAIT    R FIGHT    N NEXT FOE    F5 SAVE",
+    "CONTINUE",
+    "QUIT GAME",
     "BOTH HANDS",
     "EMPTY",
     " x",
@@ -2669,6 +2671,10 @@ void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
     const ShopDef& shop = data.GetShop();
     ConsiderGlyphs(shop.Id, shop.Name, missing);
     ConsiderGlyphs(shop.Id, shop.Keeper, missing);
+    const ControlRules& controls = data.GetControls();
+    ConsiderGlyphs("pause", controls.PauseTitle, missing);
+    ConsiderGlyphs("pause", controls.PauseContinue, missing);
+    ConsiderGlyphs("pause", controls.PauseQuit, missing);
 
     CombatantState foe;
     foe.GuardPercent = 50;

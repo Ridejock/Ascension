@@ -31,6 +31,10 @@ struct ControlRules {
     std::string DebugRespawnBusy;
     std::string DebugNewGameArmed;
     std::string DebugNewGame;
+    // Pause menu copy. Continue is the first row. Quit game is the second.
+    std::string PauseTitle;
+    std::string PauseContinue;
+    std::string PauseQuit;
     std::vector<ControlBind> Actions;
 };
 
@@ -105,8 +109,8 @@ inline constexpr std::array<std::string_view, 30> kControlActions = {
 }
 
 // Scripted keys are applied by the script, so that frame does not also read the
-// devices. Pause is not a reason to skip: WasActionPressed is only true on the
-// frame the button goes down, and Start / East are how pause ends.
+// devices. The pause menu is not a reason to skip: WasActionPressed is only true
+// on the frame the button goes down, and that edge opens the menu and moves it.
 [[nodiscard]] inline bool ReadActionEdges(bool scripting, bool paused)
 {
     if (scripting)
@@ -154,27 +158,87 @@ inline ConfirmTap TapConfirmWindow(ConfirmWindow& window)
     return ConfirmTap::Armed;
 }
 
-// Pause toggles. While paused, Cancel resumes. Any other action leaves the flag.
-[[nodiscard]] inline bool PauseAfter(bool paused, std::string_view action)
+// Continue is row 0. Quit game is row 1. The words are pauseContinue and pauseQuit.
+inline constexpr i32 kPauseRowCount = 2;
+
+struct PauseMenu {
+    bool Open = false;
+    i32 Row = 0;
+};
+
+// Opened and Resumed do not write a save. Quit asks the caller to write the run
+// and exit. None means the menu stayed as it was, including a row change.
+enum class PauseStep : u8 { None, Opened, Resumed, Quit };
+
+// Actions the open menu reads besides Pause. East and west are not in this set.
+[[nodiscard]] inline bool PauseMenuUses(std::string_view action)
 {
-    if (action == kPause)
-        return !paused;
-    if (paused && action == kCancel)
-        return false;
-    return paused;
+    return action == kCancel || action == kConfirm || action == kMoveNorth ||
+           action == kMoveSouth || action == kCyclePrev || action == kCycleNext;
 }
 
-// One frame of pause edges. Pause wins over Cancel when both are down, so a
-// resume button on the same frame as Start does not also run as a close.
-[[nodiscard]] inline bool StepPause(const Emerald::Input& input, bool paused, bool scripting)
+// Closed: Pause opens on Continue. Open: Pause or Cancel resumes. Confirm on
+// Continue resumes. Confirm on Quit game returns Quit. North and south move the
+// row and leave the menu open.
+[[nodiscard]] inline PauseStep ApplyPauseAction(PauseMenu& menu, std::string_view action)
 {
-    if (!ReadActionEdges(scripting, paused))
-        return paused;
+    if (!menu.Open) {
+        if (action != kPause)
+            return PauseStep::None;
+        menu.Open = true;
+        menu.Row = 0;
+        return PauseStep::Opened;
+    }
+    if (action == kPause || action == kCancel) {
+        menu.Open = false;
+        menu.Row = 0;
+        return PauseStep::Resumed;
+    }
+    if (action == kMoveNorth || action == kCyclePrev) {
+        if (menu.Row > 0)
+            --menu.Row;
+        return PauseStep::None;
+    }
+    if (action == kMoveSouth || action == kCycleNext) {
+        if (menu.Row + 1 < kPauseRowCount)
+            ++menu.Row;
+        return PauseStep::None;
+    }
+    if (action == kConfirm) {
+        if (menu.Row <= 0) {
+            menu.Open = false;
+            menu.Row = 0;
+            return PauseStep::Resumed;
+        }
+        return PauseStep::Quit;
+    }
+    return PauseStep::None;
+}
+
+// One frame of pause-menu edges. Pause wins over Cancel and Confirm, so the
+// frame that opens the menu does not also activate Continue.
+[[nodiscard]] inline PauseStep StepPauseMenu(const Emerald::Input& input, PauseMenu& menu,
+                                             bool scripting)
+{
+    if (!ReadActionEdges(scripting, menu.Open))
+        return PauseStep::None;
     if (input.WasActionPressed(kPause))
-        return PauseAfter(paused, kPause);
+        return ApplyPauseAction(menu, kPause);
+    if (!menu.Open)
+        return PauseStep::None;
     if (input.WasActionPressed(kCancel))
-        return PauseAfter(paused, kCancel);
-    return paused;
+        return ApplyPauseAction(menu, kCancel);
+    if (input.WasActionPressed(kConfirm))
+        return ApplyPauseAction(menu, kConfirm);
+    if (input.WasActionPressed(kMoveNorth))
+        return ApplyPauseAction(menu, kMoveNorth);
+    if (input.WasActionPressed(kCyclePrev))
+        return ApplyPauseAction(menu, kCyclePrev);
+    if (input.WasActionPressed(kMoveSouth))
+        return ApplyPauseAction(menu, kMoveSouth);
+    if (input.WasActionPressed(kCycleNext))
+        return ApplyPauseAction(menu, kCycleNext);
+    return PauseStep::None;
 }
 
 // True when a key's bound actions aim or spend the player's turn. A key with no action does not.

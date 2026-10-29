@@ -592,7 +592,7 @@ void AscensionApp::PacePresented(f32 dt)
         m_ShownAge = 0.0f;
     }
     const bool scripting = m_KeyCursor < m_Play.Keys.size();
-    if (scripting || m_Paused || m_Battle == nullptr || m_Talk || m_Camp || m_Picking || m_Aiming)
+    if (scripting || m_Pause.Open || m_Battle == nullptr || m_Talk || m_Camp || m_Picking || m_Aiming)
         return;
     if (m_Battle->Result() != BattleResult::Ongoing || m_Battle->Actor() != CombatantSide::Enemy)
         return;
@@ -1545,7 +1545,7 @@ bool AscensionApp::Choosing() const
 
 bool AscensionApp::CursorActive() const
 {
-    if (m_Paused || !m_Data.IsLoaded())
+    if (m_Pause.Open || !m_Data.IsLoaded())
         return false;
     if (m_Talk || m_Camp || m_Picking)
         return true;
@@ -1731,11 +1731,70 @@ void AscensionApp::DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 ma
     }
 }
 
-void AscensionApp::FinishFrame(Emerald::Renderer2D& renderer, f32 width)
+void AscensionApp::RetargetPauseHints(std::vector<HintChip>& hints) const
 {
-    if (m_Paused) {
-        Emerald::DrawDebugText(renderer, {width * 0.5f - 42.0f, 16.0f}, "PAUSED", kFrame, 2);
+    if (!m_Pause.Open)
+        return;
+    hints.clear();
+    AddHint(hints, kMoveNorth, "");
+    AddHint(hints, kMoveSouth, "MOVE");
+    AddHint(hints, kConfirm, "CONFIRM");
+    AddHint(hints, kCancel, "CANCEL");
+}
+
+void AscensionApp::DrawPauseMenu(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    if (!m_Data.IsLoaded())
+        return;
+    const BattleUi& ui = m_Data.GetBattleUi();
+    const UiStyle& style = ui.Style;
+    const ControlRules& rules = m_Data.GetControls();
+    const f32 pad = static_cast<f32>(style.PanelPad);
+    const i32 titleScale = style.BannerScale > 0 ? style.BannerScale : 2;
+    const f32 titleH = Emerald::DebugTextLineHeight(titleScale);
+    const f32 rowH = Emerald::DebugTextLineHeight(style.BodyScale);
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 group = static_cast<f32>(style.GroupGap);
+    const f32 listH = rowH * static_cast<f32>(kPauseRowCount) + rowGap;
+    const f32 panelH = pad + titleH + group + listH + pad;
+    const f32 panelW = width > 520.0f ? 480.0f : width - 56.0f;
+    // The hint row stays at the bottom. The panel sits above that clearance.
+    const f32 hintTop = height - 36.0f;
+    const f32 floor = hintTop - static_cast<f32>(style.HintClearance);
+    f32 panelX = (width - panelW) * 0.5f;
+    if (panelX < 28.0f)
+        panelX = 28.0f;
+    f32 panelY = floor > panelH ? (floor - panelH) * 0.42f : 24.0f;
+    if (panelY < 24.0f)
+        panelY = 24.0f;
+    if (panelY + panelH > floor && floor > panelH)
+        panelY = floor - panelH;
+    const Emerald::Vec4 panel = Paint(style.Panel);
+    const Emerald::Vec4 edge = Paint(style.Frame);
+    DrawPanel(renderer, {panelX, panelY}, {panelW > 0.0f ? panelW : 0.0f, panelH}, panel, edge);
+    const f32 textX = panelX + pad;
+    const f32 textW = panelW - pad * 2.0f;
+    f32 y = panelY + pad;
+    if (textW > 0.0f) {
+        Emerald::DrawDebugText(renderer, {textX, y}, FitLine(rules.PauseTitle, titleScale, textW),
+                               edge, titleScale);
     }
+    y += titleH + group;
+    std::vector<MenuLine> rows;
+    MenuLine cont;
+    cont.Text = rules.PauseContinue;
+    MenuLine quit;
+    quit.Text = rules.PauseQuit;
+    rows.push_back(std::move(cont));
+    rows.push_back(std::move(quit));
+    const f32 menuFloor = panelY + panelH - pad;
+    DrawMenu(renderer, rows, m_Pause.Row, {textX, y}, textW > 0.0f ? textW : 0.0f, menuFloor, style);
+}
+
+void AscensionApp::FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    if (m_Pause.Open)
+        DrawPauseMenu(renderer, width, height);
     renderer.End();
 }
 
@@ -1795,35 +1854,48 @@ void AscensionApp::PollActions(f32 dt)
     if (!m_Data.IsLoaded())
         return;
     NotePromptDevice();
-    // Quit still wins, including while paused. Save, help, and the debug actions
-    // are read before the pause edge so a resume on the same frame still writes
-    // the run. Each debug action is handled once: WasActionPressed stays true
-    // for the whole frame, and a second call would tap the new-game window twice.
-    if (Pressed(kQuit)) {
-        HandleAction(kQuit);
-        return;
-    }
+    // Save, help, and the debug actions are read before the pause edge so a
+    // resume on the same frame still writes the run. Each debug action is
+    // handled once: WasActionPressed stays true for the whole frame, and a
+    // second call would tap the new-game window twice. Quit is not a key.
+    // The pause menu's Quit game row is the exit.
     if (Pressed(kDebugRespawnFoes))
         HandleAction(kDebugRespawnFoes);
     if (Pressed(kDebugNewGame))
         HandleAction(kDebugNewGame);
-    if (m_Paused) {
+    if (m_Pause.Open) {
         if (Pressed(kSave))
             HandleAction(kSave);
         if (Pressed(kHelp))
             HandleAction(kHelp);
     }
     // OnUpdate only calls this when ReadActionEdges is true, so this is a live
-    // frame. StepPause, not HandleAction, owns the edge: calling both would
-    // toggle twice on the same press and leave the game paused.
-    const bool wasPaused = m_Paused;
-    m_Paused = StepPause(GetInput(), m_Paused, false);
-    if (m_Paused != wasPaused) {
-        Note(m_Paused ? "Paused." : "Resumed.");
+    // frame. This function, not HandleAction, owns the edge: calling both would
+    // step the menu twice on the same press.
+    if (Pressed(kPause)) {
+        TakePauseStep(ApplyPauseAction(m_Pause, kPause));
         return;
     }
-    if (m_Paused)
+    if (m_Pause.Open) {
+        if (Pressed(kCancel)) {
+            TakePauseStep(ApplyPauseAction(m_Pause, kCancel));
+            return;
+        }
+        if (Pressed(kConfirm)) {
+            TakePauseStep(ApplyPauseAction(m_Pause, kConfirm));
+            return;
+        }
+        const std::string_view nav[] = {kMoveNorth, kMoveSouth, kCyclePrev, kCycleNext};
+        const int holds[] = {0, 1, 4, 5};
+        for (int index = 0; index < 4; ++index) {
+            if (!NavStep(m_Nav[holds[index]], nav[index], dt))
+                continue;
+            const PauseStep step = ApplyPauseAction(m_Pause, nav[index]);
+            if (step != PauseStep::None)
+                TakePauseStep(step);
+        }
         return;
+    }
     if (Pressed(kSave))
         HandleAction(kSave);
     if (Pressed(kHelp))
@@ -2294,7 +2366,7 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
     m_PickRow = 0;
     m_CommandRow = 0;
     m_ChoiceRow = 0;
-    m_Paused = false;
+    m_Pause = {};
     m_RestSeen = false;
     m_RestMap.clear();
     m_ScriptDir = WalkDir::None;
@@ -2324,6 +2396,21 @@ void AscensionApp::DebugNewGame()
     Note(rules.DebugNewGame);
 }
 
+void AscensionApp::TakePauseStep(PauseStep step)
+{
+    if (step == PauseStep::Quit) {
+        HandleAction(kQuit);
+        return;
+    }
+    if (step != PauseStep::Opened && step != PauseStep::Resumed)
+        return;
+    Note(step == PauseStep::Opened ? "Paused." : "Resumed.");
+    for (NavHold& hold : m_Nav) {
+        hold.Elapsed = 0.0f;
+        hold.Repeating = false;
+    }
+}
+
 void AscensionApp::HandleAction(std::string_view action)
 {
     if (action == kQuit) {
@@ -2350,16 +2437,13 @@ void AscensionApp::HandleAction(std::string_view action)
         m_ShowHelp = !m_ShowHelp;
         return;
     }
-    // Scripted keys arrive here, not through StepPause. A live frame already
-    // applied the edge in PollActions and must not reach this branch.
-    if (action == kPause || (m_Paused && action == kCancel)) {
-        const bool next = PauseAfter(m_Paused, action);
-        if (next != m_Paused)
-            Note(next ? "Paused." : "Resumed.");
-        m_Paused = next;
+    // Scripted keys arrive here. A live frame already applied the edge in
+    // PollActions and must not reach this branch.
+    if (action == kPause || (m_Pause.Open && PauseMenuUses(action))) {
+        TakePauseStep(ApplyPauseAction(m_Pause, action));
         return;
     }
-    if (m_Paused)
+    if (m_Pause.Open)
         return;
     ScriptedPressQuery window;
     window.ScriptRunning = m_KeyCursor < m_Play.Keys.size();
@@ -2640,9 +2724,9 @@ void AscensionApp::OnUpdate(f32 dt)
     MaybeSettle();
     const bool scripting = m_KeyCursor < m_Play.Keys.size();
     // Pause does not skip this. The resume edge is only true on its own frame.
-    if (ReadActionEdges(scripting, m_Paused))
+    if (ReadActionEdges(scripting, m_Pause.Open))
         PollActions(dt);
-    if (!m_Paused && m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
+    if (!m_Pause.Open && m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
         StepMap(dt);
     // Frame time is a float, and Windows file stamps are not stable the way this poll
     // expects. A reload between scripted keys rebuilds the fight on a different frame
@@ -2945,7 +3029,7 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
     AddHint(hints, kSave, "SAVE");
     AddHint(hints, kDebugRespawnFoes, "FOES");
     AddHint(hints, kDebugNewGame, "NEW");
-    AddHint(hints, kQuit, "QUIT");
+    RetargetPauseHints(hints);
     DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
 
@@ -3500,7 +3584,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
 
     if (loadError)
         return;
-    if (showAim) {
+    if (showAim && !m_Pause.Open) {
         std::vector<HintChip> ask;
         AddHint(ask, kConfirm, "CONFIRM");
         AddHint(ask, kCancel, "CANCEL");
@@ -3547,7 +3631,6 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         for (usize i = 0; i < names.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
             AddHint(hints, slots[i], names[i]);
         AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
-        AddHint(hints, kQuit, "QUIT");
     } else {
         if (shownSkills > 0)
             AddHint(hints, kSlot1, shownSkills == 1 ? "SKILL" : "SKILLS");
@@ -3572,9 +3655,9 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         AddHint(hints, kSave, "SAVE");
         AddHint(hints, kDebugRespawnFoes, "FOES");
         AddHint(hints, kDebugNewGame, "NEW");
-        AddHint(hints, kQuit, "QUIT");
         AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
     }
+    RetargetPauseHints(hints);
     DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
 
@@ -3591,12 +3674,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     if (m_OnMap && !SpawnFightOpen() && m_Data.IsLoaded() && m_StartError.empty()) {
         if (m_Talk && m_Hero.IsReady()) {
             DrawTalk(renderer, width, height);
-            FinishFrame(renderer, width);
+            FinishFrame(renderer, width, height);
             return;
         }
         if (m_Camp && m_Hero.IsReady()) {
             DrawCamp(renderer, width, height);
-            FinishFrame(renderer, width);
+            FinishFrame(renderer, width, height);
             return;
         }
         const PoolCaps caps = m_Hero.IsReady() && m_Inventory.IsReady()
@@ -3608,7 +3691,13 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                       &m_Glides);
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
-        if (const char* word = MapInteractWord(m_Data, m_Walker)) {
+        if (m_Pause.Open) {
+            const PromptRules& prompts = m_Data.GetPrompts();
+            std::vector<HintChip> pauseHints;
+            RetargetPauseHints(pauseHints);
+            DrawHints(renderer, 16.0f, promptY, width - 16.0f, pauseHints, true);
+            promptY += Emerald::DebugTextLineHeight(prompts.TextScale) + 4.0f;
+        } else if (const char* word = MapInteractWord(m_Data, m_Walker)) {
             const PromptRules& prompts = m_Data.GetPrompts();
             const bool text = m_PromptFamily.empty() || m_PromptFamily == prompts.TextFamily;
             std::vector<HintChip> hints;
@@ -3620,18 +3709,18 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         AddHint(debugHints, kDebugRespawnFoes, "FOES");
         AddHint(debugHints, kDebugNewGame, "NEW");
         DrawHints(renderer, 16.0f, promptY, width - 16.0f, debugHints, true);
-        FinishFrame(renderer, width);
+        FinishFrame(renderer, width, height);
         return;
     }
 
     if (m_Talk && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
         DrawTalk(renderer, width, height);
-        FinishFrame(renderer, width);
+        FinishFrame(renderer, width, height);
         return;
     }
     if (m_Camp && m_Data.IsLoaded() && m_StartError.empty() && m_Hero.IsReady()) {
         DrawCamp(renderer, width, height);
-        FinishFrame(renderer, width);
+        FinishFrame(renderer, width, height);
         return;
     }
 
@@ -3653,16 +3742,16 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                 StartupFailureText(m_StartError, m_Data.GetLastError(), m_Hero.NextFightBlock());
             Emerald::DrawDebugText(renderer, {left.x + 24.0f, left.y + 80.0f}, Upper(message), kError,
                                    2, leftSize.x - 48.0f);
-            FinishFrame(renderer, width);
+            FinishFrame(renderer, width, height);
             return;
         }
         DrawBetween(renderer, width, height);
-        FinishFrame(renderer, width);
+        FinishFrame(renderer, width, height);
         return;
     }
 
     DrawFight(renderer, width, height);
-    FinishFrame(renderer, width);
+    FinishFrame(renderer, width, height);
 }
 
 void AscensionApp::DrinkAt(i32 bagIndex)
@@ -4236,7 +4325,7 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
                                    FitLine(m_Shown, style.MessageScale, detailW), ink, style.MessageScale);
     }
 
-    if (asking) {
+    if (asking && !m_Pause.Open) {
         std::vector<HintChip> ask;
         AddHint(ask, kConfirm, "CONFIRM");
         AddHint(ask, kCancel, "CANCEL");
@@ -4259,7 +4348,7 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
         AddHint(hints, kRetry, "FIGHT");
         AddHint(hints, kNext, "NEXT");
     }
-    AddHint(hints, kQuit, "QUIT");
+    RetargetPauseHints(hints);
     DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
 }
 
@@ -4325,6 +4414,7 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
         AddHint(hints, kConfirm, "SPEAK");
     }
     AddHint(hints, CloseAction(), "CLOSE");
+    RetargetPauseHints(hints);
     DrawHints(renderer, 52.0f, height - 56.0f, width - 52.0f, hints, true);
 }
 

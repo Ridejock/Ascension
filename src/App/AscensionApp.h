@@ -132,6 +132,11 @@ private:
     // The map's own step repeat reads the move actions in StepMap.
     void PollActions(f32 dt);
     void HandleAction(std::string_view action);
+    // Opened and Resumed log a line. Quit writes the run and exits, the same path as Quit.
+    void TakePauseStep(PauseStep step);
+    void DrawPauseMenu(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // While the pause menu is open, the bottom hint row shows confirm, cancel, and navigate.
+    void RetargetPauseHints(std::vector<HintChip>& hints) const;
     // DebugRespawnFoes brings cleared foes back. An ongoing fight, or a map fight
     // that has not settled, is left alone and notes the busy line from input.json.
     void DebugRespawnFoes();
@@ -163,7 +168,7 @@ private:
     // first key. Empty when that action has neither.
     [[nodiscard]] std::string ActionLabel(std::string_view action);
     [[nodiscard]] std::string CloseLabel();
-    void FinishFrame(Emerald::Renderer2D& renderer, f32 width);
+    void FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // The hint row already on this screen. Glyphs use prompts.json; missing art is the label.
     // helpLine hides the row when the help action has toggled it off. The map tile
     // prompt passes false: that line stays.
@@ -278,9 +283,10 @@ private:
     bool m_RestSeen = false;
     std::string m_RestMap;
     MapTile m_RestTile;
-    // Start pauses. Cancel or Start again resumes. The map and further actions wait.
-    // Edges are still read while this is set: the resume press lasts one frame.
-    bool m_Paused = false;
+    // Pause opens this menu on Continue. Confirm on that row, Cancel, and Pause
+    // resume without saving. Quit game writes the run and exits. The map and
+    // further actions wait. Edges are still read while it is open.
+    PauseMenu m_Pause;
     // Back/View and the help key hide the line at the bottom. The map's tile prompt stays.
     bool m_ShowHelp = true;
     // The highlighted battle command (skills, then wait, items, flee) and choice row.

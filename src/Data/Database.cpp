@@ -2775,7 +2775,7 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
     if (!AllowKeys(*body,
                    {"navInitialMilliseconds", "navRepeatMilliseconds", "debugConfirmMilliseconds",
                     "debugRespawned", "debugRespawnBusy", "debugNewGameArmed", "debugNewGame",
-                    "actions"},
+                    "pauseTitle", "pauseContinue", "pauseQuit", "actions"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2789,7 +2789,10 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
         !RequireString(*body, "debugRespawned", rules.DebugRespawned, error) ||
         !RequireString(*body, "debugRespawnBusy", rules.DebugRespawnBusy, error) ||
         !RequireString(*body, "debugNewGameArmed", rules.DebugNewGameArmed, error) ||
-        !RequireString(*body, "debugNewGame", rules.DebugNewGame, error))
+        !RequireString(*body, "debugNewGame", rules.DebugNewGame, error) ||
+        !RequireString(*body, "pauseTitle", rules.PauseTitle, error) ||
+        !RequireString(*body, "pauseContinue", rules.PauseContinue, error) ||
+        !RequireString(*body, "pauseQuit", rules.PauseQuit, error))
         return false;
     const auto list = body->find("actions");
     if (list == body->end() || !list->is_array()) {
@@ -2820,7 +2823,9 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
         if (!ReadNameList(entry, "keys", bind.Keys, error) ||
             !ReadNameList(entry, "buttons", bind.Buttons, error))
             return false;
-        if (bind.Keys.empty() && bind.Buttons.empty()) {
+        // Quit is the pause menu's exit. It stays in the action list so the save
+        // path has a name, and it has no key: Escape is Pause.
+        if (bind.Keys.empty() && bind.Buttons.empty() && bind.Name != kQuit) {
             error = "action " + Quote(bind.Name) + " has no keys or buttons";
             return false;
         }
