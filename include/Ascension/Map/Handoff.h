@@ -9,7 +9,9 @@
 
 namespace Ascension {
 
+class ArtPack;
 class Battle;
+class Walker;
 
 // What a spawn fight did. Won clears a spawn whose `once` is set. Lost sends the
 // hero to the loss tile at full HP and does not spend gold. Fled steps back beside
@@ -150,18 +152,31 @@ void ApplyMapAuras(const Database& data, const MapDef& map, const MapMemory& mem
                    std::span<const SpawnPlace> places, std::vector<PartyFoe>& foes);
 
 // `places` is the same overlay as ApplyMapAuras. Empty uses the file tiles, which
-// is where an idle mover is standing.
+// is where an idle mover is standing. `art` is the pack Walker::Place uses. A null
+// pack leaves an unsized prop open, which is what a map that sizes its own props sees.
 [[nodiscard]] MapFightRequest OfferSpawn(const Database& data, const MapDef& map,
                                          ContactQuery query, const MapMemory& memory,
-                                         std::span<const SpawnPlace> places = {});
+                                         std::span<const SpawnPlace> places = {},
+                                         const ArtPack* art = nullptr);
 
-[[nodiscard]] LossSpot FindLossReturn(const Database& data, std::string_view foughtMapId);
+[[nodiscard]] LossSpot FindLossReturn(const Database& data, std::string_view foughtMapId,
+                                      const ArtPack* art = nullptr);
 
-[[nodiscard]] MapReturn ResolveReturn(const Database& data, const ReturnQuery& query);
+[[nodiscard]] MapReturn ResolveReturn(const Database& data, const ReturnQuery& query,
+                                      const ArtPack* art = nullptr);
 
 // Writes the clear and the wounds. Does not move the hero and does not touch gold.
 [[nodiscard]] MapSettle ApplyOutcome(const Database& data, const ReturnQuery& query,
-                                     MapMemory& memory, std::span<const FoeWound> wounds);
+                                     MapMemory& memory, std::span<const FoeWound> wounds,
+                                     const ArtPack* art = nullptr);
+
+// Stands the hero on `tile` when that cell accepts them. If it does not, tries the
+// other open neighbors of `around` in north, east, south, west order, then the map
+// start. A flee passes the spawn as `avoid` so the hero is not put back on it.
+// False leaves the hero where they were.
+[[nodiscard]] bool PlaceNear(Walker& walker, const Database& data, std::string_view mapId,
+                             MapTile tile, MapTile around, MapTile avoid, bool hasAvoid,
+                             const ArtPack* art);
 
 void CaptureFoeWounds(const Battle& battle, std::vector<FoeWound>& out);
 void ApplyFoeWounds(Battle& battle, const FledWounds& wounds);

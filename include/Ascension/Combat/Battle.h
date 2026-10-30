@@ -140,6 +140,11 @@ public:
     // round back, so the next Next() is that seat and nobody has acted.
     virtual void Capture(std::vector<TurnSeat>& order, i32& index) const = 0;
     virtual void Place(std::span<const TurnSeat> order, i32 index) = 0;
+    // Drops this seat from the open round. A summon that replaces a corpse keeps that
+    // index, and the round may still list it. The new body does not act on the dead foe's
+    // remaining turn. The next round, built from whoever is standing, includes it.
+    // A model that does not keep a round leaves this empty.
+    virtual void ReleaseSeat(CombatantSide, i32) {}
 };
 
 // One action each per round. Higher agility goes first. An equal agility gives the player
@@ -151,6 +156,7 @@ public:
     void Advance() override;
     void Capture(std::vector<TurnSeat>& order, i32& index) const override;
     void Place(std::span<const TurnSeat> order, i32 index) override;
+    void ReleaseSeat(CombatantSide side, i32 index) override;
 
 private:
     void Open(std::span<const TurnSeat> living);

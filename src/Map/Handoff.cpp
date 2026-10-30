@@ -1,6 +1,7 @@
 #include "Ascension/Map/Handoff.h"
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Data/ArtPack.h"
 #include "Ascension/Map/Walk.h"
 
 namespace Ascension {
@@ -12,13 +13,13 @@ bool SameTile(MapTile left, MapTile right)
     return left.X == right.X && left.Y == right.Y;
 }
 
-bool TileOpen(const Database& data, const MapDef& map, MapTile tile)
+bool TileOpen(const Database& data, const MapDef& map, MapTile tile, const ArtPack* art)
 {
     const std::string* cell = map.Cell(tile.X, tile.Y);
     if (cell == nullptr)
         return false;
     const TileDef* def = data.FindTile(*cell);
-    return def != nullptr && !def->Solid && !MapBlocks(map, tile.X, tile.Y);
+    return def != nullptr && !def->Solid && !FootprintBlocks(map, tile.X, tile.Y, art);
 }
 
 bool Shift(MapTile from, WalkDir direction, MapTile& out)
@@ -40,14 +41,15 @@ bool Shift(MapTile from, WalkDir direction, MapTile& out)
 // The tile a flee returns to. The step they came from, when that tile is still
 // open and is not the spawn. Otherwise the first open neighbor in north, east,
 // south, west order, then the map's start.
-MapTile FleeTile(const Database& data, const MapDef& map, MapTile spawn, ContactQuery query)
+MapTile FleeTile(const Database& data, const MapDef& map, MapTile spawn, ContactQuery query,
+                 const ArtPack* art)
 {
-    if (query.HasFrom && TileOpen(data, map, query.From) && !SameTile(query.From, spawn))
+    if (query.HasFrom && TileOpen(data, map, query.From, art) && !SameTile(query.From, spawn))
         return query.From;
     const WalkDir order[] = {WalkDir::North, WalkDir::East, WalkDir::South, WalkDir::West};
     for (const WalkDir direction : order) {
         MapTile next;
-        if (Shift(spawn, direction, next) && TileOpen(data, map, next))
+        if (Shift(spawn, direction, next) && TileOpen(data, map, next, art))
             return next;
     }
     return map.Start;
@@ -62,13 +64,28 @@ const MapDef* HubMap(const Database& data)
     return nullptr;
 }
 
-MapTile LossTile(const Database& data, const MapDef& map)
+MapTile LossTile(const Database& data, const MapDef& map, const ArtPack* art)
 {
+    MapTile around = map.Start;
+    bool haveRest = false;
     for (const MapPoint& point : map.Points) {
         if (point.Kind != MapPointKind::Rest)
             continue;
-        if (TileOpen(data, map, point.Tile))
+        if (!haveRest) {
+            around = point.Tile;
+            haveRest = true;
+        }
+        if (TileOpen(data, map, point.Tile, art))
             return point.Tile;
+    }
+    if (TileOpen(data, map, map.Start, art))
+        return map.Start;
+    // The named tiles sit inside a footprint. An open neighbor still gets the hero home.
+    const WalkDir order[] = {WalkDir::North, WalkDir::East, WalkDir::South, WalkDir::West};
+    for (const WalkDir direction : order) {
+        MapTile next;
+        if (Shift(around, direction, next) && TileOpen(data, map, next, art))
+            return next;
     }
     return map.Start;
 }
@@ -245,7 +262,8 @@ bool FleeAllowed(const Database& data, const MapSpawn& spawn)
 }
 
 MapFightRequest OfferSpawn(const Database& data, const MapDef& map, ContactQuery query,
-                           const MapMemory& memory, std::span<const SpawnPlace> places)
+                           const MapMemory& memory, std::span<const SpawnPlace> places,
+                           const ArtPack* art)
 {
     MapFightRequest request;
     const MapSpawn* spawn = nullptr;
@@ -288,19 +306,19 @@ MapFightRequest OfferSpawn(const Database& data, const MapDef& map, ContactQuery
     request.SpawnTile = TileNow(*spawn, places);
     request.Once = spawn->Once;
     request.AllowFlee = FleeAllowed(data, *spawn);
-    request.ReturnTile = FleeTile(data, map, request.SpawnTile, query);
+    request.ReturnTile = FleeTile(data, map, request.SpawnTile, query, art);
     return request;
 }
 
-LossSpot FindLossReturn(const Database& data, std::string_view foughtMapId)
+LossSpot FindLossReturn(const Database& data, std::string_view foughtMapId, const ArtPack* art)
 {
     LossSpot spot;
     const MapDef* hub = HubMap(data);
     const MapDef* map = hub != nullptr ? hub : data.FindMap(foughtMapId);
     if (map == nullptr)
         return spot;
-    const MapTile tile = LossTile(data, *map);
-    if (!TileOpen(data, *map, tile))
+    const MapTile tile = LossTile(data, *map, art);
+    if (!TileOpen(data, *map, tile, art))
         return spot;
     spot.Ok = true;
     spot.Hub = hub != nullptr;
@@ -309,11 +327,11 @@ LossSpot FindLossReturn(const Database& data, std::string_view foughtMapId)
     return spot;
 }
 
-MapReturn ResolveReturn(const Database& data, const ReturnQuery& query)
+MapReturn ResolveReturn(const Database& data, const ReturnQuery& query, const ArtPack* art)
 {
     MapReturn back;
     if (query.Outcome == MapOutcome::Lost) {
-        const LossSpot spot = FindLossReturn(data, query.FoughtMapId);
+        const LossSpot spot = FindLossReturn(data, query.FoughtMapId, art);
         if (!spot.Ok)
             return back;
         back.Ok = true;
@@ -331,27 +349,66 @@ MapReturn ResolveReturn(const Database& data, const ReturnQuery& query)
     back.MapId = map->Id;
     if (query.Outcome == MapOutcome::Fled) {
         back.Tile = query.ReturnTile;
-        if (!TileOpen(data, *map, back.Tile) || SameTile(back.Tile, query.SpawnTile)) {
+        if (!TileOpen(data, *map, back.Tile, art) || SameTile(back.Tile, query.SpawnTile)) {
             ContactQuery beside;
             beside.Tile = query.SpawnTile;
-            back.Tile = FleeTile(data, *map, query.SpawnTile, beside);
+            back.Tile = FleeTile(data, *map, query.SpawnTile, beside, art);
         }
         back.KeepWounds = true;
         return back;
     }
 
     back.Tile = query.SpawnTile;
-    if (!TileOpen(data, *map, back.Tile))
+    if (!TileOpen(data, *map, back.Tile, art))
         back.Tile = map->Start;
     back.ClearSpawn = query.Once;
     return back;
 }
 
+bool PlaceNear(Walker& walker, const Database& data, std::string_view mapId, MapTile tile,
+               MapTile around, MapTile avoid, bool hasAvoid, const ArtPack* art)
+{
+    const MapDef* map = data.FindMap(mapId);
+    if (map == nullptr)
+        return false;
+    auto same = [](MapTile left, MapTile right) {
+        return left.X == right.X && left.Y == right.Y;
+    };
+    auto fits = [&](MapTile candidate) {
+        if (hasAvoid && same(candidate, avoid))
+            return false;
+        return walker.Place(data, map->Id, candidate, art);
+    };
+    if (fits(tile))
+        return true;
+    const WalkDir order[] = {WalkDir::North, WalkDir::East, WalkDir::South, WalkDir::West};
+    for (const WalkDir direction : order) {
+        MapTile next = around;
+        if (direction == WalkDir::North)
+            --next.Y;
+        else if (direction == WalkDir::East)
+            ++next.X;
+        else if (direction == WalkDir::South)
+            ++next.Y;
+        else if (direction == WalkDir::West)
+            --next.X;
+        else
+            continue;
+        if (same(next, tile))
+            continue;
+        if (fits(next))
+            return true;
+    }
+    if (!same(map->Start, tile) && fits(map->Start))
+        return true;
+    return false;
+}
+
 MapSettle ApplyOutcome(const Database& data, const ReturnQuery& query, MapMemory& memory,
-                       std::span<const FoeWound> wounds)
+                       std::span<const FoeWound> wounds, const ArtPack* art)
 {
     MapSettle settled;
-    settled.Return = ResolveReturn(data, query);
+    settled.Return = ResolveReturn(data, query, art);
     if (!settled.Return.Ok)
         return settled;
     if (settled.Return.ClearSpawn)

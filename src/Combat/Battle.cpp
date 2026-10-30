@@ -512,6 +512,22 @@ void AgilityRoundModel::Place(std::span<const TurnSeat> order, i32 index)
     m_Open = !m_Round.empty();
 }
 
+void AgilityRoundModel::ReleaseSeat(CombatantSide side, i32 index)
+{
+    if (!m_Open)
+        return;
+    // Seats already taken stay. Only the rest of this round loses the index, which is
+    // what a push under the cap already gets: the new body waits for the next round.
+    usize cursor = m_Index;
+    while (cursor < m_Round.size()) {
+        const TurnSeat& seat = m_Round[cursor];
+        if (seat.Side == side && seat.Index == index)
+            m_Round.erase(m_Round.begin() + static_cast<std::ptrdiff_t>(cursor));
+        else
+            ++cursor;
+    }
+}
+
 Battle::Battle(const Database& data, std::unique_ptr<TurnModel> turns)
     : m_Data(&data), m_Turns(std::move(turns))
 {
@@ -1316,6 +1332,11 @@ Battle::TurnOpen Battle::PrepareTurn(CombatantState& user)
         open.Result.Result = m_Result;
         return open;
     }
+    // Stun skips the action. Turn-start focus and passives still run, and a drink
+    // still stays in the bag because the action below is not taken.
+    RunTrigger(user, EffectTrigger::OnTurnStart);
+    if (&user == &m_Player)
+        GrantFocus(user, m_Rules.FocusPerTurn);
     if (tick.Skip) {
         open.Continue = false;
         open.Result.Accepted = true;
@@ -1325,9 +1346,6 @@ Battle::TurnOpen Battle::PrepareTurn(CombatantState& user)
         AdvanceTurn();
         return open;
     }
-    RunTrigger(user, EffectTrigger::OnTurnStart);
-    if (&user == &m_Player)
-        GrantFocus(user, m_Rules.FocusPerTurn);
     return open;
 }
 
@@ -2090,13 +2108,19 @@ ActionResult Battle::ResolveSummon(i32 index)
         CombatantState added;
         MakeFoe(*spot.Add, added);
         i32 joined = spot.OpenSlot;
+        bool replaced = false;
         if (count >= cap && spot.OpenSlot >= 0) {
             m_Enemies[static_cast<usize>(spot.OpenSlot)] = std::move(added);
+            replaced = true;
         } else {
             m_Enemies.push_back(std::move(added));
             joined = static_cast<i32>(m_Enemies.size()) - 1;
         }
         NameCombatants(m_Data, m_Enemies);
+        // The corpse's seat was opened for the body that died. The replacement waits
+        // for the next round, the same as a summon that still fit under the cap.
+        if (replaced && m_Turns != nullptr)
+            m_Turns->ReleaseSeat(CombatantSide::Enemy, joined);
         result.Text = m_Enemies[static_cast<usize>(joined)].Name + " joins the fight.";
     }
     FinishIfDead();
@@ -2283,7 +2307,14 @@ ActionResult Battle::EnemyAct()
     if (!open.Continue)
         return open.Result;
 
-    if (m_Enemies[static_cast<usize>(foeIndex)].ShardDue) {
+    // A windup that is ready to land (the "1/N" whose next action is the hit) is not
+    // spent on a summon. The summon waits one action. A charge that still has turns
+    // left can be interrupted, and an unknown windup still falls through below.
+    const CombatantState& windingUp = m_Enemies[static_cast<usize>(foeIndex)];
+    const bool windupLands = !windingUp.WindupSkill.empty() && windingUp.WindupLeft <= 0 &&
+                             m_Data != nullptr &&
+                             EnemySkill(windingUp, windingUp.WindupSkill) != nullptr;
+    if (m_Enemies[static_cast<usize>(foeIndex)].ShardDue && !windupLands) {
         m_Enemies[static_cast<usize>(foeIndex)].ShardDue = false;
         if (SummonTakesTurn(foeIndex)) {
             ActionResult summoned = ResolveSummon(foeIndex);

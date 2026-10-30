@@ -10,8 +10,10 @@
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Data/ArtPack.h"
 #include "Ascension/Map/Handoff.h"
 #include "Ascension/Map/Movers.h"
+#include "Ascension/Map/Walk.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
@@ -552,6 +554,91 @@ void TestRosterStart()
           "the refused roster leaves the fight that was already up");
 }
 
+const unsigned char kPng[] = {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+    0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+    0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+    0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+    0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+
+void WritePng(const fs::path& path)
+{
+    std::error_code error;
+    fs::create_directories(path.parent_path(), error);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(kPng), static_cast<std::streamsize>(sizeof(kPng)));
+}
+
+void TestPackFootprintReturn()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
+                  "{ \"id\": \"fixture_post\", \"tile\": { \"x\": 2, \"y\": 2 }, \"w\": 1, \"h\": 1 }",
+                  "{ \"id\": \"fixture_post\", \"tile\": { \"x\": 2, \"y\": 2 }, \"w\": 1, \"h\": 1 },\n"
+                  "      { \"id\": \"fixture_post\", \"tile\": { \"x\": 4, \"y\": 2 } },\n"
+                  "      { \"id\": \"fixture_post\", \"tile\": { \"x\": 1, \"y\": 1 } }");
+    Database data = Loaded(copy.Path, "a map with unsized props loads");
+    if (!data.IsLoaded())
+        return;
+    const MapDef* home = NeedMap(data, "fixture_a");
+    if (home == nullptr)
+        return;
+    WritePng(copy.Path / "pack" / "props" / "post.png");
+    WriteFile(copy.Path / "pack" / "manifest.json",
+              "{ \"props\": [ { \"id\": \"fixture_post\", \"file\": \"props/post.png\", "
+              "\"w\": 1, \"h\": 1 } ] }\n");
+    ArtPack pack;
+    DataError packError;
+    Check(pack.Load(copy.Path / "pack", data, &packError), "the prop pack loads");
+    if (!packError.Message.empty())
+        std::printf("    %s\n", packError.Message.c_str());
+
+    MapMemory memory;
+    const ContactQuery arrival = StepOnto(4, 1, 0, 0, false);
+    const MapFightRequest plain = OfferSpawn(data, *home, arrival, memory);
+    Check(plain.Active && TileIs(plain.ReturnTile, 4, 2),
+          "without a pack the south floor is the flee tile");
+    const MapFightRequest packed = OfferSpawn(data, *home, arrival, memory, {}, &pack);
+    Check(packed.Active && TileIs(packed.ReturnTile, 3, 1),
+          "a pack footprint is not a flee tile");
+    Walker stood;
+    Check(stood.Place(data, "fixture_a", packed.ReturnTile, &pack) && TileIs(stood.Place().Tile, 3, 1),
+          "the flee tile accepts the hero");
+    MapTile south;
+    south.X = 4;
+    south.Y = 2;
+    Check(!stood.Place(data, "fixture_a", south, &pack) && TileIs(stood.Place().Tile, 3, 1),
+          "place refuses the footprint cell the map left unsized");
+
+    Walker stuck;
+    MapTile start;
+    start.X = 1;
+    start.Y = 1;
+    Check(stuck.Place(data, "fixture_a", start, nullptr), "the rest can be stood on without a pack");
+    MapTile spawn;
+    spawn.X = 4;
+    spawn.Y = 1;
+    Check(PlaceNear(stuck, data, "fixture_a", south, spawn, spawn, true, &pack) &&
+              TileIs(stuck.Place().Tile, 3, 1),
+          "a footprint flee tile falls through to the next open neighbor");
+
+    const LossSpot openRest = FindLossReturn(data, "fixture_a");
+    Check(openRest.Ok && TileIs(openRest.Tile, 1, 1),
+          "without a pack a loss still stands on the rest");
+    const LossSpot loss = FindLossReturn(data, "fixture_a", &pack);
+    Check(loss.Ok && loss.MapId == "fixture_a" && TileIs(loss.Tile, 2, 1),
+          "a loss beside a footprint rest uses the open neighbor");
+    Walker returned;
+    Check(returned.Place(data, loss.MapId, loss.Tile, &pack) &&
+              TileIs(returned.Place().Tile, 2, 1),
+          "the loss tile accepts the hero");
+    Walker lost;
+    Check(lost.Place(data, "fixture_a", start, nullptr), "the loss fallback starts on the rest");
+    Check(PlaceNear(lost, data, "fixture_a", start, start, spawn, false, &pack) &&
+              TileIs(lost.Place().Tile, 2, 1),
+          "a footprint loss tile falls through to the next open neighbor");
+}
+
 void TestFleeKeepsTheWound()
 {
     Check(RunSave::kVersion == 5, "the save version records the hero name");
@@ -574,6 +661,7 @@ int main()
     TestPartyAndAuras();
     TestRosterStart();
     TestFleeKeepsTheWound();
+    TestPackFootprintReturn();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

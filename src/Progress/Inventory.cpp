@@ -27,6 +27,17 @@ bool ListedId(const std::vector<std::string>& ids, std::string_view id)
     return false;
 }
 
+bool UniqueStack(const Database* data, const ItemStack& stack)
+{
+    if (data == nullptr || stack.Empty())
+        return false;
+    const ItemDef* item = data->FindItem(stack.Id);
+    if (item == nullptr)
+        return false;
+    const RarityDef* rarity = data->FindRarity(item->Rarity);
+    return rarity != nullptr && rarity->UniquePerType;
+}
+
 bool HoldsId(const Inventory& bag, std::string_view id)
 {
     const GearSlot slots[] = {GearSlot::Weapon, GearSlot::Offhand, GearSlot::Armor,
@@ -91,13 +102,13 @@ bool Inventory::ApplyData(std::string& error)
         std::vector<ItemStack> next = m_Bag;
         bool dropped = false;
         if (!GiveOrDropLast(next, piece, dropped)) {
-            error = "The bag had no room. The offhand piece was set down.";
+            error = "The bag had no room. The offhand stays worn.";
         } else {
             m_Bag = std::move(next);
+            m_Offhand.clear();
             if (dropped)
                 error = "The bag was full. A stack was set down so the offhand could come off.";
         }
-        m_Offhand.clear();
     }
     return true;
 }
@@ -306,16 +317,17 @@ bool Inventory::GiveOrDropLast(std::vector<ItemStack>& bag, std::string_view id,
 {
     if (TryGive(bag, id))
         return true;
-    i32 last = -1;
+    i32 sacrifice = -1;
     for (i32 slot = static_cast<i32>(bag.size()) - 1; slot >= 0; --slot) {
-        if (!bag[static_cast<usize>(slot)].Empty()) {
-            last = slot;
-            break;
-        }
+        const ItemStack& stack = bag[static_cast<usize>(slot)];
+        if (stack.Empty() || UniqueStack(m_Data, stack))
+            continue;
+        sacrifice = slot;
+        break;
     }
-    if (last < 0)
+    if (sacrifice < 0)
         return false;
-    bag[static_cast<usize>(last)] = ItemStack{};
+    bag[static_cast<usize>(sacrifice)] = ItemStack{};
     dropped = true;
     return TryGive(bag, id);
 }

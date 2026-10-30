@@ -38,8 +38,9 @@ public:
 
     // Keeps gold, worn gear, and stacks. A smaller bag drops the stacks that no longer fit. A
     // smaller stack size clamps each count. If the worn weapon is now two-handed, the offhand
-    // piece is moved into the bag so its bonus stops; a full bag sets the last stack down to
-    // make a slot, and that note is left in `error` while this still succeeds. Missing item
+    // piece is moved into the bag so its bonus stops; a full bag sets a stack that is not
+    // unique per type down to make a slot, and that note is left in `error` while this still
+    // succeeds. When every occupied stack is unique, the offhand stays worn. Missing item
     // ids stay put and add no stats.
     bool ApplyData(std::string& error);
 
@@ -82,10 +83,11 @@ public:
     // Moves one from the bag onto its slot. A two-handed weapon sends the offhand back to the
     // bag, and refuses if that piece would not fit.
     bool Equip(i32 bagIndex, std::string& error);
-    // Takes a worn piece off. The offhand always comes off when something is there, including
-    // while a two-handed weapon is worn. A full bag sets the last stack down to make room, and
-    // that note is left in `error` while this still succeeds. Other slots refuse when the bag
-    // is full.
+    // Takes a worn piece off. The offhand comes off when the bag can hold it, including
+    // while a two-handed weapon is worn. A full bag sets a stack that is not unique per type
+    // down to make room, and that note is left in `error` while this still succeeds. When
+    // every occupied stack is unique, the offhand stays worn. Other slots refuse when the
+    // bag is full.
     bool Unequip(GearSlot slot, std::string& error);
     // Removes one consumable after the fight has accepted the drink.
     bool Take(i32 bagIndex, std::string& error);
@@ -113,8 +115,9 @@ private:
     [[nodiscard]] i32 StackCap() const;
     // Puts one of `id` into `bag`. False when every stack is full.
     bool TryGive(std::vector<ItemStack>& bag, std::string_view id) const;
-    // Puts one of `id` into `bag`. When every stack is full, the last occupied stack is cleared
-    // first. `dropped` is set when that happens. False only when `bag` has no slots.
+    // Puts one of `id` into `bag`. When every stack is full, the last occupied stack that is
+    // not unique per type is cleared first. `dropped` is set when that happens. False when
+    // `bag` has no slot that can be given up.
     bool GiveOrDropLast(std::vector<ItemStack>& bag, std::string_view id, bool& dropped) const;
 
     const Database* m_Data = nullptr;

@@ -2327,6 +2327,150 @@ void TestSpells()
     Check(follow.Accepted && follow.Damage > ambush.Damage, "ambush hits harder on a marked foe");
 }
 
+void TestStunKeepsTurnStart()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "skills.json", "      \"id\": \"strike\",",
+                  "      \"id\": \"litany\",\n"
+                  "      \"name\": \"Litany\",\n"
+                  "      \"description\": \"Mend 4 health at the start of each turn.\",\n"
+                  "      \"kind\": \"passive\",\n"
+                  "      \"effects\": [\n"
+                  "        { \"id\": \"mend\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", "
+                  "\"power\": 4 }\n"
+                  "      ]\n"
+                  "    },\n"
+                  "    {\n"
+                  "      \"id\": \"strike\",");
+    ReplaceInFile(copy.Path / "classes.json", "\"passives\": []", "\"passives\": [\"litany\"]");
+    Database data(copy.Path);
+    Check(data.Load(), "the fighter's litany loads");
+    const ItemDef* potion = data.FindItem("minor_potion");
+    Check(potion != nullptr, "the potion is loaded");
+    if (potion == nullptr)
+        return;
+    std::string error;
+    Battle stunned(data, Sides({CombatantSide::Player}));
+    Check(stunned.Start("fighter", 1, "bandit", error), "the fighter can be stunned");
+    stunned.SetPlayerHp(40);
+    stunned.SetPlayerFocus(4);
+    Check(stunned.Inflict(CombatantSide::Player, "bleed", error) &&
+              stunned.Inflict(CombatantSide::Player, "stunned", error),
+          "bleed and stun are both up");
+    const i32 bandit = stunned.Enemy().Hp;
+    const ActionResult skipped = stunned.UseItem(*potion);
+    Check(skipped.Accepted && skipped.SkillId.empty() &&
+              skipped.Text.find("stunned") != std::string::npos &&
+              skipped.Text.find("bleeds") != std::string::npos && stunned.Player().Hp == 41 &&
+              stunned.Player().Focus == 5 && stunned.Enemy().Hp == bandit,
+          "a stun still bleeds, mends from litany, and gains focus, and the potion stays corked");
+}
+
+void TestSlamBeforeSummon()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "enemies.json",
+                  "\"summon\": { \"enemy\": \"rubble_shard\", \"every\": 3 }",
+                  "\"summon\": { \"enemy\": \"rubble_shard\", \"every\": 2 }");
+    Database data(copy.Path);
+    Check(data.Load(), "Varn summons every second phase action");
+    std::string error;
+    Battle boss(data, Sides(std::vector<CombatantSide>(6, CombatantSide::Enemy)));
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn can slam in phase 2");
+    boss.SetEnemyHp(120);
+    const ActionResult maul = boss.EnemyAct();
+    Check(maul.Damage > 0 && maul.Text.find("stirs") == std::string::npos &&
+              boss.Enemy().WindupSkill.empty() && !boss.Enemy().ShardDue,
+          "the first phase action is the maul");
+    const ActionResult telegraph = boss.EnemyAct();
+    Check(telegraph.Damage == 0 && telegraph.Text.find("Crushing Slam") != std::string::npos &&
+              telegraph.Text.find("1/1") != std::string::npos &&
+              telegraph.Text.find("stirs") != std::string::npos && boss.Enemy().ShardDue &&
+              boss.Enemy().WindupLeft == 0 && boss.Enemies().size() == 1,
+          "the slam's telegraph is also the action that stirs the shard");
+    const i32 health = boss.Player().Hp;
+    const ActionResult slam = boss.EnemyAct();
+    Check(slam.Damage > 0 && slam.Text.find("Crushing Slam") != std::string::npos &&
+              slam.Text.find("joins") == std::string::npos && boss.Player().Hp < health &&
+              boss.Enemies().size() == 1 && boss.Enemy().WindupSkill.empty() &&
+              boss.Enemy().ShardDue,
+          "the slam lands before the summon spends the turn");
+    const ActionResult shard = boss.EnemyAct();
+    Check(shard.Damage == 0 && shard.Text.find("Rubble Shard joins") != std::string::npos &&
+              boss.Enemies().size() == 2,
+          "the summon is the action after the slam");
+}
+
+void TestReplacedCorpseWaits()
+{
+    Database data(kSample);
+    Check(data.Load(), "sample data loads");
+    std::string error;
+    Battle boss(data, std::make_unique<AgilityRoundModel>());
+    Check(boss.Start("fighter", 1, "oathkeeper_varn", error), "Varn meets the fighter");
+    boss.SetEnemyHp(120);
+
+    auto livingShard = [&]() {
+        const std::span<const CombatantState> foes = boss.Enemies();
+        for (i32 index = 1; index < static_cast<i32>(foes.size()); ++index) {
+            if (foes[static_cast<usize>(index)].Alive())
+                return index;
+        }
+        return -1;
+    };
+    auto killShards = [&]() {
+        const i32 count = static_cast<i32>(boss.Enemies().size());
+        for (i32 index = 1; index < count; ++index) {
+            if (!boss.Enemies()[static_cast<usize>(index)].Alive())
+                continue;
+            Check(boss.SetTarget(index), "a living shard can be marked");
+            boss.SetEnemyHp(0);
+        }
+    };
+
+    bool armed = false;
+    for (i32 step = 0; step < 120 && boss.Result() == BattleResult::Ongoing && !armed; ++step) {
+        boss.SetPlayerHp(boss.Player().MaxHp);
+        if (boss.Actor() != CombatantSide::Player) {
+            boss.EnemyAct();
+            continue;
+        }
+        const bool slotAlive = boss.Enemies().size() >= 2 && boss.Enemies()[1].Alive();
+        const bool atCap = boss.Enemies().size() >= 3;
+        if (atCap && slotAlive && boss.Enemies()[0].ShardDue) {
+            armed = true;
+            killShards();
+            boss.Wait();
+            break;
+        }
+        // A living shard that is not the seat a replacement would reuse has to fall,
+        // or the next summon pushes a new body instead of opening that corpse.
+        if (livingShard() >= 0 && !(atCap && slotAlive))
+            killShards();
+        boss.Wait();
+    }
+    Check(armed && boss.Result() == BattleResult::Ongoing,
+          "a full fight arms a summon while the corpse's seat is still in the round");
+    if (!armed || boss.Result() != BattleResult::Ongoing)
+        return;
+    Check(boss.Actor() == CombatantSide::Enemy && boss.ActorIndex() == 0,
+          "Varn acts after the shards fall");
+    const i32 before = boss.Player().Hp;
+    const ActionResult joined = boss.EnemyAct();
+    Check(joined.Text.find("joins") != std::string::npos, "the summon replaces the corpse");
+    const i32 seat = ShardSlot(boss, true);
+    Check(seat == 1 && boss.Enemies()[1].Hp == boss.Enemies()[1].MaxHp,
+          "the replacement stands at full health in the opened seat");
+    Check(boss.Actor() == CombatantSide::Player && boss.Player().Hp == before,
+          "the new shard does not act in the corpse's seat");
+    boss.SetPlayerHp(boss.Player().MaxHp);
+    boss.Wait();
+    Check(boss.Actor() == CombatantSide::Enemy && boss.ActorIndex() == 0,
+          "Varn still acts before the shard in the next round");
+    boss.EnemyAct();
+    Check(boss.ActorIndex() == seat, "the shard acts once the round is rebuilt");
+}
+
 } // namespace
 
 int main()
@@ -2345,11 +2489,14 @@ int main()
     TestStatusReloads();
     TestWindup();
     TestPhaseShard();
+    TestSlamBeforeSummon();
     TestWolfPack();
     TestSummonSeats();
+    TestReplacedCorpseWaits();
     TestJoinedShardMark();
     TestPackAim();
     TestGearAndConsumables();
+    TestStunKeepsTurnStart();
     TestBossPlans();
     TestGrantCopies();
     TestStunResist();
