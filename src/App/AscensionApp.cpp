@@ -909,7 +909,8 @@ void AscensionApp::TouchSpawn(const ContactQuery& query)
     const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
     if (map == nullptr)
         return;
-    const MapFightRequest request = OfferSpawn(m_Data, *map, query, m_MapMemory, m_Places);
+    const MapFightRequest request =
+        OfferSpawn(m_Data, *map, query, m_MapMemory, m_Places, &m_Gallery.GetPack());
     if (!request.Active)
         return;
     m_MapFight.Active = true;
@@ -1083,10 +1084,20 @@ void AscensionApp::MaybeSettle()
         CaptureFoeWounds(*m_Battle, wounds);
     // Gold is not touched. A win already granted it in AwardVictory. A loss and
     // a flee do not reach GrantGold, so the purse stays where it was.
-    const MapSettle settled = ApplyOutcome(m_Data, query, m_MapMemory, wounds);
-    const bool placed = settled.Return.Ok &&
-                        m_Walker.Place(m_Data, settled.Return.MapId, settled.Return.Tile,
-                                       &m_Gallery.GetPack());
+    const ArtPack* art = &m_Gallery.GetPack();
+    const MapSettle settled = ApplyOutcome(m_Data, query, m_MapMemory, wounds, art);
+    bool placed = false;
+    if (settled.Return.Ok) {
+        if (result == BattleResult::Victory) {
+            placed = m_Walker.Place(m_Data, settled.Return.MapId, settled.Return.Tile, art);
+        } else {
+            // A flee must not land back on the spawn. A loss has no spawn to avoid.
+            const bool fled = result == BattleResult::Fled;
+            const MapTile around = fled ? query.SpawnTile : settled.Return.Tile;
+            placed = PlaceNear(m_Walker, m_Data, settled.Return.MapId, settled.Return.Tile, around,
+                               query.SpawnTile, fled, art);
+        }
+    }
     if (!placed) {
         Note("The way back is gone.");
     } else if (result == BattleResult::Victory && settled.Return.ClearSpawn) {
@@ -1143,7 +1154,8 @@ void AscensionApp::OpenResumedSpawn()
     m_MapFight.AllowFlee = FleeAllowed(m_Data, *ref.Spawn);
     ContactQuery beside;
     beside.Tile = ref.Spawn->Tile;
-    const MapFightRequest offer = OfferSpawn(m_Data, *ref.Map, beside, m_MapMemory);
+    const MapFightRequest offer =
+        OfferSpawn(m_Data, *ref.Map, beside, m_MapMemory, {}, &m_Gallery.GetPack());
     if (offer.Active)
         m_MapFight.ReturnTile = offer.ReturnTile;
     else

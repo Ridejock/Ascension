@@ -320,6 +320,73 @@ void TestTwoHandedReload()
           "one stack of five is set down and the shield takes that slot");
 }
 
+void TestUniqueSurvivesStow()
+{
+    TempCopy copy;
+    ReplaceInFile(copy.Path / "items.json",
+                  "\"id\": \"wolfhide_charm\",\n"
+                  "      \"name\": \"Wolfhide Charm\",\n"
+                  "      \"description\": \"A twist of wolfhide. The step comes easier.\",\n"
+                  "      \"icon\": \"ring\",\n"
+                  "      \"rarity\": \"uncommon\",",
+                  "\"id\": \"wolfhide_charm\",\n"
+                  "      \"name\": \"Wolfhide Charm\",\n"
+                  "      \"description\": \"A twist of wolfhide. The step comes easier.\",\n"
+                  "      \"icon\": \"ring\",\n"
+                  "      \"rarity\": \"mythic\",");
+    Database data(copy.Path);
+    DataError error;
+    Check(data.Load(&error), "a mythic charm loads");
+    const ItemDef* charm = data.FindItem("wolfhide_charm");
+    const RarityDef* rarity = charm != nullptr ? data.FindRarity(charm->Rarity) : nullptr;
+    Check(rarity != nullptr && rarity->UniquePerType, "the charm is unique per type");
+
+    Inventory mixed;
+    std::string why;
+    Check(mixed.Start(data, why), "the mixed bag starts");
+    WearSwordAndShield(mixed);
+    mixed.GrantGold(700);
+    bool filled = true;
+    for (i32 bought = 0; bought < 55; ++bought) {
+        if (!mixed.Buy("minor_potion", why))
+            filled = false;
+    }
+    Check(filled && mixed.Buy("wolfhide_charm", why) && CountOf(mixed, "minor_potion") == 55 &&
+              CountOf(mixed, "wolfhide_charm") == 1 && mixed.BagAt(11).Id == "wolfhide_charm",
+          "the last stack is the claimed unique");
+    Check(mixed.Unequip(GearSlot::Offhand, why), "the shield comes off by setting a potion down");
+    CheckHas(why, "bag was full", "the note still says a stack was set down");
+    Check(mixed.Equipped(GearSlot::Offhand).empty() && FindStack(mixed, "oak_shield") >= 0 &&
+              CountOf(mixed, "wolfhide_charm") == 1 && CountOf(mixed, "minor_potion") == 50,
+          "the unique stays and a potion stack is the one set down");
+
+    ReplaceInFile(copy.Path / "shop.json", "\"stackSize\": 5", "\"stackSize\": 1");
+    Reload(data);
+    Inventory kept;
+    Check(kept.Start(data, why), "the unique bag starts");
+    WearSwordAndShield(kept);
+    bool charms = true;
+    for (i32 given = 0; given < 12; ++given) {
+        if (!kept.Give("wolfhide_charm", 1, why))
+            charms = false;
+    }
+    Check(charms && CountOf(kept, "wolfhide_charm") == 12, "twelve unique stacks fill the bag");
+    Check(!kept.Unequip(GearSlot::Offhand, why), "the shield stays when every stack is unique");
+    CheckHas(why, "bag is full", "the refusal says the bag is full");
+    Check(kept.Equipped(GearSlot::Offhand) == "oak_shield" && CountOf(kept, "wolfhide_charm") == 12,
+          "unequip did not clear a unique stack");
+
+    ReplaceInFile(copy.Path / "items.json", "\"id\": \"rusty_sword\"",
+                  "\"id\": \"rusty_sword\", \"twoHanded\": true");
+    Reload(data);
+    Check(kept.ApplyData(why), "a two-handed reload still applies");
+    CheckHas(why, "offhand stays worn", "the note says the offhand stays worn");
+    Check(kept.Equipped(GearSlot::Offhand) == "oak_shield" &&
+              kept.Equipped(GearSlot::Weapon) == "rusty_sword" &&
+              CountOf(kept, "wolfhide_charm") == 12 && kept.GearBonus().Defense == 0,
+          "the shield stays in hand and the unique stacks stay in the bag");
+}
+
 } // namespace
 
 int main()
@@ -329,6 +396,7 @@ int main()
     TestFullBag();
     TestHotReload();
     TestTwoHandedReload();
+    TestUniqueSurvivesStow();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
