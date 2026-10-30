@@ -198,7 +198,7 @@ struct CombatRules {
     i32 MaxFoes = 3;
 };
 
-// What a level-up does to current HP. The new max is always the new vitality. Gained adds
+// What a level-up does to current HP. The new max is always the new stamina. Gained adds
 // the increase in that max (a full hero stays full, a wound keeps its missing health plus
 // nothing extra). Full refills. Kept leaves the wound, then clamps it to the new max.
 // Focus is not part of this rule. progress.json names which one the run uses.
