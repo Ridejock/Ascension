@@ -60,9 +60,9 @@ bool SameList(const std::vector<std::string>& left, const std::vector<std::strin
 
 bool SameStats(const StatBlock& left, const StatBlock& right)
 {
-    return left.Vitality == right.Vitality && left.Strength == right.Strength &&
-           left.Defense == right.Defense && left.Agility == right.Agility &&
-           left.Focus == right.Focus;
+    return left.Strength == right.Strength && left.Intellect == right.Intellect &&
+           left.Stamina == right.Stamina && left.Defense == right.Defense &&
+           left.Agility == right.Agility && left.Will == right.Will;
 }
 
 bool SameCareer(const CareerRecord& left, const CareerRecord& right)

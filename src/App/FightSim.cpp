@@ -49,6 +49,7 @@ struct SimRun {
     bool TimedOut = false;
     i32 Hp = 0;
     i32 Focus = 0;
+    i32 Mana = 0;
     i32 StartHp = 0;
     i32 StartFocus = 0;
     i32 MaxHp = 0;
@@ -84,6 +85,37 @@ i32 SpendableFocus(const CombatantState& player, i32 perTurn)
             focus = player.MaxFocus;
     }
     return focus;
+}
+
+bool SpendsMana(const Database& data, const SkillDef& skill)
+{
+    if (skill.School.empty())
+        return false;
+    const SchoolDef* school = data.FindSchool(skill.School);
+    return school != nullptr && school->Resource == "mana";
+}
+
+i32 SpendablePool(i32 perTurn, i32 cap, i32 current)
+{
+    i32 pool = current;
+    if (perTurn > 0 && pool < cap) {
+        pool += perTurn;
+        if (pool > cap)
+            pool = cap;
+    }
+    return pool;
+}
+
+// True when the skill's own pool can pay, counting the regen this turn has not
+// applied yet. A physical skill reads focus. A school whose resource is mana reads mana.
+bool Affords(const Database& data, const CombatantState& player, const SkillDef& skill)
+{
+    const bool mana = SpendsMana(data, skill);
+    const CombatRules& rules = data.GetRules();
+    const i32 available =
+        mana ? SpendablePool(rules.ManaPerTurn, player.MaxMana, player.Mana)
+             : SpendablePool(rules.FocusPerTurn, player.MaxFocus, player.Focus);
+    return skill.FocusCost <= available;
 }
 
 const SkillDef* FindActive(const std::vector<HeroGrant>& grants, std::string_view id)
@@ -373,7 +405,7 @@ std::string_view OpeningBuff(const Battle& battle, const std::vector<HeroGrant>&
         if (skill.Id == "rage" || skill.Kind != SkillKind::Active ||
             skill.Target != SkillTarget::Self)
             continue;
-        if (skill.FocusCost > focus || SkillDealsDamage(skill))
+        if (!Affords(data, player, skill) || SkillDealsDamage(skill))
             continue;
         const i32 extra = UnheldDealtPercent(data, player, skill);
         if (extra <= 0)
@@ -442,6 +474,7 @@ const CombatantState* MarkedLiving(const Battle& battle)
 const SkillDef* BestHit(const Battle& battle, const Database& data, const Hero& hero,
                         const std::vector<HeroGrant>& grants, i32 focus, i32 dealtPercent)
 {
+    (void)focus;
     const CombatantState* foe = MarkedLiving(battle);
     if (foe == nullptr)
         return nullptr;
@@ -450,7 +483,7 @@ const SkillDef* BestHit(const Battle& battle, const Database& data, const Hero& 
     i32 bestDamage = -1;
     for (const HeroGrant& grant : grants) {
         const SkillDef& skill = grant.Skill;
-        if (!HitsOneFoe(skill) || skill.FocusCost > focus)
+        if (!HitsOneFoe(skill) || !Affords(data, player, skill))
             continue;
         const i32 damage = BlowDamage(data, hero, grants, player, skill, *foe, dealtPercent, false);
         if (damage > bestDamage) {
@@ -478,7 +511,7 @@ std::string_view FallbackSkill(const Battle& battle, const std::vector<HeroGrant
     if (winding) {
         for (const HeroGrant& grant : grants) {
             const SkillDef& skill = grant.Skill;
-            if (skill.FocusCost <= focus && skill.Target == SkillTarget::Enemy &&
+            if (Affords(data, player, skill) && skill.Target == SkillTarget::Enemy &&
                 StunsAWindup(skill))
                 return skill.Id;
         }
@@ -486,14 +519,14 @@ std::string_view FallbackSkill(const Battle& battle, const std::vector<HeroGrant
     if (!finishing && percent <= 32) {
         for (const HeroGrant& grant : grants) {
             const SkillDef& skill = grant.Skill;
-            if (skill.FocusCost <= focus && skill.Target == SkillTarget::Self && HasHeal(skill))
+            if (Affords(data, player, skill) && skill.Target == SkillTarget::Self && HasHeal(skill))
                 return skill.Id;
         }
     }
     if (!finishing && percent <= 32 && player.GuardPercent <= 0) {
         for (const HeroGrant& grant : grants) {
             const SkillDef& skill = grant.Skill;
-            if (skill.FocusCost <= focus && skill.Target == SkillTarget::Self && HasGuard(skill))
+            if (Affords(data, player, skill) && skill.Target == SkillTarget::Self && HasGuard(skill))
                 return skill.Id;
         }
     }
@@ -511,7 +544,7 @@ std::string_view FallbackSkill(const Battle& battle, const std::vector<HeroGrant
         for (const HeroGrant& grant : grants) {
             const SkillDef& skill = grant.Skill;
             if (skill.Id == attack->Id || skill.Kind != SkillKind::Active ||
-                skill.FocusCost > focus || skill.Target == SkillTarget::AllEnemies)
+                !Affords(data, playerNow, skill) || skill.Target == SkillTarget::AllEnemies)
                 continue;
             if (AppliesStatus(skill, *effect.IfTargetHas))
                 setup = &skill;
@@ -527,7 +560,7 @@ std::string_view FallbackSkill(const Battle& battle, const std::vector<HeroGrant
     const i32 plainHits = AttacksToClear(battle, data, hero, grants, *attack, dealt);
     for (const HeroGrant& grant : grants) {
         const SkillDef& skill = grant.Skill;
-        if (skill.Id == attack->Id || skill.FocusCost > focus ||
+        if (skill.Id == attack->Id || !Affords(data, playerNow, skill) ||
             skill.Target == SkillTarget::AllEnemies)
             continue;
         const i32 extra = AppliedTakenPercent(data, skill, *foe);
@@ -653,11 +686,12 @@ struct RunSpec {
     bool RandomFocus = false;
     i32 Slip = 0;
     u32 RngState = 1;
-    // False starts full, which is every single-fight row. True uses StartHp and
-    // StartFocus, clamped by the fight.
+    // False starts full, which is every single-fight row. True uses StartHp,
+    // StartFocus, and StartMana, clamped by the fight.
     bool UsePools = false;
     i32 StartHp = 0;
     i32 StartFocus = 0;
+    i32 StartMana = 0;
     // Worn on top of the sword, the shield, and the fang flag. Null wears nothing
     // extra. The route passes drops claimed on earlier wins of that same run.
     const std::vector<std::string>* Gear = nullptr;
@@ -793,6 +827,7 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
         OpeningPools opening;
         opening.Hp = spec.StartHp;
         opening.Focus = spec.StartFocus;
+        opening.Mana = spec.StartMana;
         if (!battle.Start(hero.ClassId(), hero.Level(), spec.EncounterId, opening, why)) {
             row.Error = why;
             return row;
@@ -803,6 +838,7 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
     }
     row.StartHp = battle.Player().Hp;
     row.StartFocus = battle.Player().Focus;
+    row.Mana = battle.Player().Mana;
     row.MaxHp = battle.Player().MaxHp;
 
     u32 state = spec.RngState == 0 ? 1u : spec.RngState;
@@ -842,6 +878,7 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
     row.TimedOut = battle.Result() == BattleResult::Ongoing;
     row.Hp = battle.Player().Hp;
     row.Focus = battle.Player().Focus;
+    row.Mana = battle.Player().Mana;
     return row;
 }
 
@@ -1254,6 +1291,7 @@ bool PlayOneRoute(const Database& data, const BuildSpec& build, const MapRoute& 
     bool full = true;
     i32 hp = 0;
     i32 focus = 0;
+    i32 mana = 0;
     std::vector<std::string> gear;
     for (const RouteStep& step : route.Steps) {
         if (!fangRoute && step.Side)
@@ -1281,6 +1319,7 @@ bool PlayOneRoute(const Database& data, const BuildSpec& build, const MapRoute& 
         spec.UsePools = !full;
         spec.StartHp = hp;
         spec.StartFocus = focus;
+        spec.StartMana = mana;
         spec.Gear = gear.empty() ? nullptr : &gear;
         const SimRun run = SimulateBuild(data, spec);
 
@@ -1305,6 +1344,7 @@ bool PlayOneRoute(const Database& data, const BuildSpec& build, const MapRoute& 
             full = false;
             hp = run.Hp;
             focus = run.Focus;
+            mana = run.Mana;
             RememberDrops(data, encounter->Id, gear);
         } else {
             full = true;
@@ -1434,6 +1474,7 @@ std::vector<ChainRow> SimulateChain(const Database& data, const ChainQuery& quer
         bool carry = false;
         i32 hp = 0;
         i32 focus = 0;
+        i32 mana = 0;
         for (const EncounterDef& encounter : encounters) {
             const std::vector<FocusOrder> orders = OrdersFor(encounter);
             FocusOrder order;
@@ -1449,6 +1490,7 @@ std::vector<ChainRow> SimulateChain(const Database& data, const ChainQuery& quer
             spec.UsePools = carry;
             spec.StartHp = hp;
             spec.StartFocus = focus;
+            spec.StartMana = mana;
             const SimRun run = SimulateBuild(data, spec);
 
             ChainRow row;
@@ -1471,10 +1513,12 @@ std::vector<ChainRow> SimulateChain(const Database& data, const ChainQuery& quer
                 carry = true;
                 hp = run.Hp;
                 focus = run.Focus;
+                mana = run.Mana;
             } else {
                 carry = false;
                 hp = 0;
                 focus = 0;
+                mana = 0;
             }
             rows.push_back(std::move(row));
         }

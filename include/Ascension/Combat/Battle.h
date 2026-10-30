@@ -37,6 +37,8 @@ struct CombatantState {
     i32 MaxHp = 0;
     i32 Focus = 0;
     i32 MaxFocus = 0;
+    i32 Mana = 0;
+    i32 MaxMana = 0;
     i32 GuardPercent = 0;
     i32 EmpowerPercent = 0;
     i32 ReflectPercent = 0;
@@ -172,6 +174,9 @@ struct CombatantSnapshot {
     std::string Id;
     i32 Hp = 0;
     i32 Focus = 0;
+    // Negative means the save did not store mana (a file from before the pool). Import
+    // fills that unit to its max. Zero is an empty pool.
+    i32 Mana = 0;
     i32 GuardPercent = 0;
     i32 EmpowerPercent = 0;
     i32 ReflectPercent = 0;
@@ -208,11 +213,12 @@ struct FightSnapshot {
 };
 
 // Pools a fight starts from. Hp is clamped to 0..MaxHp. 0 is a defeat before anyone
-// acts. Focus is clamped to 0..MaxFocus. The Start that does not take this fills both,
-// which is a lone fight and the single-encounter harness.
+// acts. Focus is clamped to 0..MaxFocus and mana to 0..MaxMana. The Start that does not
+// take this fills all three, which is a lone fight and the single-encounter harness.
 struct OpeningPools {
     i32 Hp = 0;
     i32 Focus = 0;
+    i32 Mana = 0;
 };
 
 // One player class against an encounter (one enemy, or a pack). Skill ids are kept, not
@@ -302,6 +308,9 @@ public:
     // Clamps to 0..MaxFocus. A resumed fight restores the saved pool with this.
     void SetPlayerFocus(i32 focus);
 
+    // Clamps to 0..MaxMana. A resumed fight restores the saved pool with this.
+    void SetPlayerMana(i32 mana);
+
     // Clamps the selected enemy to 0..MaxHp. 0 may end the fight. Crossing that enemy's phase
     // threshold starts phase 2.
     void SetEnemyHp(i32 hp);
@@ -346,7 +355,7 @@ private:
     };
 
     bool StartFight(std::string_view classId, i32 level, std::string_view enemyId, bool usePools,
-                    i32 hp, i32 focus, std::string& error);
+                    i32 hp, i32 focus, i32 mana, std::string& error);
     bool Build(std::string& error, bool keepWounds);
     ActionResult Reject(std::string text) const;
     void FinishIfDead();
@@ -418,6 +427,9 @@ private:
     HitLanded LandHit(CombatantState& attacker, CombatantState& defender, i32 raw);
     i32 NoteSkillUse(CombatantState& who, const std::string& skillId);
     void GrantFocus(CombatantState& who, i32 amount) const;
+    void GrantMana(CombatantState& who, i32 amount) const;
+    [[nodiscard]] bool SpendsMana(const SkillDef& skill) const;
+    [[nodiscard]] bool CanPay(const CombatantState& who, const SkillDef& skill) const;
     // ApplyStatus unless a status `who` has up resists it. False when it was resisted.
     bool Afflict(CombatantState& who, const StatusDef& status) const;
 

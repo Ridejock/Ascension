@@ -544,6 +544,23 @@ std::string GearDelta(const Database& data, const Inventory& bag, const ItemDef&
     return line;
 }
 
+bool SkillPaysMana(const Database& data, const SkillDef& skill)
+{
+    if (skill.School.empty())
+        return false;
+    const SchoolDef* school = data.FindSchool(skill.School);
+    return school != nullptr && school->Resource == "mana";
+}
+
+PoolCaps FoughtCaps(const CombatantState& player)
+{
+    PoolCaps caps;
+    caps.MaxHp = player.MaxHp;
+    caps.MaxFocus = player.MaxFocus;
+    caps.MaxMana = player.MaxMana;
+    return caps;
+}
+
 } // namespace
 
 AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options)
@@ -701,13 +718,14 @@ void AscensionApp::AwardVictory()
         Note(line);
     if (grant.LevelAfter > grant.LevelBefore)
         Note("Level " + std::to_string(grant.LevelAfter) + ".");
-    const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
-    KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+    const PoolCaps fought = FoughtCaps(m_Battle->Player());
+    KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, m_Battle->Player().Mana,
+              fought);
     if (grant.LevelAfter > grant.LevelBefore) {
         const i32 beforeHp = m_Vitals.Hp;
         const PoolCaps now = HeroPools(m_Data, m_Hero, m_Inventory);
         ApplyLevelHp(m_Vitals, fought.MaxHp, now.MaxHp, m_Data.GetProgress().LevelHp);
-        ClampFocus(m_Vitals, now.MaxFocus);
+        ClampResources(m_Vitals, now);
         if (m_Vitals.Hp > beforeHp)
             Note("HP +" + std::to_string(m_Vitals.Hp - beforeHp) + ".");
     }
@@ -783,6 +801,7 @@ bool AscensionApp::OpenBattle(std::string_view fightId, std::string& error)
     OpeningPools opening;
     opening.Hp = pools.Hp;
     opening.Focus = pools.Focus;
+    opening.Mana = pools.Mana;
     return m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), fightId, opening, error);
 }
 
@@ -792,6 +811,7 @@ bool AscensionApp::OpenRoster(std::span<const std::string> foeIds, std::string& 
     OpeningPools opening;
     opening.Hp = pools.Hp;
     opening.Focus = pools.Focus;
+    opening.Mana = pools.Mana;
     return m_Battle->Start(m_Hero.ClassId(), m_Hero.Level(), m_MapFight.EncounterId, foeIds,
                            opening, error);
 }
@@ -992,6 +1012,7 @@ void AscensionApp::BeginSpawnFight()
         if (m_Vitals.Known) {
             m_Battle->SetPlayerHp(m_Vitals.Hp);
             m_Battle->SetPlayerFocus(m_Vitals.Focus);
+            m_Battle->SetPlayerMana(m_Vitals.Mana);
         }
         m_Battle->HoldVictory();
         // The save already paid this win. A fresh Start must not award it again.
@@ -1029,8 +1050,9 @@ void AscensionApp::BeginSpawnFight()
         if (m_Battle->Result() == BattleResult::Defeat)
             RememberDefeat();
         else if (m_Battle->Result() == BattleResult::Victory) {
-            const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
-            KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+            const PoolCaps fought = FoughtCaps(m_Battle->Player());
+            KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus,
+                      m_Battle->Player().Mana, fought);
             m_VitalsSettled = true;
         }
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
@@ -1062,8 +1084,9 @@ void AscensionApp::MaybeSettle()
     if (result == BattleResult::Victory && m_Hero.NextFightBlock() != nullptr)
         return;
     if (result == BattleResult::Fled && !m_VitalsSettled) {
-        const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
-        KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+        const PoolCaps fought = FoughtCaps(m_Battle->Player());
+        KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, m_Battle->Player().Mana,
+                  fought);
         m_VitalsSettled = true;
     }
 
@@ -1235,14 +1258,16 @@ void AscensionApp::BeginFight()
     if (m_ResumeResources) {
         m_Battle->SetPlayerHp(m_ResumeHp);
         m_Battle->SetPlayerFocus(m_ResumeFocus);
+        m_Battle->SetPlayerMana(m_ResumeMana);
         m_ResumeResources = false;
     }
     if (m_Battle->Result() != BattleResult::Ongoing) {
         if (m_Battle->Result() == BattleResult::Defeat)
             RememberDefeat();
         else {
-            const PoolCaps fought{m_Battle->Player().MaxHp, m_Battle->Player().MaxFocus};
-            KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, fought);
+            const PoolCaps fought = FoughtCaps(m_Battle->Player());
+            KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus,
+                      m_Battle->Player().Mana, fought);
             m_VitalsSettled = true;
         }
         Note(m_Battle->Result() == BattleResult::Victory ? "Victory." : "Defeat.");
@@ -2861,6 +2886,7 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
     m_AnnounceResume = false;
     m_ResumeHp = 0;
     m_ResumeFocus = 0;
+    m_ResumeMana = 0;
     m_ResumeFight = {};
     m_ResumeSpawn.clear();
     m_Vitals = fresh.Pools;
@@ -3408,10 +3434,12 @@ bool AscensionApp::WriteSave()
     if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
         fought.Hp = m_Battle->Player().Hp;
         fought.Focus = m_Battle->Player().Focus;
+        fought.Mana = m_Battle->Player().Mana;
         fought.Live = m_Battle->ExportFight();
     } else if (m_Vitals.Known) {
         fought.Hp = m_Vitals.Hp;
         fought.Focus = m_Vitals.Focus;
+        fought.Mana = m_Vitals.Mana;
     }
     RecordFight(run, fought);
     RunSave saves(SaveFolder());
@@ -3464,10 +3492,15 @@ bool AscensionApp::TryResume(std::string& error)
         m_Vitals.Known = true;
         m_Vitals.Hp = run.Hp;
         m_Vitals.Focus = run.Focus;
+        if (run.ManaKnown)
+            m_Vitals.Mana = run.Mana;
+        else
+            m_Vitals.Mana = HeroPools(m_Data, m_Hero, m_Inventory).MaxMana;
         m_Vitals.ReturnToHub = false;
         m_ResumeResources = true;
         m_ResumeHp = run.Hp;
         m_ResumeFocus = run.Focus;
+        m_ResumeMana = m_Vitals.Mana;
     }
     if (run.Standing == RunStanding::Ongoing && run.Fight.Known)
         m_ResumeFight = run.Fight;
@@ -3642,6 +3675,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const Emerald::Vec4 error = Paint(style.Error);
     const Emerald::Vec4 hp = Paint(style.Hp);
     const Emerald::Vec4 focusColor = Paint(style.Focus);
+    const Emerald::Vec4 manaColor = Paint(style.Mana);
     const f32 pad = static_cast<f32>(style.PanelPad);
     const f32 lineGap = static_cast<f32>(style.LineGap);
     const f32 groupGap = static_cast<f32>(style.GroupGap);
@@ -3734,7 +3768,40 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
                                 ? static_cast<f32>(player.Focus) / static_cast<f32>(player.MaxFocus)
                                 : 0.0f;
     DrawBar(renderer, {textX, y}, barW, barH, playerFocus, focusColor);
-    y += barH;
+    y += barH + lineGap;
+    const std::string manaText = PoolText("MANA", player.Mana, player.MaxMana);
+    Emerald::DrawDebugText(renderer, {textX, y}, FitLine(manaText, style.BodyScale, textW),
+                           manaColor, style.BodyScale);
+    y += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
+    const f32 playerMana = player.MaxMana > 0
+                               ? static_cast<f32>(player.Mana) / static_cast<f32>(player.MaxMana)
+                               : 0.0f;
+    DrawBar(renderer, {textX, y}, barW, barH, playerMana, manaColor);
+    y += barH + lineGap;
+    std::string sheetLine;
+    i32 sheetCount = 0;
+    const f32 sheetH = Emerald::DebugTextLineHeight(style.DetailScale);
+    auto flushSheet = [&]() {
+        if (sheetLine.empty())
+            return;
+        if (y + sheetH <= frame.Left.y + frame.LeftSize.y - pad)
+            Emerald::DrawDebugText(renderer, {textX, y}, FitLine(sheetLine, style.DetailScale, textW),
+                                   ink, style.DetailScale);
+        y += sheetH + 4.0f;
+        sheetLine.clear();
+        sheetCount = 0;
+    };
+    for (const StatDef& stat : m_Data.GetStats()) {
+        if (sheetCount == 3)
+            flushSheet();
+        if (!sheetLine.empty())
+            sheetLine += "   ";
+        sheetLine += stat.Short.empty() ? stat.Name : stat.Short;
+        sheetLine += " ";
+        sheetLine += std::to_string(player.Stats.Get(stat.Id));
+        ++sheetCount;
+    }
+    flushSheet();
     const std::string playerStatus = StatusLine(m_Data, player);
     if (!playerStatus.empty()) {
         y += lineGap;
@@ -3855,14 +3922,16 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             if (skill == nullptr) {
                 row.Text += id;
             } else {
+                const bool paysMana = SkillPaysMana(m_Data, *skill);
+                const i32 poolNow = paysMana ? player.Mana : player.Focus;
                 row.Text += skill->Name + " (" + std::to_string(m_Hero.RankOf(skill->Id)) + ")   " +
-                            std::to_string(skill->FocusCost) + " FOCUS";
+                            std::to_string(skill->FocusCost) + (paysMana ? " MANA" : " FOCUS");
                 if (!skill->School.empty()) {
                     const SchoolDef* school = m_Data.FindSchool(skill->School);
                     row.Text += "  ";
                     row.Text += school != nullptr ? school->Name : skill->School;
                 }
-                row.Enabled = !fightOver && playerTurn && player.Focus >= skill->FocusCost;
+                row.Enabled = !fightOver && playerTurn && poolNow >= skill->FocusCost;
                 row.Detail = m_Data.DescribeSkill(*skill, m_Hero.RankOf(skill->Id));
             }
             rows.push_back(std::move(row));
@@ -3871,7 +3940,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         if (!fightOver && !m_Picking) {
             MenuLine wait;
             wait.Text = "WAIT";
-            wait.Detail = "Pass the turn. Focus returns.";
+            wait.Detail = "Pass the turn. Focus and mana return.";
             wait.Enabled = playerTurn;
             rows.push_back(std::move(wait));
             if (!m_Inventory.ConsumableSlots().empty()) {
@@ -4256,7 +4325,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
-                      shown.Focus, caps.MaxFocus, m_MapMemory.Cleared, m_Places, &m_Gallery,
+                      shown.Focus, caps.MaxFocus, shown.Mana, caps.MaxMana, m_MapMemory.Cleared,
+                      m_Places, &m_Gallery,
                       &m_Glides);
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;

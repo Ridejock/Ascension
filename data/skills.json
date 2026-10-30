@@ -43,7 +43,7 @@
       "target": "self",
       "focusCost": 3,
       "effects": [
-        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8, "scaling": "focus" },
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8, "scaling": "intellect" },
         { "id": "open", "trigger": "onUse", "op": "applyStatus", "status": "exposed" }
       ]
     },
@@ -456,7 +456,7 @@
       "school": "arcane",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "focus" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 8, "scaling": "intellect" }
       ]
     },
     {
@@ -468,7 +468,7 @@
       "school": "arcane",
       "focusCost": 2,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "focus" },
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 4, "scaling": "intellect" },
         { "id": "blight", "trigger": "onHit", "op": "applyStatus", "status": "hexed" }
       ]
     },
@@ -493,7 +493,7 @@
       "school": "arcane",
       "focusCost": 3,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 14, "scaling": "focus" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 14, "scaling": "intellect" }
       ]
     },
     {
@@ -502,7 +502,7 @@
       "description": "{mind.stat} +{mind.amount}.",
       "kind": "passive",
       "effects": [
-        { "id": "mind", "trigger": "always", "op": "stat", "stat": "focus", "amount": 2 }
+        { "id": "mind", "trigger": "always", "op": "stat", "stat": "intellect", "amount": 2 }
       ]
     },
     {
@@ -514,17 +514,17 @@
       "school": "arcane",
       "focusCost": 2,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "focus" },
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 6, "scaling": "intellect" },
         { "id": "rot", "trigger": "onHit", "op": "applyStatus", "status": "bleed" }
       ]
     },
     {
       "id": "pact",
       "name": "Pact",
-      "description": "Gain {well.amount} focus at the start of each turn.",
+      "description": "Gain {well.amount} mana at the start of each turn.",
       "kind": "passive",
       "effects": [
-        { "id": "well", "trigger": "onTurnStart", "op": "grantFocus", "amount": 1 }
+        { "id": "well", "trigger": "onTurnStart", "op": "grantMana", "amount": 1 }
       ]
     },
     {
@@ -626,7 +626,7 @@
       "school": "holy",
       "focusCost": 0,
       "effects": [
-        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "focus" }
+        { "id": "hit", "trigger": "onUse", "op": "damage", "power": 7, "scaling": "will" }
       ]
     },
     {
@@ -638,7 +638,7 @@
       "school": "holy",
       "focusCost": 2,
       "effects": [
-        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 10, "scaling": "focus" }
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 10, "scaling": "will" }
       ]
     },
     {
@@ -662,7 +662,7 @@
       "school": "holy",
       "focusCost": 3,
       "effects": [
-        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 14, "scaling": "focus" }
+        { "id": "mend", "trigger": "onUse", "op": "heal", "power": 14, "scaling": "will" }
       ]
     },
     {

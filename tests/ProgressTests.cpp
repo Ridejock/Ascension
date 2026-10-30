@@ -379,14 +379,14 @@ void TestResetKeepsPoints()
         copy.Path / "classes.json", "      \"passives\": [\"bulwark\"]\n    }\n  ]\n}",
         "      \"passives\": [\"bulwark\"]\n    },\n    {\n      \"id\": \"ranger\",\n   "
         "   \"name\": \"Ranger\",\n      \"description\": \"A second starter.\",\n      "
-        "\"starter\": true,\n      \"stats\": {\"vitality\": 1, \"strength\": 1, "
-        "\"defense\": 1, \"agility\": 1, \"focus\": 1},\n      \"growth\": {\"vitality\": "
-        "1, \"strength\": 1, \"defense\": 1, \"agility\": 1, \"focus\": 1},\n      "
+        "\"starter\": true,\n      \"stats\": {\"stamina\": 1, \"strength\": 1, "
+        "\"defense\": 1, \"agility\": 1, \"intellect\": 1, \"will\": 0},\n      \"growth\": {\"stamina\": "
+        "1, \"strength\": 1, \"defense\": 1, \"agility\": 1, \"intellect\": 1, \"will\": 0},\n      "
         "\"skills\": [\"strike\"],\n      \"passives\": []\n    },\n    {\n      \"id\": "
         "\"adept\",\n      \"name\": \"Adept\",\n      \"description\": \"Not a "
-        "starter.\",\n      \"stats\": {\"vitality\": 1, \"strength\": 1, \"defense\": "
-        "1, \"agility\": 1, \"focus\": 1},\n      \"growth\": {\"vitality\": 1, "
-        "\"strength\": 1, \"defense\": 1, \"agility\": 1, \"focus\": 1},\n      "
+        "starter.\",\n      \"stats\": {\"stamina\": 1, \"strength\": 1, \"defense\": "
+        "1, \"agility\": 1, \"intellect\": 1, \"will\": 0},\n      \"growth\": {\"stamina\": 1, "
+        "\"strength\": 1, \"defense\": 1, \"agility\": 1, \"intellect\": 1, \"will\": 0},\n      "
         "\"skills\": [\"strike\"],\n      \"passives\": []\n    }\n  ]\n}");
     Database data(copy.Path);
     Check(data.Load(), "a roster with two starters loads");
@@ -447,7 +447,7 @@ void TestResetKeepsPoints()
     battle.SetBaseStats(hero.Attributes());
     Check(battle.Start("ranger", hero.Level(), "wolf", why) &&
               battle.Player().Stats.Defense == levelDefense + classPoints &&
-              battle.Player().MaxHp == hero.Attributes().Vitality * 4,
+              battle.Player().MaxHp == hero.Attributes().Stamina * 4,
           "the next fight uses the redistributed attributes");
 }
 
@@ -538,7 +538,7 @@ i32 CountId(const std::vector<std::string>& ids, std::string_view id)
 bool SpendPool(Hero& hero, std::string& error)
 {
     while (hero.ClassPool() > 0) {
-        if (!hero.SpendClassPoint("vitality", error))
+        if (!hero.SpendClassPoint("stamina", error))
             return false;
     }
     return true;
@@ -631,7 +631,7 @@ void TestSkillPicks()
         Check(battle.UseSkill("brace").Accepted && battle.Player().GuardPercent == 75,
               "the kept tune raises brace to 75 percent");
 
-        ReplaceInFile(copy.Path / "classes.json", "\"vitality\": 18", "\"vitality\": 19");
+        ReplaceInFile(copy.Path / "classes.json", "\"stamina\": 18", "\"stamina\": 19");
         Reload(data);
         Check(hero.ApplyData(why) && hero.PickedIds().size() == 2 &&
                   Contains(hero.PickedIds(), "riposte"),
@@ -697,9 +697,9 @@ void TestStartUsesFirstStarter()
     ReplaceInFile(copy.Path / "classes.json", "{\n      \"id\": \"fighter\",",
                   "{\n      \"id\": \"ranger\",\n      \"name\": \"Ranger\",\n      "
                   "\"description\": \"A second starter.\",\n      \"starter\": true,\n      "
-                  "\"stats\": {\"vitality\": 1, \"strength\": 1, \"defense\": 1, \"agility\": 1, "
-                  "\"focus\": 1},\n      \"growth\": {\"vitality\": 1, \"strength\": 1, "
-                  "\"defense\": 1, \"agility\": 1, \"focus\": 1},\n      \"skills\": "
+                  "\"stats\": {\"stamina\": 1, \"strength\": 1, \"defense\": 1, \"agility\": 1, "
+                  "\"intellect\": 1, \"will\": 0},\n      \"growth\": {\"stamina\": 1, \"strength\": 1, "
+                  "\"defense\": 1, \"agility\": 1, \"intellect\": 1, \"will\": 0},\n      \"skills\": "
                   "[\"strike\"],\n      \"passives\": []\n    },\n    {\n      \"id\": "
                   "\"fighter\",");
     Database data(copy.Path);
@@ -726,7 +726,8 @@ void TestLevelHpRestAndLoss()
     std::string why;
     Check(hero.Start(data, why) && bag.Start(data, why), "the hero and the bag start");
     const PoolCaps caps = HeroPools(data, hero, bag);
-    Check(caps.MaxHp == 72 && caps.MaxFocus == 8, "level 1 pools are 72 HP and 8 focus");
+    Check(caps.MaxHp == 72 && caps.MaxFocus == 19 && caps.MaxMana == 1,
+          "level 1 pools are 72 HP, 19 focus, and 1 mana");
 
     Battle battle(data, std::make_unique<AgilityRoundModel>());
     battle.SetBaseStats(hero.Attributes());
@@ -738,8 +739,9 @@ void TestLevelHpRestAndLoss()
 
     Check(hero.GrantXp(8).LevelAfter == 2, "8 XP is level 2");
     const PoolCaps grown = HeroPools(data, hero, bag);
-    Check(grown.MaxHp == caps.MaxHp + 16 && grown.MaxFocus == caps.MaxFocus + 1,
-          "one fighter level adds 16 HP and 1 focus");
+    Check(grown.MaxHp == caps.MaxHp + 16 && grown.MaxFocus == caps.MaxFocus + 4 &&
+              grown.MaxMana == caps.MaxMana,
+          "one fighter level adds 16 HP and 4 focus");
 
     Vitals body;
     body.Known = true;

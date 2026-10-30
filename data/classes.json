@@ -6,18 +6,20 @@
       "description": "A front-line combatant. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
       "stats": {
-        "vitality": 18,
         "strength": 8,
+        "intellect": 4,
+        "stamina": 16,
         "defense": 6,
         "agility": 5,
-        "focus": 4
+        "will": 2
       },
       "growth": {
-        "vitality": 4,
         "strength": 2,
+        "intellect": 1,
+        "stamina": 4,
         "defense": 1,
         "agility": 1,
-        "focus": 1
+        "will": 0
       },
       "skills": ["strike", "brace", "heavy_blow", "second_wind"],
       "passives": []
@@ -30,13 +32,13 @@
       "evolveLevel": 5,
       "bonus": {
         "strength": 4,
-        "vitality": 2
+        "stamina": 2
       },
       "growth": {
-        "vitality": 3,
+        "stamina": 3,
         "strength": 3,
         "agility": 1,
-        "focus": 1
+        "intellect": 1
       },
       "skills": ["rage", "cleave"],
       "passives": ["bloodlust"],
@@ -53,14 +55,14 @@
       "evolveLevel": 5,
       "bonus": {
         "defense": 5,
-        "vitality": 3
+        "stamina": 3
       },
       "growth": {
-        "vitality": 4,
+        "stamina": 4,
         "strength": 1,
         "defense": 2,
         "agility": 1,
-        "focus": 1
+        "intellect": 1
       },
       "skills": ["shield_bash"],
       "passives": ["bulwark"],
@@ -75,18 +77,20 @@
       "description": "A student of the arcane. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
       "stats": {
-        "vitality": 14,
-        "strength": 3,
+        "strength": 1,
+        "intellect": 13,
+        "stamina": 12,
         "defense": 3,
-        "agility": 7,
-        "focus": 14
+        "agility": 8,
+        "will": 4
       },
       "growth": {
-        "vitality": 3,
         "strength": 0,
+        "intellect": 1,
+        "stamina": 3,
         "defense": 1,
         "agility": 1,
-        "focus": 2
+        "will": 1
       },
       "skills": ["ember", "hex", "aegis"],
       "passives": []
@@ -98,15 +102,16 @@
       "evolvesFrom": "mage",
       "evolveLevel": 5,
       "bonus": {
-        "focus": 4,
+        "intellect": 2,
+        "will": 2,
         "agility": 1
       },
       "growth": {
-        "vitality": 2,
-        "strength": 0,
+        "stamina": 2,
         "defense": 1,
         "agility": 2,
-        "focus": 3
+        "intellect": 2,
+        "will": 1
       },
       "skills": ["cinder"],
       "passives": ["attunement"],
@@ -122,15 +127,17 @@
       "evolvesFrom": "mage",
       "evolveLevel": 5,
       "bonus": {
-        "focus": 3,
-        "vitality": 3
+        "will": 2,
+        "intellect": 1,
+        "stamina": 3
       },
       "growth": {
-        "vitality": 3,
+        "stamina": 3,
         "strength": 1,
         "defense": 1,
         "agility": 1,
-        "focus": 2
+        "intellect": 1,
+        "will": 1
       },
       "skills": ["wither"],
       "passives": ["pact"],
@@ -145,18 +152,20 @@
       "description": "An assassin and a scout. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
       "stats": {
-        "vitality": 14,
         "strength": 6,
+        "intellect": 2,
+        "stamina": 13,
         "defense": 4,
         "agility": 11,
-        "focus": 6
+        "will": 5
       },
       "growth": {
-        "vitality": 3,
         "strength": 1,
+        "intellect": 0,
+        "stamina": 3,
         "defense": 1,
         "agility": 2,
-        "focus": 1
+        "will": 1
       },
       "skills": ["stab", "slip", "mark", "ambush"],
       "passives": []
@@ -172,11 +181,10 @@
         "strength": 2
       },
       "growth": {
-        "vitality": 2,
+        "stamina": 2,
         "strength": 2,
-        "defense": 0,
         "agility": 3,
-        "focus": 1
+        "intellect": 1
       },
       "skills": ["rupture"],
       "passives": ["from_shadow"],
@@ -193,15 +201,17 @@
       "evolveLevel": 5,
       "bonus": {
         "agility": 2,
-        "focus": 2,
-        "vitality": 2
+        "intellect": 1,
+        "will": 1,
+        "stamina": 2
       },
       "growth": {
-        "vitality": 3,
+        "stamina": 3,
         "strength": 1,
         "defense": 1,
         "agility": 2,
-        "focus": 2
+        "intellect": 1,
+        "will": 1
       },
       "skills": ["snipe"],
       "passives": ["trail"],
@@ -216,18 +226,20 @@
       "description": "Keeps the line standing, and can strike when it must. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
       "stats": {
-        "vitality": 16,
-        "strength": 4,
-        "defense": 5,
-        "agility": 4,
-        "focus": 12
+        "strength": 1,
+        "intellect": 2,
+        "stamina": 15,
+        "defense": 4,
+        "agility": 7,
+        "will": 12
       },
       "growth": {
-        "vitality": 4,
         "strength": 1,
+        "intellect": 1,
+        "stamina": 3,
         "defense": 1,
         "agility": 1,
-        "focus": 2
+        "will": 2
       },
       "skills": ["smite", "prayer", "sanctuary"],
       "passives": []
@@ -239,15 +251,16 @@
       "evolvesFrom": "cleric",
       "evolveLevel": 5,
       "bonus": {
-        "focus": 4,
-        "vitality": 2
+        "will": 2,
+        "intellect": 2,
+        "stamina": 2
       },
       "growth": {
-        "vitality": 3,
-        "strength": 0,
+        "stamina": 2,
         "defense": 1,
         "agility": 1,
-        "focus": 3
+        "intellect": 1,
+        "will": 3
       },
       "skills": ["hymn"],
       "passives": ["litany"],
@@ -264,14 +277,14 @@
       "evolveLevel": 5,
       "bonus": {
         "defense": 4,
-        "vitality": 3
+        "stamina": 3
       },
       "growth": {
-        "vitality": 4,
+        "stamina": 4,
         "strength": 1,
         "defense": 2,
         "agility": 1,
-        "focus": 1
+        "will": 1
       },
       "skills": ["censure"],
       "passives": ["oath"],

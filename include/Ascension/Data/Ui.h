@@ -36,6 +36,7 @@ struct UiStyle {
     UiRgb Error{};
     UiRgb Hp{};
     UiRgb Focus{};
+    UiRgb Mana{};
     UiRgb Highlight{};
     UiRgb Figure{};
     UiRgb Foe{};

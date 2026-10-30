@@ -117,13 +117,15 @@ void TestSample()
     Check(data.Load(&error), "sample data loads");
     Check(error.Message.empty(), "a successful load has no error");
     Check(data.GetRevision() == 1, "the first load is revision 1");
-    Check(data.GetStats().size() == 5, "five stats");
+    Check(data.GetStats().size() == 6, "six primaries");
     Check(data.GetSkills().size() == 22, "twenty-two skills");
-    Check(data.GetRules().HpPerVitality == 4 && data.GetRules().MinDamage == 1 &&
+    Check(data.GetRules().HpPerStamina == 4 && data.GetRules().MinDamage == 1 &&
               data.GetRules().AttackDenominator == 1 && data.GetRules().DefenseDenominator == 1 &&
-              data.GetRules().FocusBase == 4 && data.GetRules().FocusPerTurn == 1 &&
-              data.GetRules().FocusOnWait == 2 && data.GetRules().MaxFoes == 3,
-          "combat.json supplies the damage rules, focus regen, and a 3-foe fight");
+              data.GetRules().PoolK == 1000 && data.GetRules().PoolM == 250 &&
+              data.GetRules().FocusPerTurn == 1 && data.GetRules().FocusOnWait == 2 &&
+              data.GetRules().ManaPerTurn == 1 && data.GetRules().ManaOnWait == 2 &&
+              data.GetRules().MaxFoes == 3,
+          "combat.json supplies the damage rules, pool coefficients, regen, and a 3-foe fight");
     Check(data.GetEnemies().size() == 7, "seven enemies, counting the boss and the shard");
     Check(data.GetItems().size() == 7, "seven items");
     i32 mythicItems = 0;
@@ -157,9 +159,9 @@ void TestSample()
     Check(!fighter->IsEvolution() && fighter->Starter, "fighter is the base class and a starter");
     Check(berserker != nullptr && !berserker->Starter && guardian != nullptr && !guardian->Starter,
           "evolutions are not starters");
-    Check(fighter->Stats.Vitality == 18 && fighter->Stats.Strength == 8 &&
+    Check(fighter->Stats.Stamina == 18 && fighter->Stats.Strength == 8 &&
               fighter->Stats.Defense == 6 && fighter->Stats.Agility == 5 &&
-              fighter->Stats.Focus == 4,
+              fighter->Stats.Intellect == 4,
           "fighter level-1 stats");
     const auto fighterSkills = data.ActiveSkills(*fighter);
     Check(fighterSkills.size() == 4 && fighterSkills[0]->Id == "strike" &&
@@ -229,21 +231,21 @@ void TestSample()
     Check(data.FindSkill("taunt") == nullptr, "taunt is gone");
 
     const StatBlock level1 = data.StatsAt(*fighter, 1);
-    Check(level1.Vitality == 18 && level1.Strength == 8, "level 1 is the base stats");
+    Check(level1.Stamina == 18 && level1.Strength == 8, "level 1 is the base stats");
     const StatBlock level5 = data.StatsAt(*fighter, 5);
     // 18 + 4*4 vitality, 8 + 2*4 strength, 6 + 1*4 defense, 5 + 4 agility, 4 + 4 focus.
-    Check(level5.Vitality == 34 && level5.Strength == 16 && level5.Defense == 10 &&
-              level5.Agility == 9 && level5.Focus == 8,
+    Check(level5.Stamina == 34 && level5.Strength == 16 && level5.Defense == 10 &&
+              level5.Agility == 9 && level5.Intellect == 8,
           "fighter level 5 applies four growth steps");
     const StatBlock rage = data.StatsAt(*berserker, 5);
-    Check(rage.Vitality == 36 && rage.Strength == 20 && rage.Defense == 10,
+    Check(rage.Stamina == 36 && rage.Strength == 20 && rage.Defense == 10,
           "berserker at 5 is the fighter plus its bonus");
     const StatBlock guard = data.StatsAt(*guardian, 5);
-    Check(guard.Vitality == 37 && guard.Defense == 15 && guard.Strength == 16,
+    Check(guard.Stamina == 37 && guard.Defense == 15 && guard.Strength == 16,
           "guardian at 5 is the fighter plus its bonus");
     const StatBlock before = data.StatsAt(*berserker, 4);
     const StatBlock parent = data.StatsAt(*fighter, 4);
-    Check(before.Vitality == parent.Vitality && before.Strength == parent.Strength,
+    Check(before.Stamina == parent.Stamina && before.Strength == parent.Strength,
           "before the evolve level, an evolution is still the parent");
 
     const EnemyDef* wolf = data.FindEnemy("wolf");
@@ -266,7 +268,7 @@ void TestSample()
     Check(aimed != nullptr && aimedHit != nullptr && aimedHit->Power == 20 && aimed->Windup == 2,
           "aimed shot is power 20 after a 2-turn wind-up");
     Check(enemies[5].Experience == 80 && enemies[5].Boss && enemies[5].Level == 8 &&
-              enemies[5].Stats.Vitality == 60 && enemies[5].Stats.Strength == 14 &&
+              enemies[5].Stats.Stamina == 60 && enemies[5].Stats.Strength == 14 &&
               enemies[5].Stats.Defense == 12 && enemies[5].Skills.size() == 3 &&
               enemies[5].PhaseAtPercent == 50 && enemies[5].SummonId == "rubble_shard" &&
               enemies[5].SummonEvery == 3,
@@ -354,15 +356,15 @@ void TestHotReload()
     DataError error;
     Check(data.Load(&error), "copied sample loads");
 
-    ReplaceInFile(copy.Path / "classes.json", "\"vitality\": 18", "\"vitality\": 30");
+    ReplaceInFile(copy.Path / "classes.json", "\"stamina\": 18", "\"stamina\": 30");
     Check(data.CheckForChanges(&error) == 0, "the first sight of a change waits");
     Check(data.GetRevision() == 1, "waiting does not bump the revision");
     const ClassDef* fighter = data.FindClass("fighter");
-    Check(fighter != nullptr && fighter->Stats.Vitality == 18,
+    Check(fighter != nullptr && fighter->Stats.Stamina == 18,
           "old stats stay until the write settles");
     Check(data.CheckForChanges(&error) == 1, "a settled write reloads");
     fighter = data.FindClass("fighter");
-    Check(data.GetRevision() == 2 && fighter != nullptr && fighter->Stats.Vitality == 30,
+    Check(data.GetRevision() == 2 && fighter != nullptr && fighter->Stats.Stamina == 30,
           "hot reload updates the fighter's vitality");
     Check(data.GetLastError().empty(), "a good reload clears the error");
 
@@ -373,7 +375,7 @@ void TestHotReload()
     CheckHas(data.GetLastError(), "classes.json", "the error names the file");
     CheckHas(data.GetLastError(), "not valid JSON", "the error says the JSON is broken");
     fighter = data.FindClass("fighter");
-    Check(data.GetRevision() == 2 && fighter != nullptr && fighter->Stats.Vitality == 30,
+    Check(data.GetRevision() == 2 && fighter != nullptr && fighter->Stats.Stamina == 30,
           "a failed reload keeps the previous fighter");
 
     // Same broken bytes, new timestamp: reported once, not as a second distinct failure.
@@ -425,12 +427,12 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "classes.json", "\"vitality\": 18", "\"vitality\": \"lots\"");
+        ReplaceInFile(copy.Path / "classes.json", "\"stamina\": 18", "\"stamina\": \"lots\"");
         TestRejected(copy.Path, "classes.json", "integer", "a stat must be an integer");
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "classes.json", "\"vitality\": 18", "\"strenght\": 18");
+        ReplaceInFile(copy.Path / "classes.json", "\"stamina\": 18", "\"strenght\": 18");
         TestRejected(copy.Path, "classes.json", "unknown stat",
                      "a misspelled stat key is rejected");
     }
@@ -449,8 +451,8 @@ void TestValidation()
               "id": "fighter",
               "name": "Fighter",
               "description": "Base.",
-              "stats": {"vitality": 1, "strength": 1, "defense": 1, "agility": 1, "focus": 1},
-              "growth": {"vitality": 1, "strength": 1, "defense": 1, "agility": 1, "focus": 1},
+              "stats": {"stamina": 1, "strength": 1, "defense": 1, "agility": 1, "intellect": 1, "will": 0},
+              "growth": {"stamina": 1, "strength": 1, "defense": 1, "agility": 1, "intellect": 1, "will": 0},
               "skills": ["strike"],
               "passives": []
             },
@@ -482,7 +484,7 @@ void TestValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "stats.json", "\"id\": \"focus\"", "\"id\": \"luck\"");
+        ReplaceInFile(copy.Path / "stats.json", "\"id\": \"will\"", "\"id\": \"luck\"");
         TestRejected(copy.Path, "stats.json", "unknown stat", "stats.json cannot invent a stat");
     }
     {
@@ -905,7 +907,7 @@ void TestUnusedFields()
             copy.Path / "skills.json",
             "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
             "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8, "
-            "\"scaling\": \"vitality\" },\n        { \"id\": \"mark\", \"trigger\": "
+            "\"scaling\": \"stamina\" },\n        { \"id\": \"mark\", \"trigger\": "
             "\"onUse\", \"op\": \"applyStatus\", \"status\": \"bleed\", \"every\": 2 }");
         ReplaceInFile(copy.Path / "skills.json",
                       "{ \"id\": \"focus\", \"trigger\": \"onBlock\", \"op\": \"grantFocus\", "
@@ -926,7 +928,7 @@ void TestUnusedFields()
         const EffectDef* rest = EffectOf(data.FindSkill("bulwark"), "rest");
         const EffectDef* pulse = EffectOf(data.FindSkill("bulwark"), "pulse");
         const EffectDef* sting = EffectOf(data.FindSkill("bulwark"), "sting");
-        Check(mend != nullptr && mend->Scaling == "vitality" && mark != nullptr &&
+        Check(mend != nullptr && mend->Scaling == "stamina" && mark != nullptr &&
                   mark->Every == 2 && cut != nullptr && cut->Status == "bleed" &&
                   !cut->Every.has_value() && rest != nullptr && rest->Power == 4 &&
                   !rest->Scaling.has_value() && pulse != nullptr && pulse->Amount == 1 &&
@@ -939,7 +941,7 @@ void TestUnusedFields()
             copy.Path / "skills.json",
             "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }",
             "{ \"id\": \"mend\", \"trigger\": \"onTurnStart\", \"op\": \"heal\", "
-            "\"power\": 8, \"scaling\": \"vitality\" }");
+            "\"power\": 8, \"scaling\": \"stamina\" }");
         ExpectUnused(copy.Path, "skills.json", "second_wind", "mend", "scaling",
                      "onTurnStart heal does not use scaling");
     }
@@ -1628,9 +1630,9 @@ void TestSchools()
         TempCopy copy;
         WriteFile(copy.Path / "schools.json",
                   "{ \"schools\": [ { \"id\": \"arcane\", \"name\": \"Arcane\", \"resource\": "
-                  "\"mana\" } ] }\n");
-        TestRejected(copy.Path, "schools.json", "focus",
-                     "a school resource other than focus fails");
+                  "\"rage\" } ] }\n");
+        TestRejected(copy.Path, "schools.json", "mana",
+                     "a school resource other than focus or mana fails");
     }
     {
         TempCopy copy;
@@ -1684,9 +1686,9 @@ void TestShippedStarters()
           "starters are fighter, mage, rogue, and cleric, in that order");
     const SchoolDef* arcane = data.FindSchool("arcane");
     const SchoolDef* holy = data.FindSchool("holy");
-    Check(data.GetSchools().size() == 2 && arcane != nullptr && arcane->Resource == "focus" &&
-              holy != nullptr && holy->Name == "Holy" && holy->Resource == "focus",
-          "arcane and holy both spend focus");
+    Check(data.GetSchools().size() == 2 && arcane != nullptr && arcane->Resource == "mana" &&
+              holy != nullptr && holy->Name == "Holy" && holy->Resource == "mana",
+          "arcane and holy both spend mana");
     const SkillDef* ember = data.FindSkill("ember");
     const SkillDef* strike = data.FindSkill("strike");
     const SkillDef* prayer = data.FindSkill("prayer");
@@ -1717,16 +1719,9 @@ void TestShippedStarters()
         assassin == nullptr || scout == nullptr || cleric == nullptr || priest == nullptr ||
         templar == nullptr)
         return;
-    Check(mage->Stats.Vitality + mage->Stats.Strength + mage->Stats.Defense + mage->Stats.Agility +
-                      mage->Stats.Focus ==
-                  41 &&
-              rogue->Stats.Vitality + rogue->Stats.Strength + rogue->Stats.Defense +
-                      rogue->Stats.Agility + rogue->Stats.Focus ==
-                  41 &&
-              cleric->Stats.Vitality + cleric->Stats.Strength + cleric->Stats.Defense +
-                      cleric->Stats.Agility + cleric->Stats.Focus ==
-                  41,
-          "each new base spends the same 41 attribute points as the fighter");
+    Check(StatTotal(mage->Stats) == 41 && StatTotal(rogue->Stats) == 41 &&
+              StatTotal(cleric->Stats) == 41 && StatTotal(data.FindClass("fighter")->Stats) == 41,
+          "each starter spends the same 41 attribute points");
     const auto magePaths = data.EvolutionsOf("mage");
     const auto roguePaths = data.EvolutionsOf("rogue");
     const auto clericPaths = data.EvolutionsOf("cleric");
@@ -1776,13 +1771,13 @@ void TestShippedDescriptions()
     const EffectDef* mend = wind != nullptr ? wind->FindEffect("mend") : nullptr;
     const EffectDef* opened = wind != nullptr ? wind->FindEffect("open") : nullptr;
     Check(wind != nullptr && wind->FocusCost == 3 && mend != nullptr && mend->Power == 8 &&
-              mend->Scaling == "focus" && opened != nullptr &&
+              mend->Scaling == "intellect" && opened != nullptr &&
               opened->Op == EffectOp::ApplyStatus && opened->Status == "exposed",
-          "second wind costs 3, heals 8 plus Focus, and applies Exposed");
+          "second wind costs 3, heals 8 plus Intellect, and applies Exposed");
     const std::string windText = wind != nullptr ? data.DescribeSkill(*wind) : std::string();
-    Check(windText.find("higher Focus mends more") != std::string::npos &&
+    Check(windText.find("higher Intellect mends more") != std::string::npos &&
               windText.find("You are Exposed while you recover") != std::string::npos,
-          "second wind names Focus and Exposed");
+          "second wind names Intellect and Exposed");
 
     const SkillDef* riposte = data.FindSkill("riposte");
     const EffectDef* riposteWard = riposte != nullptr ? riposte->FindEffect("ward") : nullptr;
@@ -1852,7 +1847,7 @@ void TestShippedDescriptions()
     Check(knownRules && !data.GetEnemies().empty(),
           "the dire wolf and the bear are the shipped foes with ai rules");
     const bool bearShape =
-        bear != nullptr && bear->Unique && bear->Level == 7 && bear->Stats.Vitality == 52 &&
+        bear != nullptr && bear->Unique && bear->Level == 7 && bear->Stats.Stamina == 52 &&
         bear->Stats.Strength == 17 && bear->Stats.Defense == 5 && bear->Stats.Agility == 4 &&
         bear->Experience == 20 && bear->Gold == 24 && bear->HasColor && bear->Red == 0x7E &&
         bear->Green == 0x4E && bear->Blue == 0x2E && bear->Pattern.size() == 3 &&

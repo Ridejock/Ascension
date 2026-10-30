@@ -6,11 +6,12 @@
       "description": "Hungry, fast, and rarely alone.",
       "level": 1,
       "stats": {
-        "vitality": 10,
+        "stamina": 10,
         "strength": 5,
         "defense": 2,
         "agility": 7,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["bite"],
       "experience": 8,
@@ -22,11 +23,12 @@
       "description": "A road thief with a nicked blade. Every few cuts, the wound stays open.",
       "level": 3,
       "stats": {
-        "vitality": 16,
+        "stamina": 16,
         "strength": 7,
         "defense": 4,
         "agility": 6,
-        "focus": 2
+        "intellect": 2,
+        "will": 0
       },
       "skills": ["slash"],
       "experience": 18,
@@ -38,11 +40,12 @@
       "description": "A pale moth from the Stillbarrow tombs. The dust on its wings sticks.",
       "level": 4,
       "stats": {
-        "vitality": 12,
+        "stamina": 12,
         "strength": 6,
         "defense": 2,
         "agility": 9,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["flutter"],
       "experience": 14,
@@ -54,11 +57,12 @@
       "description": "A barrow archer who draws on the dead. The shot is obvious before it lands.",
       "level": 5,
       "stats": {
-        "vitality": 16,
+        "stamina": 16,
         "strength": 8,
         "defense": 3,
         "agility": 4,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["aimed_shot"],
       "experience": 22,
@@ -70,11 +74,12 @@
       "description": "Stone set to watch the Stillbarrow door. It hardens when the barrow is pressed.",
       "level": 6,
       "stats": {
-        "vitality": 32,
+        "stamina": 32,
         "strength": 10,
         "defense": 8,
         "agility": 3,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["harden", "thrust"],
       "pattern": ["harden", "thrust", "thrust"],
@@ -88,11 +93,12 @@
       "level": 8,
       "boss": true,
       "stats": {
-        "vitality": 60,
+        "stamina": 60,
         "strength": 14,
         "defense": 12,
         "agility": 3,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["maul_swing", "crushing_slam", "stone_skin"],
       "pattern": ["maul_swing", "crushing_slam", "stone_skin"],
@@ -108,11 +114,12 @@
       "description": "A stone the barrow threw. It falls until it breaks.",
       "level": 1,
       "stats": {
-        "vitality": 6,
+        "stamina": 6,
         "strength": 0,
         "defense": 0,
         "agility": 1,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["rubble_strike"],
       "experience": 0,

@@ -641,9 +641,9 @@ void TestPackFootprintReturn()
 
 void TestFleeKeepsTheWound()
 {
-    Check(RunSave::kVersion == 5, "the save version records the hero name");
+    Check(RunSave::kVersion == 6, "the save version records the six-primary sheet");
     RunState run;
-    RememberOutcome(run, BattleResult::Fled, 3, 1);
+    RememberOutcome(run, BattleResult::Fled, 3, 1, 0);
     Check(run.Standing == RunStanding::None && run.ResourcesKnown && run.Hp == 3 &&
               run.Focus == 1 && ResumeWound(run),
           "a flee is between fights and the wound is kept");

@@ -6,11 +6,12 @@
       "description": "Hungry, fast, and rarely alone.",
       "level": 1,
       "stats": {
-        "vitality": 10,
+        "stamina": 10,
         "strength": 6,
         "defense": 2,
         "agility": 7,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["bite"],
       "experience": 8,
@@ -23,11 +24,12 @@
       "description": "A road thief with a nicked blade. Every few cuts, the wound stays open.",
       "level": 3,
       "stats": {
-        "vitality": 18,
+        "stamina": 18,
         "strength": 8,
         "defense": 4,
         "agility": 6,
-        "focus": 2
+        "intellect": 2,
+        "will": 0
       },
       "skills": ["slash"],
       "experience": 18,
@@ -39,11 +41,12 @@
       "description": "A pale moth from the Stillbarrow tombs. The dust on its wings sticks.",
       "level": 4,
       "stats": {
-        "vitality": 14,
+        "stamina": 14,
         "strength": 10,
         "defense": 2,
         "agility": 9,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["flutter"],
       "experience": 14,
@@ -55,11 +58,12 @@
       "description": "A barrow archer who draws on the dead. The shot is obvious before it lands. A bone bolt flies after the draw, even if the shot never does.",
       "level": 5,
       "stats": {
-        "vitality": 27,
+        "stamina": 27,
         "strength": 12,
         "defense": 3,
         "agility": 4,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["aimed_shot", "bone_bolt"],
       "pattern": ["aimed_shot", "bone_bolt"],
@@ -72,11 +76,12 @@
       "description": "A barrow-fed wolf that runs at the front of the pack. Bigger, and slower to fall.",
       "level": 5,
       "stats": {
-        "vitality": 16,
+        "stamina": 16,
         "strength": 10,
         "defense": 3,
         "agility": 8,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["howl", "stalk", "circle", "bite", "dire_bloodlust"],
       "pattern": ["bite", "howl", "stalk", "circle", "stalk"],
@@ -102,11 +107,12 @@
       "description": "Stone set to watch the Stillbarrow door. It hardens when the barrow is pressed.",
       "level": 6,
       "stats": {
-        "vitality": 40,
+        "stamina": 40,
         "strength": 16,
         "defense": 8,
         "agility": 3,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["harden", "thrust"],
       "pattern": ["harden", "thrust", "thrust"],
@@ -119,11 +125,12 @@
       "description": "A lone bear past the Stillbarrow door. It mauls until the wound sticks, and low health turns it Enraged.",
       "level": 7,
       "stats": {
-        "vitality": 52,
+        "stamina": 52,
         "strength": 17,
         "defense": 5,
         "agility": 4,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["heavy_swipe", "rending_maul", "enrage"],
       "pattern": ["heavy_swipe", "rending_maul", "heavy_swipe"],
@@ -151,11 +158,12 @@
       "level": 8,
       "boss": true,
       "stats": {
-        "vitality": 83,
+        "stamina": 83,
         "strength": 18,
         "defense": 12,
         "agility": 3,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["maul_swing", "crushing_slam", "stone_skin"],
       "pattern": ["maul_swing", "crushing_slam", "stone_skin"],
@@ -171,11 +179,12 @@
       "description": "A stone the barrow threw. It falls until it breaks.",
       "level": 1,
       "stats": {
-        "vitality": 8,
+        "stamina": 8,
         "strength": 0,
         "defense": 0,
         "agility": 1,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["rubble_strike"],
       "experience": 0,
@@ -187,11 +196,12 @@
       "description": "A cairn that stands up. While its stone is closed, a blow is wasted; the turn is better spent on breath or guard.",
       "level": 7,
       "stats": {
-        "vitality": 80,
+        "stamina": 80,
         "strength": 14,
         "defense": 8,
         "agility": 2,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["cairn_shell", "cairn_slam", "cairn_settle"],
       "pattern": ["cairn_shell", "cairn_slam", "cairn_slam", "cairn_settle"],
@@ -204,11 +214,12 @@
       "description": "A huge barrow thrall. When it bellows, it cannot be stunned or Exposed until the next big swing lands; only a guard takes the weight.",
       "level": 8,
       "stats": {
-        "vitality": 91,
+        "stamina": 91,
         "strength": 14,
         "defense": 6,
         "agility": 3,
-        "focus": 0
+        "intellect": 0,
+        "will": 0
       },
       "skills": ["bellow", "overhead", "brute_maul"],
       "pattern": ["bellow", "brute_maul", "overhead", "brute_maul"],

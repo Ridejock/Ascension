@@ -144,6 +144,33 @@ void MigrateRunV4(Emerald::SaveData& data)
         data.SetString("class", "fighter");
 }
 
+// Version 5 stored vitality and a focus attribute on a custom sheet. Version 6's
+// primaries are strength, intellect, stamina, defense, agility, and will. Vitality
+// becomes stamina. The focus attribute becomes will. Intellect is absent, so it reads
+// as 0. The carried focus pool keeps the name "focus". Mana is left absent so the load
+// fills it to the new max.
+void MigrateStatBlock(Emerald::SaveData& data, const std::string& prefix)
+{
+    const std::string vitality = prefix + ".vitality";
+    const std::string stamina = prefix + ".stamina";
+    if (data.Has(vitality) && !data.Has(stamina))
+        data.Rename(vitality, stamina);
+    const std::string focus = prefix + ".focus";
+    const std::string will = prefix + ".will";
+    if (data.Has(focus) && !data.Has(will))
+        data.Rename(focus, will);
+}
+
+void MigrateRunV5(Emerald::SaveData& data)
+{
+    const i32 steps = data.GetInt("step.count", 0);
+    for (i32 index = 0; index < steps && index < kMaxEntries; ++index)
+        MigrateStatBlock(data, Key("step", index, {}));
+    const i32 sources = data.GetInt("source.count", 0);
+    for (i32 index = 0; index < sources && index < kMaxEntries; ++index)
+        MigrateStatBlock(data, Key("source", index, {}));
+}
+
 // Version 3's position is an encounter-list index. Version 4 stores a map, a tile, and
 // spawn ids. The index waits under legacy.index until the maps are loaded. A finished
 // fight did not carry HP in version 3; drop a leftover health field so it still does not.
@@ -168,6 +195,7 @@ Emerald::SaveSystem Open(const std::filesystem::path& folder)
     system.AddMigration(2, MigrateRunV2);
     system.AddMigration(3, MigrateRunV3);
     system.AddMigration(4, MigrateRunV4);
+    system.AddMigration(5, MigrateRunV5);
     return system;
 }
 
@@ -198,6 +226,7 @@ void WriteUnit(Emerald::SaveData& data, const std::string& prefix, const Combata
     data.SetString(prefix + ".id", unit.Id);
     data.SetInt(prefix + ".hp", unit.Hp);
     data.SetInt(prefix + ".focus", unit.Focus);
+    data.SetInt(prefix + ".mana", unit.Mana);
     data.SetInt(prefix + ".guard", unit.GuardPercent);
     data.SetInt(prefix + ".empower", unit.EmpowerPercent);
     data.SetInt(prefix + ".reflect", unit.ReflectPercent);
@@ -239,6 +268,7 @@ bool ReadUnit(const Emerald::SaveData& data, const std::string& prefix, Combatan
     unit.Id = data.GetString(prefix + ".id");
     unit.Hp = data.GetInt(prefix + ".hp", 0);
     unit.Focus = data.GetInt(prefix + ".focus", 0);
+    unit.Mana = data.Has(prefix + ".mana") ? data.GetInt(prefix + ".mana", 0) : -1;
     unit.GuardPercent = data.GetInt(prefix + ".guard", 0);
     unit.EmpowerPercent = data.GetInt(prefix + ".empower", 0);
     unit.ReflectPercent = data.GetInt(prefix + ".reflect", 0);
@@ -448,6 +478,7 @@ void Store(const RunState& run, Emerald::SaveData& data)
     data.SetBool("resources", run.ResourcesKnown);
     data.SetInt("hp", run.Hp);
     data.SetInt("focus", run.Focus);
+    data.SetInt("mana", run.Mana);
     WriteFight(run.Fight, data);
 }
 
@@ -621,6 +652,8 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     run.ResourcesKnown = data.GetBool("resources", false);
     run.Hp = data.GetInt("hp", 0);
     run.Focus = data.GetInt("focus", 0);
+    run.ManaKnown = data.Has("mana");
+    run.Mana = data.GetInt("mana", 0);
     std::string fightError;
     if (!ReadFight(data, run.Fight, fightError))
         run.Fight = {};

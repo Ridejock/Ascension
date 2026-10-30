@@ -203,7 +203,7 @@ if(ASCENSION_BUILD_TESTS)
     add_test(NAME Walk COMMAND AscensionWalkTests)
 
     add_executable(AscensionCombatTests tests/CombatTests.cpp tests/Check.h)
-    target_link_libraries(AscensionCombatTests PRIVATE AscensionCombat)
+    target_link_libraries(AscensionCombatTests PRIVATE AscensionCombat AscensionProgress)
     target_include_directories(AscensionCombatTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/App")
     target_compile_definitions(AscensionCombatTests PRIVATE

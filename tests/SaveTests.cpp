@@ -180,9 +180,9 @@ std::string BossId(const Database& data)
 
 bool SameStats(const StatBlock& left, const StatBlock& right)
 {
-    return left.Vitality == right.Vitality && left.Strength == right.Strength &&
-           left.Defense == right.Defense && left.Agility == right.Agility &&
-           left.Focus == right.Focus;
+    return left.Strength == right.Strength && left.Intellect == right.Intellect &&
+           left.Stamina == right.Stamina && left.Defense == right.Defense &&
+           left.Agility == right.Agility && left.Will == right.Will;
 }
 
 RunState Capture(const Hero& hero, const Inventory& bag)
@@ -257,6 +257,8 @@ void TestRoundTrip()
     run.ResourcesKnown = true;
     run.Hp = 17;
     run.Focus = 1;
+    run.Mana = 4;
+    run.ManaKnown = true;
     const StatBlock stats = hero.Attributes();
 
     TempDir dir("ascension-save-round");
@@ -268,7 +270,7 @@ void TestRoundTrip()
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     Check(text.find("EMERALD-SAVE 1") == 0, "the file is an Emerald save, not JSON");
-    Check(text.find("version = 5") != std::string::npos, "the header carries the data version");
+    Check(text.find("version = 6") != std::string::npos, "the header carries the data version");
     Check(text.find("position =") == std::string::npos, "the encounter index is not stored");
     Check(text.find('{') == std::string::npos, "the save text has no JSON object");
 
@@ -303,7 +305,8 @@ void TestRoundTrip()
               loaded.Run.Defeated[1] == boss && loaded.Run.EncounterId == "wolf_pack" &&
               loaded.Run.DirectEnemy == "rubble_shard" &&
               loaded.Run.Standing == RunStanding::Ongoing && loaded.Run.ResourcesKnown &&
-              loaded.Run.Hp == 17 && loaded.Run.Focus == 1 && loaded.Run.Flags.size() == 1 &&
+              loaded.Run.Hp == 17 && loaded.Run.Focus == 1 && loaded.Run.ManaKnown &&
+              loaded.Run.Mana == 4 && loaded.Run.Flags.size() == 1 &&
               loaded.Run.Flags[0] == "met" && loaded.Run.Found.size() == 1 &&
               loaded.Run.Found[0] == "alphas_fang",
           "defeated foes, the encounter, the wound, a flag, and the fang come back");
@@ -601,9 +604,9 @@ void TestAiSnapshot()
                   "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
                   "\"gold\": 0\n    },\n    {\n      \"id\": \"rule_post\",\n      \"name\": "
                   "\"Rule Post\",\n      \"description\": \"A post with a short pattern and two "
-                  "rules.\",\n      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "rules.\",\n      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 40,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"thrust\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\", \"thrust\"],\n"
                   "      \"pattern\": [\"harden\", \"thrust\"],\n      \"ai\": [\n        "
                   "{ \"if\": { \"targetStatus\": \"exposed\", \"next\": \"harden\" }, "
                   "\"do\": \"skill\", \"skill\": \"thrust\" }\n      ],\n      \"experience\": 0,\n"
@@ -702,18 +705,18 @@ void AddWanderer(const fs::path& classes)
                   "      \"description\": \"A traveler with the same drills.\",\n"
                   "      \"starter\": true,\n"
                   "      \"stats\": {\n"
-                  "        \"vitality\": 18,\n"
+                  "        \"stamina\": 18,\n"
                   "        \"strength\": 8,\n"
                   "        \"defense\": 6,\n"
                   "        \"agility\": 5,\n"
-                  "        \"focus\": 4\n"
+                  "        \"intellect\": 4, \"will\": 0\n"
                   "      },\n"
                   "      \"growth\": {\n"
-                  "        \"vitality\": 4,\n"
+                  "        \"stamina\": 4,\n"
                   "        \"strength\": 2,\n"
                   "        \"defense\": 1,\n"
                   "        \"agility\": 1,\n"
-                  "        \"focus\": 1\n"
+                  "        \"intellect\": 1, \"will\": 0\n"
                   "      },\n"
                   "      \"skills\": [\"strike\", \"brace\", \"heavy_blow\", \"second_wind\"],\n"
                   "      \"passives\": []\n"
@@ -878,7 +881,8 @@ void TestVictoryHp()
 
     Hero hero = StartHero(data);
     RunState run = Capture(hero, StartBag(data));
-    RememberOutcome(run, battle.Result(), battle.Player().Hp, battle.Player().Focus);
+    RememberOutcome(run, battle.Result(), battle.Player().Hp, battle.Player().Focus,
+                    battle.Player().Mana);
     TempDir dir("ascension-save-victory-hp");
     RunSave saves(dir.Path);
     Check(saves.Write(run, why), "the victory is written");
@@ -949,7 +953,7 @@ void TestVersion3Hub()
     Check(saves.Write(loaded.Run, why), "the migrated run is written as the current version");
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    Check(text.find("version = 5") != std::string::npos && text.find("position =") == std::string::npos &&
+    Check(text.find("version = 6") != std::string::npos && text.find("position =") == std::string::npos &&
               text.find("legacy.index") == std::string::npos &&
               text.find("alphas_fang") != std::string::npos,
           "the new file is version 5, with spawn ids and the fang, and no list index");
@@ -1070,6 +1074,43 @@ void TestSpawnIds()
     RunSave brokenSave(brokenDir.Path);
     const RunLoad bad = brokenSave.Read();
     Check(!bad && bad.Error == RunSaveError::BadData, "an empty spawn id is damaged, not a crash");
+}
+
+void TestVersion5Sheet()
+{
+    TempDir dir("ascension-save-v5-sheet");
+    Emerald::SaveData older;
+    older.SetString("class", "mage");
+    older.SetString("name", "Old");
+    older.SetBool("custom", true);
+    older.SetInt("step.count", 1);
+    older.SetInt("step.0.vitality", 3);
+    older.SetInt("step.0.strength", 1);
+    older.SetInt("step.0.focus", 2);
+    older.SetInt("source.count", 1);
+    older.SetString("source.0.id", "mage");
+    older.SetInt("source.0.vitality", 14);
+    older.SetInt("source.0.focus", 8);
+    older.SetBool("resources", true);
+    older.SetInt("hp", 20);
+    older.SetInt("focus", 3);
+    Emerald::SaveSystem version5(dir.Path, 5);
+    Check(version5.Save("run", older, "v5"), "a version 5 sheet is written");
+    RunSave saves(dir.Path);
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == 5, "version 5 migrates");
+    Check(loaded.Run.Career.Custom && loaded.Run.Career.LevelSteps.size() == 1 &&
+              loaded.Run.Career.LevelSteps[0].Stamina == 3 &&
+              loaded.Run.Career.LevelSteps[0].Strength == 1 &&
+              loaded.Run.Career.LevelSteps[0].Will == 2 &&
+              loaded.Run.Career.LevelSteps[0].Intellect == 0,
+          "vitality becomes stamina and the focus attribute becomes will");
+    Check(loaded.Run.Career.Sources.size() == 1 && loaded.Run.Career.Sources[0].Points.Stamina == 14 &&
+              loaded.Run.Career.Sources[0].Points.Will == 8,
+          "a class source keeps the renamed primaries");
+    Check(loaded.Run.ResourcesKnown && !loaded.Run.ManaKnown && loaded.Run.Hp == 20 &&
+              loaded.Run.Focus == 3,
+          "the old focus pool stays, and mana is absent so the load can fill it");
 }
 
 void TestVersion4Name()
@@ -1335,6 +1376,7 @@ int main()
     TestVersion3Hub();
     TestFixtureV3();
     TestSpawnIds();
+    TestVersion5Sheet();
     TestVersion4Name();
     TestAwardVictoryChoiceSave();
     TestFoundOptional();

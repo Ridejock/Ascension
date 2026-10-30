@@ -48,20 +48,26 @@ struct RunState {
     std::string DirectEnemy;
     RunStanding Standing = RunStanding::None;
     bool ResourcesKnown = false;
+    // False when an older file stored HP and focus and had no mana key. The load fills
+    // mana to the hero's max instead of starting them at zero.
+    bool ManaKnown = false;
     i32 Hp = 0;
     i32 Focus = 0;
+    i32 Mana = 0;
     FightSnapshot Fight;
 };
 
 // Records the fight's result and the pools the caller wants kept. A win, a flee, and an
-// ongoing blow store HP and focus. A loss stores whatever the caller passes, which is the
-// refilled pools when the map has already sent the hero home. A flee is between fights
-// (standing None) and still keeps the wound.
-inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focus)
+// ongoing blow store HP, focus, and mana. A loss stores whatever the caller passes, which
+// is the refilled pools when the map has already sent the hero home. A flee is between
+// fights (standing None) and still keeps the wound.
+inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focus, i32 mana)
 {
     run.ResourcesKnown = true;
+    run.ManaKnown = true;
     run.Hp = hp;
     run.Focus = focus;
+    run.Mana = mana;
     if (result == BattleResult::Victory) {
         run.Standing = RunStanding::Victory;
         return;
@@ -92,6 +98,7 @@ struct FightRecord {
     bool VitalsKnown = false;
     i32 Hp = 0;
     i32 Focus = 0;
+    i32 Mana = 0;
     // Used when no battle is on screen. An ongoing file with a snapshot restores that blow.
     RunStanding Standing = RunStanding::None;
     bool ResumeKnown = false;
@@ -112,7 +119,7 @@ struct FightRecord {
 inline void RecordFight(RunState& run, const FightRecord& in)
 {
     if (in.BattleLive && in.Result == BattleResult::Ongoing) {
-        RememberOutcome(run, BattleResult::Ongoing, in.Hp, in.Focus);
+        RememberOutcome(run, BattleResult::Ongoing, in.Hp, in.Focus, in.Mana);
         run.Fight = in.Live;
         if (in.SpawnActive)
             run.SpawnId = in.SpawnId;
@@ -128,7 +135,7 @@ inline void RecordFight(RunState& run, const FightRecord& in)
             result = BattleResult::Defeat;
         else if (in.Standing == RunStanding::Ongoing)
             result = BattleResult::Ongoing;
-        RememberOutcome(run, result, in.Hp, in.Focus);
+        RememberOutcome(run, result, in.Hp, in.Focus, in.Mana);
         if (result == BattleResult::Ongoing && in.ResumeKnown) {
             run.Fight = in.Resume;
             run.SpawnId = in.ResumeSpawn;
@@ -204,13 +211,15 @@ struct RunLoad {
 // the previous good copy. The folder is the per-user path unless a test passes its own.
 class RunSave {
 public:
-    // Version 5. `name` is the hero's own name. Empty is the default, and a missing
-    // name on an older file stays empty. A missing class becomes `fighter`. The class
-    // a version 4 file already stored is kept. Version 4 is a map id and a tile,
-    // cleared spawns are string ids, and HP and focus are kept between fights,
-    // including after a flee. Found ids and dialogue flags were already optional in
-    // version 3: a missing list claimed nothing and set no talk flags.
-    static constexpr u32 kVersion = 5;
+    // Version 6. The hero's sheet is the six primaries, and the carried pools are HP,
+    // focus, and mana. A version 5 file keeps its class and name. A custom build's
+    // vitality becomes stamina and its focus attribute becomes will; intellect is 0
+    // until spent. A missing mana key is filled to the new max on load, not stored as
+    // zero. Version 5 is the named hero. Version 4 is a map id and a tile, cleared
+    // spawns are string ids, and HP and focus are kept between fights, including after
+    // a flee. Found ids and dialogue flags were already optional in version 3: a missing
+    // list claimed nothing and set no talk flags.
+    static constexpr u32 kVersion = 6;
 
     explicit RunSave(std::filesystem::path folder);
 

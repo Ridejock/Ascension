@@ -131,7 +131,7 @@ public:
     // is not a starter. A playtest uses this so --class can name any starter.
     bool AdoptStarter(std::string_view classId, std::string& error);
 
-    // Moves one pooled class point onto `statId` (vitality, strength, defense, agility, focus).
+    // Moves one pooled class point onto `statId` (one of the six primaries).
     bool SpendClassPoint(std::string_view statId, std::string& error);
 
     // Points earned by leveling. Kept across a reset.

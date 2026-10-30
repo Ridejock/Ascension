@@ -245,6 +245,7 @@ private:
     bool m_AnnounceResume = false;
     i32 m_ResumeHp = 0;
     i32 m_ResumeFocus = 0;
+    i32 m_ResumeMana = 0;
     FightSnapshot m_ResumeFight;
     bool m_Picking = false;
     i32 m_PickRow = 0;
