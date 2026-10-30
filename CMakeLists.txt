@@ -281,7 +281,7 @@ if(ASCENSION_BUILD_TESTS)
     emerald_set_warnings(AscensionDebugRunTests)
     add_test(NAME DebugRun COMMAND AscensionDebugRunTests)
 
-    add_executable(AscensionInputTests tests/InputTests.cpp tests/Check.h)
+    add_executable(AscensionInputTests tests/InputTests.cpp tests/FrontTests.cpp tests/Check.h)
     target_link_libraries(AscensionInputTests PRIVATE AscensionData)
     target_compile_definitions(AscensionInputTests PRIVATE
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"

@@ -26,9 +26,12 @@ struct AttributeSource {
 };
 
 // The career fields a save writes. Level is not stored: it is derived from XP and the curve.
-// Custom is the build-reset flag. When it is set, LevelSteps and Sources are the stats; when
-// it is clear, those lists are empty and the class formula is used instead.
+// Name is the hero's own name from character create. Empty is an old save, or a run
+// that a flag started, and the screen then shows the class name. Custom is the
+// build-reset flag. When it is set, LevelSteps and Sources are the stats; when it is
+// clear, those lists are empty and the class formula is used instead.
 struct CareerRecord {
+    std::string Name;
     std::string ClassId;
     i32 Xp = 0;
     std::vector<std::string> Practiced;
@@ -62,6 +65,9 @@ public:
 
     [[nodiscard]] bool IsReady() const { return m_Data != nullptr && !m_ClassId.empty(); }
     [[nodiscard]] const std::string& ClassId() const { return m_ClassId; }
+    // Empty until character create accepts a name. A loaded save may stay empty.
+    [[nodiscard]] const std::string& Name() const { return m_Name; }
+    void SetName(std::string name) { m_Name = std::move(name); }
     [[nodiscard]] i32 Xp() const { return m_Xp; }
     [[nodiscard]] i32 Level() const;
     [[nodiscard]] i32 NextLevelXp() const;
@@ -172,6 +178,7 @@ private:
     [[nodiscard]] std::vector<AttributeSource> DerivedSources() const;
 
     const Database* m_Data = nullptr;
+    std::string m_Name;
     std::string m_ClassId;
     i32 m_Xp = 0;
     std::vector<std::string> m_Practiced;

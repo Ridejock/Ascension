@@ -2569,6 +2569,9 @@ const char* kUiLabels[] = {
     "Press again to start a new game.",
     "New game.",
     "Could not start a new game.",
+    "the name cannot be used",
+    "no starter class",
+    "is not a starter",
     "ALL FOES",
     "YOU",
     "NO CHANGE",
@@ -2675,6 +2678,20 @@ void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
     ConsiderGlyphs("pause", controls.PauseTitle, missing);
     ConsiderGlyphs("pause", controls.PauseContinue, missing);
     ConsiderGlyphs("pause", controls.PauseQuit, missing);
+    ConsiderGlyphs("title", controls.TitleWordmark, missing);
+    ConsiderGlyphs("title", controls.TitleTagline, missing);
+    ConsiderGlyphs("title", controls.TitleContinue, missing);
+    ConsiderGlyphs("title", controls.TitleNewGame, missing);
+    ConsiderGlyphs("title", controls.TitleQuit, missing);
+    ConsiderGlyphs("title", controls.TitleOverwrite, missing);
+    ConsiderGlyphs("title", controls.TitleOverwriteYes, missing);
+    ConsiderGlyphs("title", controls.TitleBack, missing);
+    ConsiderGlyphs("create", controls.CreateName, missing);
+    ConsiderGlyphs("create", controls.CreateClass, missing);
+    ConsiderGlyphs("create", controls.CreateBegin, missing);
+    ConsiderGlyphs("create", controls.CreateNameEmpty, missing);
+    ConsiderGlyphs("create", controls.CreateNameLong, missing);
+    ConsiderGlyphs("create", controls.CreateNameBad, missing);
 
     CombatantState foe;
     foe.GuardPercent = 50;

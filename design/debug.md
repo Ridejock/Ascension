@@ -7,7 +7,7 @@ Two keyboard actions for a running game. The names are `DebugRespawnFoes` and `D
 | Action | Key | Pad | What it does |
 |---|---|---|---|
 | DebugRespawnFoes | F6 |  | Bring every defeated foe back, on every map |
-| DebugNewGame | F9, twice |  | Start a new run. The second press has to land inside the confirm window |
+| DebugNewGame | F9, twice |  | Open character create. The second press has to land inside the confirm window |
 
 Neither action has a gamepad button. Rebinding is a change to `input.json` only.
 
@@ -23,13 +23,13 @@ An ongoing fight, and a map fight that has not settled yet, does nothing to thos
 
 `DebugNewGame` the first time arms a confirm. The line is `debugNewGameArmed` (`Press again to start a new game.`).
 
-The second press starts over when it lands within `debugConfirmMilliseconds` of the first. That value is 1500. A later press arms the window again instead of starting over. There is no gamepad confirm for this: the second press is the same action.
+The second press opens character create when it lands within `debugConfirmMilliseconds` of the first. That value is 1500. A later press arms the window again instead of opening create. There is no gamepad confirm for this: the second press is the same action.
 
-A new run is the one a missing save starts. The hero is the first starter class, at level 1, with no XP. The bag is empty and gold is 0. Defeated foes, cleared spawns, claimed drops, and talk flags are clear. Health and focus are full. The hero stands on the start tile of the map that sets `hub`.
+From a running game, Begin is the new run. The hero is the name and the starter the player picked, at level 1, with no XP. The bag is empty and gold is 0. Defeated foes, cleared spawns, claimed drops, and talk flags are clear. Health and focus are full. The hero stands on the start tile of the map that sets `hub`. Escape before Begin returns to the game and changes nothing.
 
-The line is `debugNewGame` (`New game.`).
+The line is `debugNewGame` (`New game.`), when create opens.
 
-The save file is not deleted and not rewritten. The next Save, or Quit game on the pause menu, writes this run over it, the same way a new game becomes the file on the first save.
+The save file is not deleted and not rewritten. The next Save, or Quit game on the pause menu, writes this run over it. From the title, F9 is New game, and Begin writes the file the way the title's own New game does. A save still asks before it is replaced.
 
 ## Help
 

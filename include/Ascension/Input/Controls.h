@@ -35,6 +35,22 @@ struct ControlRules {
     std::string PauseTitle;
     std::string PauseContinue;
     std::string PauseQuit;
+    // Title and character create. Continue is dimmed when no save can be loaded.
+    // The name refusals are the name step's notice.
+    std::string TitleWordmark;
+    std::string TitleTagline;
+    std::string TitleContinue;
+    std::string TitleNewGame;
+    std::string TitleQuit;
+    std::string TitleOverwrite;
+    std::string TitleOverwriteYes;
+    std::string TitleBack;
+    std::string CreateName;
+    std::string CreateClass;
+    std::string CreateBegin;
+    std::string CreateNameEmpty;
+    std::string CreateNameLong;
+    std::string CreateNameBad;
     std::vector<ControlBind> Actions;
 };
 

@@ -27,7 +27,11 @@ struct FreshStart {
 
 // The same hero and bag a missing save starts: Start() on both, then the hub tile.
 // Does not open, write, or delete a save file. The caller places the hero.
+// `name` empty keeps the default (no personal name). `classId` empty keeps the first
+// starter. A name that create would reject, or a class that is not a starter, fails
+// and leaves the hero as it was.
 [[nodiscard]] bool BeginNewGame(const Database& data, Hero& hero, Inventory& inventory,
-                                FreshStart& out, std::string& error);
+                                FreshStart& out, std::string& error, std::string_view name = {},
+                                std::string_view classId = {});
 
 } // namespace Ascension

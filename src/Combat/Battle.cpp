@@ -572,7 +572,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     m_HeroGrants = m_Data->HeroGrants(*klass, m_WornItems, m_PickedSkills);
     CombatantState player;
     player.Id = klass->Id;
-    player.Name = klass->Name;
+    player.Name = m_HeroLabel.empty() ? klass->Name : m_HeroLabel;
     player.Stats = m_HasBaseStats ? m_BaseStats : m_Data->StatsAt(*klass, m_Level);
     player.Stats += m_Gear;
     ApplyAlways(player, true);

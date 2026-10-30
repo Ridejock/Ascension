@@ -91,6 +91,12 @@ struct PlaytestOptions {
     // never opens a window. No --map still walks: the hub is the default room.
     [[nodiscard]] bool OpensOverland() const { return !Sim && Fight.Id.empty(); }
 
+    // True when this launch should not stop on the title. A flag that builds a hero,
+    // a fight, or a map does that, and so does a key script. --save-dir alone still
+    // shows the title and Continue reads that folder. --class skips create: the flag
+    // already named the class.
+    [[nodiscard]] bool SkipsFront() const { return DefinesRun() || !Keys.empty(); }
+
     // True when startup has to load data to check an id, a level, or a folder.
     [[nodiscard]] bool UsesData() const;
 

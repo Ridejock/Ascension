@@ -67,7 +67,8 @@ bool SameStats(const StatBlock& left, const StatBlock& right)
 
 bool SameCareer(const CareerRecord& left, const CareerRecord& right)
 {
-    if (left.ClassId != right.ClassId || left.Xp != right.Xp || left.Custom != right.Custom ||
+    if (left.Name != right.Name || left.ClassId != right.ClassId || left.Xp != right.Xp ||
+        left.Custom != right.Custom ||
         left.ChoosingStarter != right.ChoosingStarter || left.ClassPool != right.ClassPool ||
         left.SpendId != right.SpendId)
         return false;
@@ -275,8 +276,21 @@ void TestNewGame(const Database& sample, const Database& shipped)
           "new game resets the shipped run");
     Check(shippedStart.Run.MapId == hub->Id && shippedStart.Run.Tile.X == hub->Start.X &&
               shippedStart.Run.Tile.Y == hub->Start.Y && shippedHero.Level() == 1 &&
-              shippedHero.Xp() == 0 && shippedBag.Gold() == 0,
+              shippedHero.Xp() == 0 && shippedBag.Gold() == 0 && shippedHero.Name().empty(),
           "a shipped new game stands on the hub start at level 1");
+
+    Hero named;
+    Inventory namedBag;
+    FreshStart namedStart;
+    Check(!BeginNewGame(shipped, named, namedBag, namedStart, why, "Mara!", "mage"),
+          "a name create would refuse does not start");
+    Check(BeginNewGame(shipped, named, namedBag, namedStart, why, "  Mara Stone ", "mage"),
+          "create starts the named class");
+    Check(named.Name() == "Mara Stone" && named.ClassId() == "mage" && named.Level() == 1 &&
+              named.Xp() == 0 && namedBag.Gold() == 0 && namedStart.Run.Career.Name == "Mara Stone" &&
+              namedStart.Run.Career.ClassId == "mage" && namedStart.Run.MapId == hub->Id &&
+              namedStart.Run.Tile.X == hub->Start.X && namedStart.Run.Tile.Y == hub->Start.Y,
+          "the named mage stands on the hub start");
 }
 
 void TestSaveLeftAlone(const Database& sample)

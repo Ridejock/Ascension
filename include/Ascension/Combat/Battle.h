@@ -279,6 +279,11 @@ public:
     // The sandbox passes the hero's attributes. Leave it unset and Start keeps the class formula.
     void SetBaseStats(StatBlock stats);
 
+    // The name drawn and logged for the hero. Empty keeps the class name, which is what
+    // a save from before names, and a fight that never called this, already show.
+    // Call it before Start, and again before ApplyData. The next Build reads it.
+    void SetHeroLabel(std::string_view name) { m_HeroLabel = std::string(name); }
+
     // Drinks a consumable on the player's turn. Accepted with SkillId set means the drink
     // landed and the bag should drop one. A stun spends the turn and leaves SkillId empty,
     // so the bottle stays in the bag.
@@ -408,6 +413,7 @@ private:
     const Database* m_Data = nullptr;
     std::unique_ptr<TurnModel> m_Turns;
     std::string m_ClassId;
+    std::string m_HeroLabel;
     std::string m_EncounterId;
     // When set, Build seats these ids instead of the encounter's list. Empty means
     // the encounter's own list, which is every fight that did not come from a queue.

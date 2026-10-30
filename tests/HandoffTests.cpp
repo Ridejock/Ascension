@@ -554,7 +554,7 @@ void TestRosterStart()
 
 void TestFleeKeepsTheWound()
 {
-    Check(RunSave::kVersion == 4, "the save version records the map");
+    Check(RunSave::kVersion == 5, "the save version records the hero name");
     RunState run;
     RememberOutcome(run, BattleResult::Fled, 3, 1);
     Check(run.Standing == RunStanding::None && run.ResourcesKnown && run.Hp == 3 &&

@@ -1094,13 +1094,24 @@ void TestRoute()
     PlaytestOptions launch;
     Check(Parse({}, launch, error), "a launch with no flags parses");
     Check(launch.OpensOverland() && launch.LoadsSave() && !launch.DefinesRun() &&
-              launch.MapId.empty() && launch.Fight.Id.empty(),
-          "no flags walks the hub and reads the per-user save");
+              !launch.SkipsFront() && launch.MapId.empty() && launch.Fight.Id.empty(),
+          "no flags shows the title, and Continue walks the hub from the per-user save");
 
     PlaytestOptions enemy;
     Check(Parse({"--enemy", "wolf"}, enemy, error), "--enemy parses");
-    Check(!enemy.OpensOverland() && !enemy.LoadsSave() && enemy.DefinesRun(),
+    Check(!enemy.OpensOverland() && !enemy.LoadsSave() && enemy.DefinesRun() && enemy.SkipsFront(),
           "--enemy stays on the fight screen and does not load a save");
+    PlaytestOptions namedClass;
+    Check(Parse({"--class", "mage"}, namedClass, error), "--class parses");
+    Check(namedClass.SkipsFront() && !namedClass.LoadsSave() && namedClass.ClassId == "mage",
+          "--class skips the title and starts as that class");
+    PlaytestOptions scripted;
+    Check(Parse({"--keys", "w"}, scripted, error), "--keys parses");
+    Check(scripted.SkipsFront() && scripted.LoadsSave(), "a key script skips the title");
+    PlaytestOptions saveOnly;
+    Check(Parse({"--save-dir", "saves"}, saveOnly, error), "--save-dir parses");
+    Check(!saveOnly.SkipsFront() && saveOnly.LoadsSave() && !saveOnly.DefinesRun(),
+          "--save-dir alone still shows the title");
 
     PlaytestOptions alone;
     Check(!Parse({"--route"}, alone, error), "--route without --sim fails");

@@ -230,6 +230,7 @@ void TestRoundTrip()
     Check(bag.Equip(swordSlot, why), "the sword is worn");
 
     RunState run = Capture(hero, bag);
+    run.Career.Name = "Mara Stone";
     const std::string boss = BossId(data);
     run.Defeated.push_back("wolf");
     run.Defeated.push_back(boss);
@@ -265,7 +266,7 @@ void TestRoundTrip()
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     Check(text.find("EMERALD-SAVE 1") == 0, "the file is an Emerald save, not JSON");
-    Check(text.find("version = 4") != std::string::npos, "the header carries the data version");
+    Check(text.find("version = 5") != std::string::npos, "the header carries the data version");
     Check(text.find("position =") == std::string::npos, "the encounter index is not stored");
     Check(text.find('{') == std::string::npos, "the save text has no JSON object");
 
@@ -276,7 +277,8 @@ void TestRoundTrip()
     Hero again = StartHero(data);
     Inventory bagAgain = StartBag(data);
     Check(Restore(again, bagAgain, loaded.Run, why), "the run is applied");
-    Check(again.ClassId() == "berserker" && again.Xp() == hero.Xp() && again.Level() == 8,
+    Check(again.Name() == "Mara Stone" && again.ClassId() == "berserker" && again.Xp() == hero.Xp() &&
+              again.Level() == 8,
           "class, XP, and level come back");
     Check(SameStats(again.Attributes(), stats), "the stats come back");
     Check(again.UsesOf("strike") == 3 && again.RankOf("strike") == 2, "skill practice comes back");
@@ -942,13 +944,13 @@ void TestVersion3Hub()
           "the hero stands on the hub start, and the once-spawn of a defeated encounter is cleared");
 
     std::string why;
-    Check(saves.Write(loaded.Run, why), "the migrated run is written as version 4");
+    Check(saves.Write(loaded.Run, why), "the migrated run is written as the current version");
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    Check(text.find("version = 4") != std::string::npos && text.find("position =") == std::string::npos &&
+    Check(text.find("version = 5") != std::string::npos && text.find("position =") == std::string::npos &&
               text.find("legacy.index") == std::string::npos &&
               text.find("alphas_fang") != std::string::npos,
-          "the new file is version 4, with spawn ids and the fang, and no list index");
+          "the new file is version 5, with spawn ids and the fang, and no list index");
 }
 
 void TestFixtureV3()
@@ -976,13 +978,13 @@ void TestFixtureV3()
     Inventory bag = StartBag(data);
     std::string why;
     Check(Restore(hero, bag, loaded.Run, why), "the fixture career loads");
-    Check(hero.ClassId() == "fighter" && hero.Xp() == 8 && bag.Gold() == 4 &&
+    Check(hero.Name().empty() && hero.ClassId() == "fighter" && hero.Xp() == 8 && bag.Gold() == 4 &&
               loaded.Run.EncounterId == "bandit" && loaded.Run.MapId == "fixture_a" &&
               loaded.Run.Tile.X == 1 && loaded.Run.Tile.Y == 1 &&
               HoldsId(loaded.Run.Cleared, "fixture_spawn") &&
               !HoldsId(loaded.Run.Cleared, "fixture_hold") && loaded.Run.LegacyIndex < 0,
           "the fixture stands on the first map's start with the wolf spawn cleared");
-    Check(saves.Write(loaded.Run, why), "the fixture is saved as version 4");
+    Check(saves.Write(loaded.Run, why), "the fixture is saved as the current version");
     const RunLoad again = saves.Read();
     Check(static_cast<bool>(again) && again.FileVersion == RunSave::kVersion &&
               again.Run.Found.size() == 1 && again.Run.Found[0] == "alphas_fang" &&
@@ -1068,6 +1070,42 @@ void TestSpawnIds()
     Check(!bad && bad.Error == RunSaveError::BadData, "an empty spawn id is damaged, not a crash");
 }
 
+void TestVersion4Name()
+{
+    TempDir mageDir("ascension-save-v4-mage");
+    Emerald::SaveData mage;
+    mage.SetString("class", "mage");
+    mage.SetInt("xp", 8);
+    Emerald::SaveSystem version4(mageDir.Path, 4);
+    Check(version4.Save("run", mage, "mage"), "a version 4 mage file is written");
+    RunSave mageSave(mageDir.Path);
+    const RunLoad kept = mageSave.Read();
+    Check(static_cast<bool>(kept) && kept.FileVersion == 4 && kept.Run.Career.ClassId == "mage" &&
+              kept.Run.Career.Name.empty(),
+          "a version 4 file keeps its class and gains an empty name");
+
+    TempDir bareDir("ascension-save-v4-bare");
+    Emerald::SaveData bare;
+    bare.SetInt("xp", 0);
+    Emerald::SaveSystem bareSystem(bareDir.Path, 4);
+    Check(bareSystem.Save("run", bare, "bare"), "a version 4 file with no class is written");
+    RunSave bareSave(bareDir.Path);
+    const RunLoad fighter = bareSave.Read();
+    Check(static_cast<bool>(fighter) && fighter.Run.Career.ClassId == "fighter" &&
+              fighter.Run.Career.Name.empty(),
+          "a version 4 file with no class migrates as fighter with an empty name");
+
+    Database data = Sample();
+    if (!data.IsLoaded())
+        return;
+    Hero hero = StartHero(data);
+    std::string why;
+    CareerRecord bad = fighter.Run.Career;
+    bad.Name = "Mara!";
+    Check(hero.ImportCareer(bad, why) && hero.Name().empty() && hero.ClassId() == "fighter",
+          "a name the create screen would refuse loads as the empty default");
+}
+
 void TestFoundOptional()
 {
     TempDir dir("ascension-save-found-absent");
@@ -1102,6 +1140,7 @@ int main()
     TestVersion3Hub();
     TestFixtureV3();
     TestSpawnIds();
+    TestVersion4Name();
     TestFoundOptional();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();

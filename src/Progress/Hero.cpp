@@ -1,5 +1,7 @@
 #include "Ascension/Progress/Hero.h"
 
+#include "Ascension/Progress/HeroName.h"
+
 namespace Ascension {
 
 namespace {
@@ -23,10 +25,12 @@ bool Hero::Start(const Database& data, std::string& error)
     if (starters.empty() || starters.front() == nullptr) {
         error = "no starter class";
         m_Data = nullptr;
+        m_Name.clear();
         m_ClassId.clear();
         return false;
     }
     m_Data = &data;
+    m_Name.clear();
     m_ClassId = starters.front()->Id;
     m_Xp = 0;
     m_Practiced.clear();
@@ -541,6 +545,7 @@ std::vector<AttributeSource> Hero::DerivedSources() const
 
 void Hero::ExportCareer(CareerRecord& out) const
 {
+    out.Name = m_Name;
     out.ClassId = m_ClassId;
     out.Xp = m_Xp;
     out.Practiced = m_Practiced;
@@ -574,6 +579,12 @@ bool Hero::ImportCareer(const CareerRecord& in, std::string& error)
         return false;
     }
     m_ClassId = in.ClassId;
+    if (in.Name.empty()) {
+        m_Name.clear();
+    } else {
+        const HeroNameCheck check = CheckHeroName(in.Name);
+        m_Name = check.Status == HeroNameStatus::Ok ? check.Name : std::string{};
+    }
     m_Xp = in.Xp < 0 ? 0 : in.Xp;
     if (m_Xp > kXpCap)
         m_Xp = kXpCap;

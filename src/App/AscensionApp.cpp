@@ -953,6 +953,7 @@ void AscensionApp::BeginSpawnFight()
     m_Battle->SetWornItems(m_Inventory.WornIds());
     m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
+    m_Battle->SetHeroLabel(m_Hero.Name());
     std::string error;
     const EncounterDef* encounter = m_Data.FindEncounter(m_MapFight.EncounterId);
     const bool listed = encounter != nullptr && !m_MapFight.Foes.empty() &&
@@ -1153,6 +1154,7 @@ void AscensionApp::BeginFight()
     m_Battle->SetWornItems(m_Inventory.WornIds());
     m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
+    m_Battle->SetHeroLabel(m_Hero.Name());
     std::string error;
     if (!OpenBattle(fightId, error)) {
         m_StartError = error;
@@ -1437,6 +1439,39 @@ void AscensionApp::OnStart()
             return;
         }
     }
+    EnsureIcons();
+    if (!BindControls()) {
+        Quit();
+        return;
+    }
+    // A flag that builds the run, and a key script, skip the title so the old
+    // commands still start where they started. Anything else waits on the title.
+    if (m_Play.SkipsFront()) {
+        BootPreparedRun();
+        return;
+    }
+    ShowTitle();
+}
+
+void AscensionApp::ShowTitle()
+{
+    m_SaveProbed = true;
+    m_Front = {};
+    m_Front.Phase = FrontPhase::Title;
+    m_Front.Return = FrontPhase::Title;
+    const RunLoad loaded = RunSave(SaveFolder()).Read();
+    if (loaded) {
+        m_Front.SaveExists = true;
+        if (loaded.FromBackup)
+            Note("The save was damaged. The previous one was loaded.");
+    } else if (loaded.Error != RunSaveError::NotFound) {
+        Note("The save could not be read. A new run starts.");
+    }
+    SyncTextInput();
+}
+
+void AscensionApp::BootPreparedRun()
+{
     PlaytestSetup setup;
     std::string why;
     bool resumed = false;
@@ -1455,15 +1490,19 @@ void AscensionApp::OnStart()
         m_DirectEnemy = std::move(setup.DirectEnemy);
         m_Inventory.SetDefeated(m_Defeated);
     }
+    FinishBoot(resumed);
+}
+
+void AscensionApp::FinishBoot(bool resumed)
+{
     if (!TakeAutoPath())
         return;
     if (m_Hero.IsReady() && m_Inventory.IsReady() && !m_Vitals.Known)
         FillVitals(m_Vitals, HeroPools(m_Data, m_Hero, m_Inventory));
-    EnsureIcons();
-    if (!BindControls()) {
-        Quit();
-        return;
-    }
+    m_Front.Phase = FrontPhase::Playing;
+    m_Front.Debug = false;
+    m_Front.Return = FrontPhase::Playing;
+    SyncTextInput();
     // --enemy is the fight screen, including N to the next list row. Anything else
     // walks. No --map means the hub, and the per-user save when this command did
     // not build a hero.
@@ -1486,6 +1525,234 @@ void AscensionApp::OnStart()
     if (resumed)
         m_AnnounceResume = true;
     BeginFight();
+}
+
+void AscensionApp::ContinueSavedRun()
+{
+    std::string why;
+    if (!TryResume(why)) {
+        m_Front.SaveExists = false;
+        m_Front.Phase = FrontPhase::Title;
+        m_Front.Row = kTitleRowContinue;
+        if (why.empty())
+            Note("The save could not be read. A new run starts.");
+        return;
+    }
+    FinishBoot(true);
+}
+
+void AscensionApp::CommitCreatedRun()
+{
+    const std::vector<const ClassDef*> starters = m_Data.Starters();
+    if (m_Front.ClassRow < 0 || m_Front.ClassRow >= static_cast<i32>(starters.size()) ||
+        starters[static_cast<usize>(m_Front.ClassRow)] == nullptr) {
+        Note("no starter class");
+        return;
+    }
+    const bool debug = m_Front.Debug;
+    const std::string classId = starters[static_cast<usize>(m_Front.ClassRow)]->Id;
+    FreshStart fresh;
+    std::string error;
+    if (!BeginNewGame(m_Data, m_Hero, m_Inventory, fresh, error, m_Front.Name, classId)) {
+        Note(error.empty() ? "Could not start a new game." : error);
+        return;
+    }
+    ApplyFreshRun(fresh);
+    m_Front.Phase = FrontPhase::Playing;
+    m_Front.Debug = false;
+    m_Front.Return = FrontPhase::Playing;
+    m_Front.Notice = FrontNotice::None;
+    SyncTextInput();
+    // The title's Begin writes the run, so the next launch can Continue. F9 leaves
+    // the file until the next Save, the same way it did before create existed.
+    if (!debug)
+        WriteSave();
+}
+
+void AscensionApp::SyncTextInput()
+{
+    SDL_Window* window = GetWindow().GetNativeWindow();
+    if (window == nullptr)
+        return;
+    if (m_Front.Phase == FrontPhase::Name)
+        SDL_StartTextInput(window);
+    else
+        SDL_StopTextInput(window);
+}
+
+void AscensionApp::OnEvent(const SDL_Event& event)
+{
+    if (m_Front.Phase != FrontPhase::Name || event.type != SDL_EVENT_TEXT_INPUT ||
+        event.text.text == nullptr)
+        return;
+    const NameEdit edit = AppendHeroName(m_Front.Name, event.text.text);
+    if (edit == NameEdit::Added || edit == NameEdit::Kept)
+        m_Front.Notice = FrontNotice::None;
+    else if (edit == NameEdit::Full)
+        m_Front.Notice = FrontNotice::TooLong;
+    else
+        m_Front.Notice = FrontNotice::BadChar;
+    if (edit == NameEdit::Added)
+        m_NameTyped = true;
+}
+
+bool AscensionApp::NameConfirmSuppressed()
+{
+    if (m_Front.Phase != FrontPhase::Name || !m_NameTyped)
+        return false;
+    const Emerald::Keyboard& keys = GetInput().GetKeyboard();
+    if (keys.WasKeyPressed(Emerald::Key::Enter))
+        return false;
+    if (keys.WasKeyPressed(static_cast<Emerald::Key>(SDL_SCANCODE_KP_ENTER)))
+        return false;
+    return keys.WasKeyPressed(Emerald::Key::E);
+}
+
+std::string AscensionApp::FrontNoticeLine() const
+{
+    const ControlRules& rules = m_Data.GetControls();
+    if (m_Front.Notice == FrontNotice::Empty)
+        return rules.CreateNameEmpty;
+    if (m_Front.Notice == FrontNotice::TooLong)
+        return rules.CreateNameLong;
+    if (m_Front.Notice == FrontNotice::BadChar)
+        return rules.CreateNameBad;
+    return {};
+}
+
+void AscensionApp::TakeFrontStep(FrontStep step)
+{
+    SyncTextInput();
+    if (step == FrontStep::None)
+        return;
+    for (NavHold& hold : m_Nav) {
+        hold.Elapsed = 0.0f;
+        hold.Repeating = false;
+    }
+    if (step == FrontStep::Quit) {
+        Quit();
+        return;
+    }
+    if (step == FrontStep::Continue) {
+        ContinueSavedRun();
+        return;
+    }
+    if (step == FrontStep::Began)
+        CommitCreatedRun();
+}
+
+void AscensionApp::TypeNameFromKeys()
+{
+    if (m_Front.Phase != FrontPhase::Name || m_NameTyped)
+        return;
+    const Emerald::Keyboard& keys = GetInput().GetKeyboard();
+    const bool shift = keys.IsKeyDown(Emerald::Key::LeftShift) ||
+                       keys.IsKeyDown(Emerald::Key::RightShift);
+    std::string chunk;
+    for (int index = 0; index < 26; ++index) {
+        const auto key = static_cast<Emerald::Key>(SDL_SCANCODE_A + index);
+        if (!keys.WasKeyPressed(key))
+            continue;
+        const char lower = static_cast<char>('a' + index);
+        chunk.push_back(shift ? static_cast<char>(lower - 'a' + 'A') : lower);
+    }
+    const Emerald::Key digits[] = {
+        Emerald::Key::Num1, Emerald::Key::Num2, Emerald::Key::Num3, Emerald::Key::Num4,
+        Emerald::Key::Num5, Emerald::Key::Num6, Emerald::Key::Num7, Emerald::Key::Num8,
+        Emerald::Key::Num9, Emerald::Key::Num0};
+    const char digitChars[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
+    for (int index = 0; index < 10; ++index) {
+        if (keys.WasKeyPressed(digits[index]))
+            chunk.push_back(digitChars[index]);
+    }
+    if (keys.WasKeyPressed(Emerald::Key::Space))
+        chunk.push_back(' ');
+    if (keys.WasKeyPressed(static_cast<Emerald::Key>(SDL_SCANCODE_MINUS)) && !shift)
+        chunk.push_back('-');
+    if (keys.WasKeyPressed(static_cast<Emerald::Key>(SDL_SCANCODE_APOSTROPHE)) && !shift)
+        chunk.push_back('\'');
+    const bool shiftedSymbol =
+        (shift && keys.WasKeyPressed(static_cast<Emerald::Key>(SDL_SCANCODE_MINUS))) ||
+        (shift && keys.WasKeyPressed(static_cast<Emerald::Key>(SDL_SCANCODE_APOSTROPHE)));
+    if (chunk.empty()) {
+        if (shiftedSymbol)
+            m_Front.Notice = FrontNotice::BadChar;
+        return;
+    }
+    for (const char code : chunk) {
+        const char one[] = {code, '\0'};
+        const NameEdit edit = AppendHeroName(m_Front.Name, std::string_view(one, 1));
+        if (edit == NameEdit::Added) {
+            m_Front.Notice = FrontNotice::None;
+            m_NameTyped = true;
+        } else if (edit == NameEdit::Full) {
+            m_Front.Notice = FrontNotice::TooLong;
+            m_NameTyped = true;
+        } else if (edit == NameEdit::Rejected) {
+            m_Front.Notice = FrontNotice::BadChar;
+        }
+    }
+}
+
+void AscensionApp::PollFront(f32 dt)
+{
+    if (!m_Data.IsLoaded() || m_Front.Phase == FrontPhase::Playing)
+        return;
+    NotePromptDevice();
+    TypeNameFromKeys();
+    if (Pressed(kHelp))
+        m_ShowHelp = !m_ShowHelp;
+    if (Pressed(kDebugNewGame)) {
+        const FrontPhase before = m_Front.Phase;
+        DebugNewGame();
+        if (m_Front.Phase != before) {
+            m_NameTyped = false;
+            SyncTextInput();
+            return;
+        }
+    }
+    if (m_Front.Phase == FrontPhase::Playing) {
+        m_NameTyped = false;
+        return;
+    }
+    const i32 starters = static_cast<i32>(m_Data.Starters().size());
+    auto take = [this, starters](std::string_view action) {
+        if (action == kConfirm && NameConfirmSuppressed())
+            return;
+        const FrontPhase before = m_Front.Phase;
+        const FrontStep step = ApplyFrontAction(m_Front, action, starters);
+        // A row change keeps the held-direction repeat. Leaving the step does not.
+        if (m_Front.Phase != before) {
+            for (NavHold& hold : m_Nav) {
+                hold.Elapsed = 0.0f;
+                hold.Repeating = false;
+            }
+        }
+        TakeFrontStep(step);
+    };
+    if (Pressed(kPause)) {
+        take(kPause);
+        m_NameTyped = false;
+        return;
+    }
+    if (Pressed(kCancel)) {
+        take(kCancel);
+        m_NameTyped = false;
+        return;
+    }
+    if (Pressed(kConfirm)) {
+        take(kConfirm);
+        m_NameTyped = false;
+        return;
+    }
+    const std::string_view nav[] = {kMoveNorth, kMoveSouth, kCyclePrev, kCycleNext};
+    const int holds[] = {0, 1, 4, 5};
+    for (int index = 0; index < 4; ++index) {
+        if (!NavStep(m_Nav[holds[index]], nav[index], dt))
+            continue;
+        take(nav[index]);
+    }
+    m_NameTyped = false;
 }
 
 bool AscensionApp::BindControls()
@@ -1791,6 +2058,190 @@ void AscensionApp::DrawPauseMenu(Emerald::Renderer2D& renderer, f32 width, f32 h
     DrawMenu(renderer, rows, m_Pause.Row, {textX, y}, textW > 0.0f ? textW : 0.0f, menuFloor, style);
 }
 
+void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    if (!m_Data.IsLoaded())
+        return;
+    const BattleUi& ui = m_Data.GetBattleUi();
+    const UiStyle& style = ui.Style;
+    const ControlRules& rules = m_Data.GetControls();
+    const Emerald::Vec4 dim = Paint(style.Dim);
+    const Emerald::Vec4 edge = Paint(style.Frame);
+    const Emerald::Vec4 panel = Paint(style.Panel);
+    const Emerald::Vec4 error = Paint(style.Error);
+    const f32 pad = static_cast<f32>(style.PanelPad);
+    const i32 titleScale = style.TitleScale > 0 ? style.TitleScale : 4;
+    const f32 titleH = Emerald::DebugTextLineHeight(titleScale);
+    const f32 bodyH = Emerald::DebugTextLineHeight(style.BodyScale);
+    const f32 group = static_cast<f32>(style.GroupGap);
+
+    Emerald::Vec4 wash = panel;
+    for (const MapDef& map : m_Data.GetMaps()) {
+        if (!map.Hub)
+            continue;
+        const std::string* tileId = map.Cell(map.Start.X, map.Start.Y);
+        const TileDef* tile = tileId != nullptr ? m_Data.FindTile(*tileId) : nullptr;
+        if (tile != nullptr) {
+            wash = {static_cast<f32>(tile->Red) / 255.0f, static_cast<f32>(tile->Green) / 255.0f,
+                    static_cast<f32>(tile->Blue) / 255.0f, 1.0f};
+        }
+        break;
+    }
+    renderer.FillRect({0.0f, 0.0f}, {width, height}, wash);
+
+    const i32 starters = static_cast<i32>(m_Data.Starters().size());
+    const i32 rows = FrontRowCount(m_Front, starters);
+    const bool naming = m_Front.Phase == FrontPhase::Name;
+    const bool showFigure = m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin;
+    const f32 fig = static_cast<f32>(ui.FigureSize);
+    const Emerald::Vec2 figSize{fig * 4.0f, fig * 6.5f};
+    const f32 rowH = bodyH;
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 listH = naming ? bodyH : (rows > 0 ? rowH * static_cast<f32>(rows) + rowGap : bodyH);
+    const f32 figureH = showFigure ? figSize.y : 0.0f;
+    const f32 blockH = figureH > listH ? figureH : listH;
+    const bool detailed = m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin;
+    const f32 detailH =
+        detailed ? Emerald::DebugTextLineHeight(style.DetailScale) * 3.0f + group : 0.0f;
+    std::string heading = rules.TitleWordmark;
+    std::string sub = rules.TitleTagline;
+    if (m_Front.Phase == FrontPhase::Overwrite) {
+        heading = rules.TitleOverwrite;
+        sub.clear();
+    } else if (m_Front.Phase == FrontPhase::Name) {
+        heading = rules.CreateName;
+        sub.clear();
+    } else if (m_Front.Phase == FrontPhase::Class) {
+        heading = rules.CreateClass;
+        sub.clear();
+    } else if (m_Front.Phase == FrontPhase::Begin) {
+        heading = m_Front.Name;
+        if (m_Front.ClassRow >= 0 && m_Front.ClassRow < starters) {
+            const ClassDef* klass = m_Data.Starters()[static_cast<usize>(m_Front.ClassRow)];
+            sub = klass != nullptr ? klass->Name : std::string{};
+        }
+    }
+    const f32 subH = sub.empty() ? 0.0f : bodyH;
+    const f32 noticeH = bodyH;
+    const f32 panelH = pad + titleH + group + subH + (sub.empty() ? 0.0f : group) + blockH +
+                       detailH + group + noticeH + pad;
+    const f32 panelW = width > 760.0f ? 720.0f : width - 56.0f;
+    const f32 hintTop = height - 36.0f;
+    const f32 floor = hintTop - static_cast<f32>(style.HintClearance);
+    f32 panelX = (width - panelW) * 0.5f;
+    if (panelX < 28.0f)
+        panelX = 28.0f;
+    f32 panelY = floor > panelH ? (floor - panelH) * 0.35f : 24.0f;
+    if (panelY < 24.0f)
+        panelY = 24.0f;
+    if (panelY + panelH > floor && floor > panelH)
+        panelY = floor - panelH;
+    DrawPanel(renderer, {panelX, panelY}, {panelW > 0.0f ? panelW : 0.0f, panelH}, panel, edge);
+
+    const f32 textX = panelX + pad;
+    const f32 textW = panelW - pad * 2.0f;
+    f32 y = panelY + pad;
+    if (textW > 0.0f) {
+        const std::string line = FitLine(heading, titleScale, textW);
+        const f32 band = Emerald::MeasureDebugText(line, titleScale).x;
+        f32 atX = textX + (textW - band) * 0.5f;
+        if (atX < textX)
+            atX = textX;
+        Emerald::DrawDebugText(renderer, {atX, y}, line, edge, titleScale);
+    }
+    y += titleH + group;
+    if (!sub.empty() && textW > 0.0f) {
+        const std::string line = FitLine(sub, style.BodyScale, textW);
+        const f32 band = Emerald::MeasureDebugText(line, style.BodyScale).x;
+        f32 atX = textX + (textW - band) * 0.5f;
+        if (atX < textX)
+            atX = textX;
+        Emerald::DrawDebugText(renderer, {atX, y}, line, dim, style.BodyScale);
+        y += bodyH + group;
+    }
+
+    f32 menuX = textX;
+    f32 menuW = textW;
+    if (showFigure && textW > figSize.x + rowGap) {
+        const Emerald::Vec2 figAt{textX, y};
+        const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
+        std::string classId;
+        if (m_Front.Phase == FrontPhase::Begin && m_Front.ClassRow >= 0 &&
+            m_Front.ClassRow < starters) {
+            const ClassDef* klass = m_Data.Starters()[static_cast<usize>(m_Front.ClassRow)];
+            if (klass != nullptr)
+                classId = klass->Id;
+        } else if (m_Front.Phase == FrontPhase::Class && m_Front.Row >= 0 && m_Front.Row < starters) {
+            const ClassDef* klass = m_Data.Starters()[static_cast<usize>(m_Front.Row)];
+            if (klass != nullptr)
+                classId = klass->Id;
+        }
+        if (classId.empty() || m_Gallery.IsEmpty() ||
+            !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, classId, figAt, figSize, white))
+            DrawFigure(renderer, figAt, fig, Paint(style.Figure));
+        menuX = textX + figSize.x + rowGap;
+        menuW = textW - figSize.x - rowGap;
+    }
+
+    if (naming) {
+        const bool empty = m_Front.Name.empty();
+        const std::string shown = empty ? rules.CreateName : m_Front.Name;
+        const std::string line = FitLine(shown, style.BodyScale, menuW);
+        const f32 band = Emerald::MeasureDebugText(line, style.BodyScale).x;
+        renderer.FillRect({menuX, y}, {band > 0.0f ? band : menuW, bodyH}, Paint(style.Highlight));
+        Emerald::DrawDebugText(renderer, {menuX, y}, line, empty ? dim : panel, style.BodyScale);
+    } else if (menuW > 0.0f) {
+        std::vector<MenuLine> menu;
+        if (m_Front.Phase == FrontPhase::Title) {
+            MenuLine cont;
+            cont.Text = rules.TitleContinue;
+            cont.Enabled = m_Front.SaveExists;
+            MenuLine fresh;
+            fresh.Text = rules.TitleNewGame;
+            MenuLine quit;
+            quit.Text = rules.TitleQuit;
+            menu.push_back(std::move(cont));
+            menu.push_back(std::move(fresh));
+            menu.push_back(std::move(quit));
+        } else if (m_Front.Phase == FrontPhase::Overwrite) {
+            MenuLine yes;
+            yes.Text = rules.TitleOverwriteYes;
+            MenuLine back;
+            back.Text = rules.TitleBack;
+            menu.push_back(std::move(yes));
+            menu.push_back(std::move(back));
+        } else if (m_Front.Phase == FrontPhase::Class) {
+            const std::vector<const ClassDef*> list = m_Data.Starters();
+            for (const ClassDef* klass : list) {
+                MenuLine row;
+                row.Text = klass != nullptr ? klass->Name : std::string{};
+                if (klass != nullptr)
+                    row.Detail = m_Data.Describe(*klass);
+                menu.push_back(std::move(row));
+            }
+        } else if (m_Front.Phase == FrontPhase::Begin) {
+            MenuLine begin;
+            begin.Text = rules.CreateBegin;
+            if (m_Front.ClassRow >= 0 && m_Front.ClassRow < starters) {
+                const ClassDef* klass = m_Data.Starters()[static_cast<usize>(m_Front.ClassRow)];
+                if (klass != nullptr)
+                    begin.Detail = m_Data.Describe(*klass);
+            }
+            menu.push_back(std::move(begin));
+        }
+        const f32 menuFloor = panelY + panelH - pad - noticeH - group;
+        DrawMenu(renderer, menu, m_Front.Row, {menuX, y}, menuW, menuFloor, style);
+    }
+
+    const std::string notice = FrontNoticeLine();
+    const std::string foot = !notice.empty() ? notice : (m_Log.empty() ? std::string{} : m_Log.back());
+    if (!foot.empty() && textW > 0.0f) {
+        const f32 footY = panelY + panelH - pad - noticeH;
+        Emerald::DrawDebugText(renderer, {textX, footY}, FitLine(foot, style.BodyScale, textW),
+                               notice.empty() ? dim : error, style.BodyScale);
+    }
+}
+
 void AscensionApp::FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
     if (m_Pause.Open)
@@ -1861,8 +2312,11 @@ void AscensionApp::PollActions(f32 dt)
     // The pause menu's Quit game row is the exit.
     if (Pressed(kDebugRespawnFoes))
         HandleAction(kDebugRespawnFoes);
-    if (Pressed(kDebugNewGame))
+    if (Pressed(kDebugNewGame)) {
         HandleAction(kDebugNewGame);
+        if (m_Front.Phase != FrontPhase::Playing)
+            return;
+    }
     if (m_Pause.Open) {
         if (Pressed(kSave))
             HandleAction(kSave);
@@ -2382,18 +2836,31 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
 void AscensionApp::DebugNewGame()
 {
     const ControlRules& rules = m_Data.GetControls();
+    if (m_Front.Phase != FrontPhase::Playing && m_Front.Phase != FrontPhase::Title)
+        return;
     if (TapConfirmWindow(m_NewGameConfirm) == ConfirmTap::Armed) {
         Note(rules.DebugNewGameArmed);
         return;
     }
-    FreshStart fresh;
-    std::string error;
-    if (!BeginNewGame(m_Data, m_Hero, m_Inventory, fresh, error)) {
-        Note(error.empty() ? "Could not start a new game." : error);
+    // From the game, create replaces the run only when Begin is confirmed, and the
+    // file waits for the next save. From the title, F9 is New game.
+    if (m_Front.Phase == FrontPhase::Playing) {
+        OpenDebugCreate(m_Front);
+        Note(rules.DebugNewGame);
+        SyncTextInput();
         return;
     }
-    ApplyFreshRun(fresh);
+    m_Front.Debug = false;
+    m_Front.Return = FrontPhase::Title;
+    if (m_Front.SaveExists) {
+        m_Front.Phase = FrontPhase::Overwrite;
+        m_Front.Row = kOverwriteRowYes;
+        m_Front.Notice = FrontNotice::None;
+    } else {
+        OpenFrontName(m_Front);
+    }
     Note(rules.DebugNewGame);
+    SyncTextInput();
 }
 
 void AscensionApp::TakePauseStep(PauseStep step)
@@ -2717,6 +3184,27 @@ void AscensionApp::OnUpdate(f32 dt)
         AdvanceConfirmWindow(m_NewGameConfirm, dt,
                              m_Data.GetControls().DebugConfirmMilliseconds);
     }
+    if (m_Front.Phase != FrontPhase::Playing) {
+        if (ReadActionEdges(false, false))
+            PollFront(dt);
+        m_ReloadWait += dt;
+        if (m_ReloadWait < kPollSeconds)
+            return;
+        m_ReloadWait = 0.0f;
+        const u32 revision = m_Data.GetRevision();
+        DataError error;
+        m_Data.CheckForChanges(&error);
+        if (m_Data.GetRevision() == revision || !m_Data.IsLoaded())
+            return;
+        m_PromptSheets.clear();
+        if (!BindControls())
+            return;
+        // The first load can fail and a later save of data/ can succeed. Probe the
+        // slot once, and leave a menu the player is already on alone.
+        if (!m_SaveProbed && m_Front.Phase == FrontPhase::Title)
+            ShowTitle();
+        return;
+    }
     if (!TakeAutoPath())
         return;
     MaybeSettle();
@@ -2726,7 +3214,8 @@ void AscensionApp::OnUpdate(f32 dt)
     // Pause does not skip this. The resume edge is only true on its own frame.
     if (ReadActionEdges(scripting, m_Pause.Open))
         PollActions(dt);
-    if (!m_Pause.Open && m_OnMap && !SpawnFightOpen() && !m_Talk && !m_Camp)
+    if (m_Front.Phase == FrontPhase::Playing && !m_Pause.Open && m_OnMap && !SpawnFightOpen() &&
+        !m_Talk && !m_Camp)
         StepMap(dt);
     // Frame time is a float, and Windows file stamps are not stable the way this poll
     // expects. A reload between scripted keys rebuilds the fight on a different frame
@@ -2785,6 +3274,7 @@ void AscensionApp::OnUpdate(f32 dt)
     m_Battle->SetWornItems(m_Inventory.WornIds());
     m_Battle->SetPickedSkills(m_Hero.PickedIds());
     m_Battle->SetBaseStats(m_Hero.Attributes());
+    m_Battle->SetHeroLabel(m_Hero.Name());
     if (!m_Battle->ApplyData(why)) {
         Note(why);
         return;
@@ -2971,9 +3461,12 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
     DrawPanel(renderer, right, rightSize);
     DrawPanel(renderer, {28.0f, height - 148.0f}, {width - 56.0f, 124.0f});
 
-    std::string title = m_Hero.ClassId();
-    if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
-        title = heroClass->Name;
+    std::string title = m_Hero.Name();
+    if (title.empty()) {
+        title = m_Hero.ClassId();
+        if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
+            title = heroClass->Name;
+    }
     f32 y = left.y + 24.0f;
     Emerald::DrawDebugText(renderer, {left.x + 28.0f, y}, Upper(title), kInk, 3);
     y += Emerald::DebugTextLineHeight(3) + 8.0f;
@@ -3147,9 +3640,12 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const f32 textRight = frame.Left.x + frame.LeftSize.x - pad;
     const f32 textW = textRight > textX ? textRight - textX : 0.0f;
     f32 y = figAt.y;
-    std::string title = player.Name;
-    if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
-        title = heroClass->Name;
+    std::string title = m_Hero.Name();
+    if (title.empty()) {
+        title = player.Name;
+        if (const ClassDef* heroClass = m_Data.FindClass(m_Hero.ClassId()))
+            title = heroClass->Name;
+    }
     const std::string titleLine = FitLine(title, style.TitleScale, textW);
     const f32 titleH = Emerald::DebugTextLineHeight(style.TitleScale);
     if (playerTurn || aimSelf) {
@@ -3670,6 +4166,18 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
     const f32 width = static_cast<f32>(pixels.x);
     const f32 height = static_cast<f32>(pixels.y);
     renderer.Begin(Emerald::Mat4::OrthoPixelSpace(width, height));
+
+    if (m_Data.IsLoaded() && m_StartError.empty() && m_Front.Phase != FrontPhase::Playing) {
+        DrawFront(renderer, width, height);
+        std::vector<HintChip> hints;
+        AddHint(hints, kMoveNorth, "");
+        AddHint(hints, kMoveSouth, "MOVE");
+        AddHint(hints, kConfirm, "CONFIRM");
+        AddHint(hints, kCancel, "CANCEL");
+        DrawHints(renderer, 48.0f, height - 36.0f, width - 48.0f, hints, true);
+        renderer.End();
+        return;
+    }
 
     if (m_OnMap && !SpawnFightOpen() && m_Data.IsLoaded() && m_StartError.empty()) {
         if (m_Talk && m_Hero.IsReady()) {
