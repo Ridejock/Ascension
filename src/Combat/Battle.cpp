@@ -1447,6 +1447,15 @@ void Battle::SetEnemyHp(i32 hp)
     EnterPhase(m_Target, note);
 }
 
+void Battle::HoldVictory()
+{
+    if (!m_Started)
+        return;
+    for (CombatantState& foe : m_Enemies)
+        foe.Hp = 0;
+    m_Result = BattleResult::Victory;
+}
+
 FightSnapshot Battle::ExportFight()
 {
     FightSnapshot shot;

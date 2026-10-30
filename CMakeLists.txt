@@ -227,7 +227,7 @@ if(ASCENSION_BUILD_TESTS)
     add_test(NAME Inventory COMMAND AscensionInventoryTests)
 
     add_executable(AscensionSaveTests tests/SaveTests.cpp tests/Check.h)
-    target_link_libraries(AscensionSaveTests PRIVATE AscensionProgress AscensionCombat)
+    target_link_libraries(AscensionSaveTests PRIVATE AscensionMap AscensionProgress AscensionCombat)
     target_compile_definitions(AscensionSaveTests PRIVATE
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"

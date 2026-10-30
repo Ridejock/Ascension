@@ -737,6 +737,8 @@ void AscensionApp::AwardVictory()
         TakeAutoPath();
     RememberVictory();
     m_Standing = RunStanding::Victory;
+    // A choice still open keeps the spawn id in this file. MaybeSettle writes the
+    // cleared save once the player answers, in this session or after a load.
     WriteSave();
 }
 
@@ -925,13 +927,19 @@ void AscensionApp::TouchSpawn(const ContactQuery& query)
 
 void AscensionApp::BeginSpawnFight()
 {
+    const bool held = m_HoldVictory;
+    m_HoldVictory = false;
     if (!m_MapFight.Active)
         return;
-    if (const char* block = m_Hero.NextFightBlock()) {
-        if (m_Log.empty() || m_Log.back() != block)
-            Note(block);
-        m_MapFight.Active = false;
-        return;
+    // A saved win that is still choosing must not take this return. It drops the
+    // fight, and the map then has no screen that can answer the choice.
+    if (!held) {
+        if (const char* block = m_Hero.NextFightBlock()) {
+            if (m_Log.empty() || m_Log.back() != block)
+                Note(block);
+            m_MapFight.Active = false;
+            return;
+        }
     }
     m_Log.clear();
     ClearPresented();
@@ -945,6 +953,10 @@ void AscensionApp::BeginSpawnFight()
     m_ShopAsk = ShopAsk::None;
     if (!m_Data.IsLoaded() || !m_Hero.IsReady()) {
         m_MapFight.Active = false;
+        if (held) {
+            m_XpAwarded = true;
+            m_VitalsSettled = true;
+        }
         return;
     }
     if (m_Battle == nullptr)
@@ -966,9 +978,33 @@ void AscensionApp::BeginSpawnFight()
         Note(error);
         m_Battle.reset();
         m_MapFight.Active = false;
+        if (held) {
+            m_XpAwarded = true;
+            m_VitalsSettled = true;
+        }
         return;
     }
     m_Battle->SetFleeAllowed(m_MapFight.AllowFlee);
+    if (held) {
+        m_ResumeFight = {};
+        m_ResumeSpawn.clear();
+        if (m_Vitals.Known) {
+            m_Battle->SetPlayerHp(m_Vitals.Hp);
+            m_Battle->SetPlayerFocus(m_Vitals.Focus);
+        }
+        m_Battle->HoldVictory();
+        // The save already paid this win. A fresh Start must not award it again.
+        m_XpAwarded = true;
+        m_VitalsSettled = true;
+        m_Standing = RunStanding::Victory;
+        if (const char* block = m_Hero.NextFightBlock()) {
+            if (m_Log.empty() || m_Log.back() != block)
+                Note(block);
+        }
+        if (m_Hero.NextFightBlock() == nullptr)
+            MaybeSettle();
+        return;
+    }
     if (m_ResumeFight.Known) {
         const FightSnapshot shot = std::move(m_ResumeFight);
         m_ResumeFight = {};
@@ -1087,11 +1123,14 @@ void AscensionApp::MaybeSettle()
 
 void AscensionApp::OpenResumedSpawn()
 {
+    const bool held = m_HoldVictory;
     const MapSpawnRef ref = m_Data.FindSpawn(m_ResumeSpawn);
     if (ref.Map == nullptr || ref.Spawn == nullptr) {
+        m_HoldVictory = false;
         m_ResumeFight = {};
         m_ResumeSpawn.clear();
-        m_Standing = RunStanding::None;
+        if (!held)
+            m_Standing = RunStanding::None;
         Note("The spawn is gone.");
         return;
     }
@@ -1359,6 +1398,7 @@ bool AscensionApp::UseMapPoint()
 
 bool AscensionApp::EnterOverland(std::string_view preferred)
 {
+    m_HoldVictory = false;
     bool stood = false;
     const ArtPack* art = &m_Gallery.GetPack();
     if (m_HasPlace)
@@ -1384,7 +1424,12 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     m_PlaceMap = m_Walker.Place().MapId;
     m_PlaceTile = m_Walker.Place().Tile;
     Note("Map " + m_Walker.Place().MapId + ".");
-    if (!m_ResumeSpawn.empty() && (m_ResumeFight.Known || m_Standing == RunStanding::Ongoing))
+    const char* block = m_Hero.IsReady() ? m_Hero.NextFightBlock() : nullptr;
+    const LoadedSpawn plan =
+        PlanLoadedSpawn(m_Standing, m_ResumeSpawn, m_ResumeFight.Known, block);
+    if (plan == LoadedSpawn::Hold || plan == LoadedSpawn::Settle)
+        m_HoldVictory = true;
+    if (plan == LoadedSpawn::Resume || m_HoldVictory)
         OpenResumedSpawn();
     else if (m_Standing == RunStanding::Ongoing) {
         // A version 3 fight was the encounter list. It names no spawn, so the
@@ -2918,7 +2963,11 @@ void AscensionApp::HandleAction(std::string_view action)
     if (DecideScriptedPress(window) == ScriptedPress::IgnoreWindow)
         return;
 
-    if (m_OnMap && !SpawnFightOpen()) {
+    // Overland never answers a choice. A loaded map win keeps the spawn fight up
+    // until the block lifts, so Confirm and the number keys reach HandleChoice.
+    const BattleResult shown = m_Battle != nullptr ? m_Battle->Result() : BattleResult::Fled;
+    const PlayKey route = RoutePlayKey(m_OnMap, SpawnFightOpen(), m_Battle != nullptr, shown);
+    if (route == PlayKey::Overland) {
         HandleOverland(action);
         return;
     }
@@ -3033,7 +3082,7 @@ void AscensionApp::HandleAction(std::string_view action)
         }
     }
 
-    if (m_Battle == nullptr || m_Battle->Result() != BattleResult::Ongoing) {
+    if (route == PlayKey::Choice) {
         HandleChoice(action);
         return;
     }
@@ -3332,29 +3381,27 @@ bool AscensionApp::WriteSave()
     else if (m_EnemyIndex >= 0 && m_EnemyIndex < static_cast<i32>(encounters.size()))
         run.EncounterId = encounters[static_cast<usize>(m_EnemyIndex)].Id;
 
+    FightRecord fought;
+    fought.BattleLive = m_Battle != nullptr;
+    if (m_Battle != nullptr)
+        fought.Result = m_Battle->Result();
+    fought.VitalsKnown = m_Vitals.Known;
+    fought.Standing = m_Standing;
+    fought.ResumeKnown = m_ResumeFight.Known;
+    fought.Resume = m_ResumeFight;
+    fought.ResumeSpawn = m_ResumeSpawn;
+    fought.SpawnActive = m_MapFight.Active;
+    fought.SpawnId = m_MapFight.SpawnId;
+    fought.ChoiceOpen = m_Hero.NextFightBlock() != nullptr;
     if (m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing) {
-        RememberOutcome(run, BattleResult::Ongoing, m_Battle->Player().Hp, m_Battle->Player().Focus);
-        run.Fight = m_Battle->ExportFight();
-        if (m_MapFight.Active)
-            run.SpawnId = m_MapFight.SpawnId;
+        fought.Hp = m_Battle->Player().Hp;
+        fought.Focus = m_Battle->Player().Focus;
+        fought.Live = m_Battle->ExportFight();
     } else if (m_Vitals.Known) {
-        BattleResult result = BattleResult::Fled;
-        if (m_Battle != nullptr)
-            result = m_Battle->Result();
-        else if (m_Standing == RunStanding::Victory)
-            result = BattleResult::Victory;
-        else if (m_Standing == RunStanding::Defeat)
-            result = BattleResult::Defeat;
-        else if (m_Standing == RunStanding::Ongoing)
-            result = BattleResult::Ongoing;
-        RememberOutcome(run, result, m_Vitals.Hp, m_Vitals.Focus);
-        if (result == BattleResult::Ongoing && m_ResumeFight.Known) {
-            run.Fight = m_ResumeFight;
-            run.SpawnId = m_ResumeSpawn;
-        }
-    } else {
-        run.Standing = m_Standing;
+        fought.Hp = m_Vitals.Hp;
+        fought.Focus = m_Vitals.Focus;
     }
+    RecordFight(run, fought);
     RunSave saves(SaveFolder());
     std::string error;
     if (!saves.Write(run, error)) {
@@ -4179,6 +4226,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         return;
     }
 
+    // No spawn fight: the map. A win that is still choosing keeps that fight up,
+    // including after a load, so the choice is drawn instead of this screen.
     if (m_OnMap && !SpawnFightOpen() && m_Data.IsLoaded() && m_StartError.empty()) {
         if (m_Talk && m_Hero.IsReady()) {
             DrawTalk(renderer, width, height);
