@@ -300,6 +300,11 @@ public:
     // threshold starts phase 2.
     void SetEnemyHp(i32 hp);
 
+    // Marks a started fight as already won. Foes drop to 0 HP. XP and gold are not granted.
+    // A saved map win that is still choosing a path uses this so the choice screen and the
+    // settle see a victory, without paying the fight again.
+    void HoldVictory();
+
     // The live fight, including each foe's wound, statuses, pattern step, and whose action
     // it is. Empty (Known false) before the fight starts or after it ends.
     FightSnapshot ExportFight();

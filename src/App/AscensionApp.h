@@ -292,6 +292,9 @@ private:
     MapTile m_PlaceTile;
     // Spawn id from a save, until the snapshot is restored or dropped.
     std::string m_ResumeSpawn;
+    // A loaded victory whose spawn is not cleared yet. BeginSpawnFight seals the
+    // fight as a win so the choice can be answered, and does not grant XP again.
+    bool m_HoldVictory = false;
     // HP and focus between fights. A new hero is full. A win or a flee writes the
     // leftover back. A loss fills both and sets ReturnToHub. The save records the
     // pools whenever they are known.

@@ -35,7 +35,10 @@ struct RunState {
     std::vector<std::string> Cleared;
     // Wounds a flee left, keyed by spawn id. The same shape the map keeps in memory.
     std::vector<FledWounds> Wounds;
-    // The spawn an ongoing fight came from. Empty for a list fight, and between fights.
+    // The spawn an ongoing fight came from. Empty for a list fight, and between fights,
+    // except a map win that is still choosing a path, spending class points, or picking
+    // a skill. That file keeps this id and leaves it out of Cleared. A load opens the
+    // choice instead of the map. The spawn is cleared once the choice is answered.
     std::string SpawnId;
     // Encounter id for the fight screen. Not an index: inserting a row does not shift it.
     std::string EncounterId;
@@ -78,6 +81,101 @@ inline void RememberOutcome(RunState& run, BattleResult result, i32 hp, i32 focu
 [[nodiscard]] inline bool ResumeWound(const RunState& run)
 {
     return run.ResourcesKnown;
+}
+
+// What WriteSave knows about the fight on screen. AwardVictory writes while the battle
+// is still a victory and, when a choice is open, before the spawn is cleared.
+// ChoiceOpen is Hero::NextFightBlock() being set: a path, class points, or a skill pick.
+struct FightRecord {
+    bool BattleLive = false;
+    BattleResult Result = BattleResult::Fled;
+    bool VitalsKnown = false;
+    i32 Hp = 0;
+    i32 Focus = 0;
+    // Used when no battle is on screen. An ongoing file with a snapshot restores that blow.
+    RunStanding Standing = RunStanding::None;
+    bool ResumeKnown = false;
+    FightSnapshot Resume;
+    std::string ResumeSpawn;
+    // ExportFight() while the battle is still going. Ignored once the fight is over.
+    FightSnapshot Live;
+    // A map fight that has not been settled. SpawnId is that spawn.
+    bool SpawnActive = false;
+    std::string SpawnId;
+    bool ChoiceOpen = false;
+};
+
+// Standing, pools, the fight snapshot, and the spawn id. A victory with ChoiceOpen keeps
+// the spawn id and does not store a snapshot: the blow is over, and the career is the
+// choice. An ongoing fight is unchanged. A finished fight with no choice leaves the spawn
+// id empty, which is a list fight and a map win that has already settled.
+inline void RecordFight(RunState& run, const FightRecord& in)
+{
+    if (in.BattleLive && in.Result == BattleResult::Ongoing) {
+        RememberOutcome(run, BattleResult::Ongoing, in.Hp, in.Focus);
+        run.Fight = in.Live;
+        if (in.SpawnActive)
+            run.SpawnId = in.SpawnId;
+        return;
+    }
+    if (in.VitalsKnown) {
+        BattleResult result = BattleResult::Fled;
+        if (in.BattleLive)
+            result = in.Result;
+        else if (in.Standing == RunStanding::Victory)
+            result = BattleResult::Victory;
+        else if (in.Standing == RunStanding::Defeat)
+            result = BattleResult::Defeat;
+        else if (in.Standing == RunStanding::Ongoing)
+            result = BattleResult::Ongoing;
+        RememberOutcome(run, result, in.Hp, in.Focus);
+        if (result == BattleResult::Ongoing && in.ResumeKnown) {
+            run.Fight = in.Resume;
+            run.SpawnId = in.ResumeSpawn;
+        }
+    } else {
+        run.Standing = in.Standing;
+    }
+    if (run.Standing != RunStanding::Victory || run.Fight.Known)
+        return;
+    if (!in.SpawnActive || !in.ChoiceOpen || in.SpawnId.empty())
+        return;
+    run.SpawnId = in.SpawnId;
+}
+
+// What a loaded spawn id should do. Walk is the map. Resume is an ongoing blow.
+// Hold is a map win whose choice is still open: the fight screen stays up and the
+// map does not take keys. Settle is that win after the choice was already answered
+// and the spawn still has to be cleared. The spawn is cleared then.
+enum class LoadedSpawn : u8 { Walk, Resume, Hold, Settle };
+
+[[nodiscard]] inline LoadedSpawn PlanLoadedSpawn(RunStanding standing, std::string_view spawnId,
+                                                 bool fightKnown, const char* block)
+{
+    if (!spawnId.empty() && (fightKnown || standing == RunStanding::Ongoing))
+        return LoadedSpawn::Resume;
+    if (!spawnId.empty() && standing == RunStanding::Victory) {
+        if (block != nullptr && block[0] != '\0')
+            return LoadedSpawn::Hold;
+        return LoadedSpawn::Settle;
+    }
+    return LoadedSpawn::Walk;
+}
+
+// Where a key goes once pause and the front are out of the way. Overland is the map,
+// and it never answers a choice. Choice is HandleChoice: Confirm and the number keys
+// pick the open path, class point, or skill. Battle is a fight that is still going.
+// A loaded Hold keeps the spawn fight up, so this returns Choice and not Overland.
+enum class PlayKey : u8 { Overland, Choice, Battle };
+
+[[nodiscard]] inline PlayKey RoutePlayKey(bool onMap, bool spawnFightOpen, bool battleLive,
+                                          BattleResult result)
+{
+    if (onMap && !spawnFightOpen)
+        return PlayKey::Overland;
+    if (!battleLive || result != BattleResult::Ongoing)
+        return PlayKey::Choice;
+    return PlayKey::Battle;
 }
 
 enum class RunSaveError : u8 {

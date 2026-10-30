@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Input/Controls.h"
+#include "Ascension/Map/Handoff.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Check.h"
 #include "Emerald/Core/Log.h"
@@ -1106,6 +1108,199 @@ void TestVersion4Name()
           "a name the create screen would refuse loads as the empty default");
 }
 
+// AwardVictory writes before MaybeSettle. A map win that opens a path used to save
+// the rewards, an empty spawn id, and a cleared list that skipped that spawn. Loading
+// it stood on the map, overland took every key, and the choice could not be answered.
+// The spawn stayed up, so a later step could pay the fight again.
+void TestAwardVictoryChoiceSave()
+{
+    Database data = Sample();
+    if (!data.IsLoaded())
+        return;
+    const ClassDef* path = data.FindClass("berserker");
+    const MapDef* home = data.FindMap("fixture_a");
+    const auto& curve = data.GetProgress().XpToReach;
+    Check(path != nullptr && home != nullptr &&
+              static_cast<i32>(curve.size()) >= path->EvolveLevel && path->EvolveLevel >= 2,
+          "the path and the fixture map are loaded");
+    if (path == nullptr || home == nullptr || static_cast<i32>(curve.size()) < path->EvolveLevel)
+        return;
+
+    Hero hero = StartHero(data);
+    Inventory bag = StartBag(data);
+    Battle battle(data, std::make_unique<AgilityRoundModel>());
+    std::string error;
+    Check(battle.Start(hero.ClassId(), hero.Level(), "wolf", error), "the wolf fight starts");
+    if (battle.Result() == BattleResult::Ongoing) {
+        battle.SetPlayerHp(11);
+        battle.SetPlayerFocus(1);
+        Check(battle.SetTarget(0), "the wolf is the target");
+        battle.SetEnemyHp(0);
+    }
+    Check(battle.Result() == BattleResult::Victory, "the wolf is down");
+    const i32 award = battle.Experience();
+    const i32 gold = battle.Gold();
+    const i32 goal = curve[static_cast<usize>(path->EvolveLevel - 1)];
+    Check(award > 0 && award < goal, "one wolf does not skip the path");
+    hero.GrantXp(goal - award);
+    Check(hero.NextFightBlock() == nullptr, "the path is still closed before the award");
+    const XpGrant grant = hero.GrantXp(award);
+    bag.GrantGold(gold);
+    const char* block = hero.NextFightBlock();
+    Check(grant.ChoiceOpened && block != nullptr && hero.ChoicePending(),
+          "AwardVictory's XP opens the path");
+    const i32 xp = hero.Xp();
+    const i32 purse = bag.Gold();
+    const i32 hp = battle.Player().Hp;
+    const i32 focus = battle.Player().Focus;
+
+    FightRecord fought;
+    fought.BattleLive = true;
+    fought.Result = battle.Result();
+    fought.VitalsKnown = true;
+    fought.Hp = hp;
+    fought.Focus = focus;
+    fought.Standing = RunStanding::Victory;
+    fought.SpawnActive = true;
+    fought.SpawnId = "fixture_spawn";
+    fought.ChoiceOpen = block != nullptr;
+
+    FightRecord noChoice = fought;
+    noChoice.ChoiceOpen = false;
+    RunState plain;
+    RecordFight(plain, noChoice);
+    Check(plain.SpawnId.empty() && plain.Standing == RunStanding::Victory && !plain.Fight.Known,
+          "a win with no choice does not pin the spawn");
+
+    FightRecord mid;
+    mid.BattleLive = true;
+    mid.Result = BattleResult::Ongoing;
+    mid.Hp = hp;
+    mid.Focus = focus;
+    mid.SpawnActive = true;
+    mid.SpawnId = "fixture_spawn";
+    mid.Live.Known = true;
+    RunState ongoing;
+    RecordFight(ongoing, mid);
+    Check(ongoing.Standing == RunStanding::Ongoing && ongoing.SpawnId == "fixture_spawn" &&
+              ongoing.Fight.Known &&
+              PlanLoadedSpawn(ongoing.Standing, ongoing.SpawnId, ongoing.Fight.Known, block) ==
+                  LoadedSpawn::Resume,
+          "an ongoing map fight still resumes from its snapshot");
+
+    RunState run;
+    hero.ExportCareer(run.Career);
+    bag.ExportBag(run.Bag);
+    run.Defeated.push_back("wolf");
+    run.MapId = home->Id;
+    run.Tile.X = 4;
+    run.Tile.Y = 1;
+    RecordFight(run, fought);
+    Check(run.Standing == RunStanding::Victory && run.SpawnId == "fixture_spawn" &&
+              !run.Fight.Known && run.Cleared.empty() && run.Hp == hp && run.Focus == focus,
+          "the victory save keeps the spawn and not a fight snapshot");
+
+    TempDir dir("ascension-save-pending-choice");
+    RunSave saves(dir.Path);
+    std::string why;
+    Check(saves.Write(run, why), "the open-choice victory is written");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded), "the open-choice victory loads");
+    if (!loaded)
+        return;
+
+    Hero resumed = StartHero(data);
+    Inventory purseBag = StartBag(data);
+    Check(resumed.ImportCareer(loaded.Run.Career, why) && purseBag.ImportBag(loaded.Run.Bag, why),
+          "the awarded career and purse load");
+    const char* loadedBlock = resumed.NextFightBlock();
+    const LoadedSpawn plan = PlanLoadedSpawn(loaded.Run.Standing, loaded.Run.SpawnId,
+                                             loaded.Run.Fight.Known, loadedBlock);
+    Check(plan == LoadedSpawn::Hold && loaded.Run.Cleared.empty() && resumed.Xp() == xp &&
+              purseBag.Gold() == purse,
+          "load keeps the choice, the award, and the uncleared spawn");
+
+    Battle restored(data, std::make_unique<AgilityRoundModel>());
+    Check(restored.Start(resumed.ClassId(), resumed.Level(), "wolf", error),
+          "the loaded win opens the same encounter");
+    restored.SetPlayerHp(loaded.Run.Hp);
+    restored.SetPlayerFocus(loaded.Run.Focus);
+    restored.HoldVictory();
+    const bool fightUp = plan == LoadedSpawn::Hold;
+    const PlayKey choiceKey = RoutePlayKey(true, fightUp, true, restored.Result());
+    Check(restored.Result() == BattleResult::Victory && choiceKey == PlayKey::Choice &&
+              SlotIndex(kSlot1) == 0 && kConfirm == std::string_view("Confirm"),
+          "Confirm, Slot1, and a map step reach the choice, not the map");
+    Check(RoutePlayKey(true, false, false, BattleResult::Fled) == PlayKey::Overland,
+          "a save with no spawn id would walk, which is the soft lock");
+    Check(resumed.Xp() == xp && purseBag.Gold() == purse,
+          "sealing the loaded win does not pay XP or gold again");
+
+    const std::vector<std::string> paths = resumed.ChoiceIds();
+    Check(!paths.empty() && resumed.Choose(paths[static_cast<usize>(SlotIndex(kSlot1))], why),
+          "Slot1 chooses the first path");
+    Check(resumed.NextFightBlock() == nullptr, "the block lifts after the path");
+    const LoadedSpawn answered = PlanLoadedSpawn(loaded.Run.Standing, loaded.Run.SpawnId,
+                                                 loaded.Run.Fight.Known, resumed.NextFightBlock());
+    Check(answered == LoadedSpawn::Settle, "answering the choice settles the spawn");
+
+    MapMemory memory;
+    memory.Cleared = loaded.Run.Cleared;
+    ContactQuery step;
+    step.Tile.X = 4;
+    step.Tile.Y = 1;
+    step.From.X = 3;
+    step.From.Y = 1;
+    step.HasFrom = true;
+    const MapFightRequest offer = OfferSpawn(data, *home, step, memory);
+    Check(offer.Active && offer.SpawnId == "fixture_spawn" && offer.Once,
+          "the spawn is still on the map before the settle");
+    ReturnQuery back;
+    back.Outcome = MapOutcome::Won;
+    back.SpawnId = offer.SpawnId;
+    back.FoughtMapId = offer.MapId;
+    back.SpawnTile = offer.SpawnTile;
+    back.ReturnTile = offer.ReturnTile;
+    back.Once = offer.Once;
+    const MapSettle settled = ApplyOutcome(data, back, memory, {});
+    const MapFightRequest again = OfferSpawn(data, *home, step, memory);
+    Check(settled.Cleared && settled.Return.ClearSpawn && !again.Active,
+          "MaybeSettle clears the spawn, so stepping on it does not pay again");
+
+    RunState after;
+    resumed.ExportCareer(after.Career);
+    purseBag.ExportBag(after.Bag);
+    after.Defeated.push_back("wolf");
+    after.Cleared = memory.Cleared;
+    after.MapId = settled.Return.MapId;
+    after.Tile = settled.Return.Tile;
+    FightRecord done;
+    done.VitalsKnown = true;
+    done.Hp = loaded.Run.Hp;
+    done.Focus = loaded.Run.Focus;
+    done.Standing = RunStanding::Victory;
+    RecordFight(after, done);
+    Check(after.SpawnId.empty() && after.Standing == RunStanding::Victory &&
+              PlanLoadedSpawn(after.Standing, after.SpawnId, after.Fight.Known,
+                              resumed.NextFightBlock()) == LoadedSpawn::Walk &&
+              RoutePlayKey(true, false, false, BattleResult::Fled) == PlayKey::Overland,
+          "the settled save walks, and the map takes the keys");
+
+    TempDir settledDir("ascension-save-pending-settled");
+    RunSave settledSave(settledDir.Path);
+    Check(settledSave.Write(after, why), "the settled victory is written");
+    const RunLoad settledLoad = settledSave.Read();
+    Hero settledHero = StartHero(data);
+    Check(static_cast<bool>(settledLoad) && settledHero.ImportCareer(settledLoad.Run.Career, why) &&
+              settledLoad.Run.SpawnId.empty() && settledLoad.Run.Cleared.size() == 1 &&
+              settledLoad.Run.Cleared[0] == "fixture_spawn" && settledHero.Xp() == xp &&
+              settledHero.NextFightBlock() == nullptr &&
+              PlanLoadedSpawn(settledLoad.Run.Standing, settledLoad.Run.SpawnId,
+                              settledLoad.Run.Fight.Known,
+                              settledHero.NextFightBlock()) == LoadedSpawn::Walk,
+          "loading the settled save does not open the choice or the spawn");
+}
+
 void TestFoundOptional()
 {
     TempDir dir("ascension-save-found-absent");
@@ -1141,6 +1336,7 @@ int main()
     TestFixtureV3();
     TestSpawnIds();
     TestVersion4Name();
+    TestAwardVictoryChoiceSave();
     TestFoundOptional();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();
