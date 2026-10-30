@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Progress/Inventory.h"
+#include "Ascension/Progress/Vitals.h"
 #include "Check.h"
 #include "FoeAlert.h"
 
@@ -130,7 +132,7 @@ TurnSeat EnemySeat(i32 index)
 CombatRules SampleRules()
 {
     CombatRules rules;
-    rules.HpPerVitality = 4;
+    rules.HpPerStamina = 4;
     rules.MinDamage = 1;
     rules.AttackNumerator = 1;
     rules.AttackDenominator = 1;
@@ -141,6 +143,11 @@ CombatRules SampleRules()
 
 void TestFormula()
 {
+    Check(PoolMax(18, 4, 1000, 250) == 19, "floor(1*18 + 0.25*4) is 19");
+    Check(PoolMax(0, 4, 1000, 250) == 1, "floor(0.25*4) is 1");
+    Check(PoolMax(1, 3, 1000, 250) == 1, "floor(1 + 0.75) does not round up");
+    Check(PoolMax(1, 4, 1000, 250) == 2, "floor(1 + 1) is 2");
+    Check(PoolMax(10, 0, 1000, 250) == 10, "a zero secondary leaves the primary");
     const CombatRules rules = SampleRules();
     StrikeQuery hit;
     hit.Power = 10;
@@ -179,9 +186,9 @@ void TestWolfFight()
     Database data(kSample);
     Check(data.Load(), "sample data loads");
     Battle battle = StartSample(data, std::make_unique<AgilityRoundModel>(), "wolf");
-    Check(battle.Player().MaxHp == 72 && battle.Player().MaxFocus == 8 &&
-              battle.Player().Focus == 8,
-          "fighter health and focus");
+    Check(battle.Player().MaxHp == 72 && battle.Player().MaxFocus == 19 &&
+              battle.Player().Focus == 19 && battle.Player().MaxMana == 1,
+          "fighter health, focus, and mana");
     Check(battle.Enemy().MaxHp == 40 && battle.Enemy().Name == "Wolf", "wolf health");
     Check(battle.PlayerSkillIds().size() == 4, "four fighter skills");
     Check(battle.Actor() == CombatantSide::Enemy, "the faster wolf acts first");
@@ -215,7 +222,8 @@ void TestSkillsAndGuard()
         "wolf");
 
     const ActionResult heavy = battle.UseSkill("heavy_blow");
-    Check(heavy.Damage == 24 && battle.Player().Focus == 6 && battle.Enemy().Hp == 16,
+    Check(heavy.Damage == 24 && battle.Player().Focus == 17 && battle.Player().Mana == 1 &&
+              battle.Enemy().Hp == 16,
           "heavy blow costs 2 focus and hits harder than strike");
 
     Battle healer = StartSample(data,
@@ -231,7 +239,8 @@ void TestSkillsAndGuard()
         data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
         "wolf");
     const ActionResult wasted = full.UseSkill("second_wind");
-    Check(wasted.Accepted && wasted.Healing == 0 && full.Player().Focus == 6,
+    Check(wasted.Accepted && wasted.Healing == 0 && full.Player().Focus == 17 &&
+              full.Player().Mana == 1,
           "second wind at full health still spends focus");
 
     Battle guard = StartSample(data,
@@ -248,9 +257,9 @@ void TestSkillsAndGuard()
         data, std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player}),
         "wolf");
     i32 braces = 0;
-    while (braces < 12 && focus.UseSkill("brace").Accepted)
+    while (braces < 40 && focus.UseSkill("brace").Accepted)
         ++braces;
-    Check(braces == 7 && focus.Player().Focus == 1 && focus.Actor() == CombatantSide::Player,
+    Check(braces == 18 && focus.Player().Focus == 1 && focus.Actor() == CombatantSide::Player,
           "focus regenerates by 1, and a brace that cannot be paid does not spend the turn");
 }
 
@@ -274,7 +283,7 @@ void TestDefeatAndSkip()
                   "\"focusCost\": 0,",
                   "\"id\": \"bite\",\n      \"name\": \"Bite\",\n      \"description\": \"A quick "
                   "snap.\",\n      \"kind\": \"active\",\n      \"target\": \"enemy\",\n      "
-                  "\"focusCost\": 4,");
+                  "\"focusCost\": 99,");
     Database priced(copy.Path);
     Check(priced.Load(), "the priced bite loads");
     Battle broke = StartSample(
@@ -351,13 +360,13 @@ void TestFocusRegen()
     Battle battle = StartSample(data, Sides({CombatantSide::Player}), "bandit");
     for (i32 i = 0; i < 5; ++i)
         Check(battle.Actor() == CombatantSide::Player, "actor stays the player");
-    Check(battle.Player().Focus == 8, "reading whose turn it is does not grant focus");
-    Check(battle.UseSkill("heavy_blow").Accepted && battle.Player().Focus == 6,
+    Check(battle.Player().Focus == 19, "reading whose turn it is does not grant focus");
+    Check(battle.UseSkill("heavy_blow").Accepted && battle.Player().Focus == 17,
           "the first heavy blow spends 2 from a full pool");
-    Check(battle.UseSkill("heavy_blow").Accepted && battle.Player().Focus == 5,
+    Check(battle.UseSkill("heavy_blow").Accepted && battle.Player().Focus == 16,
           "the next turn gives 1 focus back before the cost");
     const ActionResult waited = battle.Wait();
-    Check(waited.Accepted && battle.Player().Focus == 8,
+    Check(waited.Accepted && battle.Player().Focus == 19,
           "wait adds 2 focus on top of the turn's 1");
 }
 
@@ -376,15 +385,15 @@ void TestRiposteAndBulwark()
     battle.SetWornItems({"wolfhide_charm"});
     std::string error;
     Check(battle.Start("guardian", 5, "wolf", error), "the guardian meets the wolf");
-    Check(battle.Player().Stats.Defense == 18 && battle.Player().MaxFocus == 12,
-          "bulwark adds 3 defense and focus is 4 plus the focus stat");
+    Check(battle.Player().Stats.Defense == 18 && battle.Player().MaxFocus == 39,
+          "bulwark adds 3 defense and focus follows stamina and intellect");
     Check(battle.UseSkill("riposte").Accepted && battle.Player().GuardPercent == 50 &&
               battle.Player().ReflectPercent == 50 && battle.Player().ReflectFlat == 28 &&
-              battle.Player().Focus == 10,
+              battle.Player().Focus == 37,
           "riposte guards 50 percent and its flat reflect is power plus defense");
     const ActionResult bite = battle.EnemyAct();
     // 28 back, less the wolf's defense (the fixture counts defense in full): 26, so 14 left.
-    Check(bite.Damage == 0 && battle.Enemy().Hp == 14 && battle.Player().Focus == 11 &&
+    Check(bite.Damage == 0 && battle.Enemy().Hp == 14 && battle.Player().Focus == 38 &&
               battle.Player().GuardPercent == 0,
           "half of the blocked bite returns with the defense scaling, less the wolf's defense, "
           "and bulwark pays focus");
@@ -392,7 +401,7 @@ void TestRiposteAndBulwark()
     Battle plain(data, Sides({CombatantSide::Player, CombatantSide::Enemy, CombatantSide::Enemy}));
     Check(plain.Start("guardian", 5, "wolf", error), "the second guardian fight starts");
     Check(plain.UseSkill("brace").Accepted, "brace is a guard");
-    Check(plain.EnemyAct().Damage == 0 && plain.Player().Focus == 11,
+    Check(plain.EnemyAct().Damage == 0 && plain.Player().Focus == 38,
           "a guard that stops damage grants bulwark focus");
     const i32 focus = plain.Player().Focus;
     Check(plain.EnemyAct().Damage == 1 && plain.Player().Focus == focus,
@@ -968,9 +977,9 @@ void TestGearAndConsumables()
     Check(focused.UseSkill("brace").Accepted && focused.UseSkill("brace").Accepted &&
               focused.UseSkill("brace").Accepted && focused.UseSkill("brace").Accepted,
           "four braces spend focus");
-    Check(focused.Player().Focus == 3, "four braces leave 3 focus");
+    Check(focused.Player().Focus == 14, "four braces leave 14 focus");
     const ActionResult sipped = focused.UseItem(*tonic);
-    Check(sipped.Accepted && sipped.SkillId == "focus_tonic" && focused.Player().Focus == 8 &&
+    Check(sipped.Accepted && sipped.SkillId == "focus_tonic" && focused.Player().Focus == 19 &&
               sipped.Text.find("Focus +4") != std::string::npos,
           "focus tonic restores 4 focus");
 
@@ -1040,13 +1049,13 @@ void TestGrantCopies()
     Check(paladin.Start("paladin", 5, "wolf", error), "the paladin meets the wolf");
     Check(paladin.Player().Stats.Defense == 13, "the shared bulwark still adds 3 defense");
     Check(paladin.UseSkill("brace").Accepted, "the paladin braces");
-    Check(paladin.EnemyAct().Damage == 0 && paladin.Player().Focus == 12,
+    Check(paladin.EnemyAct().Damage == 0 && paladin.Player().Focus == 36,
           "the paladin's grant returns 2 focus when a guard stops a hit");
 
     Battle guardian(data, Sides({CombatantSide::Player, CombatantSide::Enemy}));
     Check(guardian.Start("guardian", 5, "wolf", error), "the guardian meets the same wolf");
     Check(guardian.UseSkill("brace").Accepted && guardian.EnemyAct().Damage == 0 &&
-              guardian.Player().Focus == 11,
+              guardian.Player().Focus == 38,
           "the guardian's own copy of bulwark still returns 1 focus");
 
     Battle fighter = StartSample(data, Sides({CombatantSide::Enemy}), "wolf");
@@ -1412,21 +1421,21 @@ void AddPostFoes(const fs::path& root)
         "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      \"gold\": 0\n    "
         "},\n    {\n      \"id\": \"shell_post\",\n      \"name\": \"Shell Post\",\n      "
         "\"description\": \"A post that closes a stone shell, then taps.\",\n      \"level\": "
-        "1,\n      \"stats\": {\n        \"vitality\": 30,\n        \"strength\": 0,\n        "
-        "\"defense\": 0,\n        \"agility\": 1,\n        \"focus\": 0\n      },\n      "
+        "1,\n      \"stats\": {\n        \"stamina\": 30,\n        \"strength\": 0,\n        "
+        "\"defense\": 0,\n        \"agility\": 1,\n        \"intellect\": 0, \"will\": 0\n      },\n      "
         "\"skills\": [\"test_shell\", \"test_tap\"],\n      \"pattern\": [\"test_shell\", "
         "\"test_tap\", \"test_tap\"],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    "
         "{\n "
         "     \"id\": \"steadfast_post\",\n      \"name\": \"Steadfast Post\",\n      "
         "\"description\": \"A post that sets its feet, then draws.\",\n      \"level\": 1,\n      "
-        "\"stats\": {\n        \"vitality\": 30,\n        \"strength\": 0,\n        \"defense\": "
-        "0,\n        \"agility\": 1,\n        \"focus\": 0\n      },\n      \"skills\": "
+        "\"stats\": {\n        \"stamina\": 30,\n        \"strength\": 0,\n        \"defense\": "
+        "0,\n        \"agility\": 1,\n        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": "
         "[\"test_bellow\", \"test_draw\"],\n      \"pattern\": [\"test_bellow\", "
         "\"test_draw\"],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n      "
         "\"id\": \"open_post\",\n      \"name\": \"Open Post\",\n      \"description\": \"A post "
         "that draws with nothing holding the stun off.\",\n      \"level\": 1,\n      \"stats\": "
-        "{\n        \"vitality\": 30,\n        \"strength\": 0,\n        \"defense\": 0,\n        "
-        "\"agility\": 1,\n        \"focus\": 0\n      },\n      \"skills\": [\"test_draw\"],\n     "
+        "{\n        \"stamina\": 30,\n        \"strength\": 0,\n        \"defense\": 0,\n        "
+        "\"agility\": 1,\n        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"test_draw\"],\n     "
         " \"pattern\": [\"test_draw\"],\n      \"experience\": 0,\n      \"gold\": 0\n    }\n  "
         "]\n}");
 }
@@ -1614,7 +1623,7 @@ void TestSecondWindExposed()
                   "\"focusCost\": 3,\n"
                   "      \"effects\": [\n"
                   "        { \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", "
-                  "\"power\": 8, \"scaling\": \"focus\" },\n"
+                  "\"power\": 8, \"scaling\": \"intellect\" },\n"
                   "        { \"id\": \"open\", \"trigger\": \"onUse\", \"op\": \"applyStatus\", "
                   "\"status\": \"exposed\" }\n"
                   "      ]");
@@ -1624,7 +1633,7 @@ void TestSecondWindExposed()
 
     Battle low(data, Sides({CombatantSide::Player}));
     Check(low.Start("fighter", 1, "wolf", error), "the focus-4 fight starts");
-    Check(low.Player().Stats.Focus == 4, "the fighter's Focus is 4");
+    Check(low.Player().Stats.Intellect == 4, "the fighter's Focus is 4");
     low.SetPlayerHp(20);
     const ActionResult mend = low.UseSkill("second_wind");
     Check(mend.Accepted && mend.Healing == 12 && low.Player().Hp == 32 &&
@@ -1634,14 +1643,14 @@ void TestSecondWindExposed()
 
     Battle high(data, Sides({CombatantSide::Player}));
     StatBlock focused;
-    focused.Vitality = 18;
+    focused.Stamina = 18;
     focused.Strength = 8;
     focused.Defense = 6;
     focused.Agility = 5;
-    focused.Focus = 9;
+    focused.Intellect = 9;
     high.SetBaseStats(focused);
     Check(high.Start("fighter", 1, "wolf", error), "the focus-9 fight starts");
-    Check(high.Player().Stats.Focus == 9 && high.Player().MaxHp == 72,
+    Check(high.Player().Stats.Intellect == 9 && high.Player().MaxHp == 72,
           "raising Focus leaves max health alone");
     high.SetPlayerHp(20);
     const ActionResult more = high.UseSkill("second_wind");
@@ -1739,9 +1748,9 @@ void TestFoeRules()
                   "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
                   "\"gold\": 0\n    },\n    {\n      \"id\": \"rule_post\",\n      \"name\": "
                   "\"Rule Post\",\n      \"description\": \"A post with a short pattern and two "
-                  "rules.\",\n      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "rules.\",\n      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 40,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"thrust\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\", \"thrust\"],\n"
                   "      \"pattern\": [\"harden\", \"thrust\"],\n      \"ai\": [\n        "
                   "{ \"if\": { \"targetStatus\": \"exposed\", \"next\": \"harden\" }, "
                   "\"do\": \"skill\", \"skill\": \"thrust\" },\n        "
@@ -1826,18 +1835,18 @@ void TestAllyHp()
                   "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
                   "\"gold\": 0\n    },\n    {\n      \"id\": \"caller\",\n      \"name\": "
                   "\"Caller\",\n      \"description\": \"A made-up foe that watches its allies.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 40,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 3,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"bite\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\", \"bite\"],\n"
                   "      \"pattern\": [\"harden\"],\n      \"ai\": [\n"
                   "        { \"if\": { \"allyHpAtMost\": 50 }, \"do\": \"skill\", "
                   "\"skill\": \"bite\" }\n"
                   "      ],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n"
                   "      \"id\": \"mate\",\n      \"name\": \"Mate\",\n"
                   "      \"description\": \"A made-up ally with a known health pool.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 10,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 10,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\"],\n"
                   "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
                   "    }");
     ReplaceInFile(copy.Path / "encounters.json",
@@ -2026,9 +2035,9 @@ void TestAllyCount()
                   "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
                   "\"gold\": 0\n    },\n    {\n      \"id\": \"counter\",\n      \"name\": "
                   "\"Counter\",\n      \"description\": \"A made-up foe that counts its "
-                  "allies.\",\n      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "allies.\",\n      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 40,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"bite\", "
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\", \"bite\", "
                   "\"thrust\"],\n      \"pattern\": [\"harden\"],\n      \"ai\": [\n"
                   "        { \"if\": { \"allyCountAtMost\": 0 }, \"do\": \"skill\", "
                   "\"skill\": \"thrust\" },\n"
@@ -2037,18 +2046,18 @@ void TestAllyCount()
                   "      ],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n"
                   "      \"id\": \"floor\",\n      \"name\": \"Floor\",\n"
                   "      \"description\": \"A made-up foe that wants a full pack.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 40,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 40,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\", \"bite\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\", \"bite\"],\n"
                   "      \"pattern\": [\"harden\"],\n      \"ai\": [\n"
                   "        { \"if\": { \"allyCountAtLeast\": 2 }, \"do\": \"skill\", "
                   "\"skill\": \"bite\" }\n"
                   "      ],\n      \"experience\": 0,\n      \"gold\": 0\n    },\n    {\n"
                   "      \"id\": \"mate\",\n      \"name\": \"Mate\",\n"
                   "      \"description\": \"A made-up ally.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 10,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 10,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\"],\n"
                   "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
                   "    }");
     ReplaceInFile(copy.Path / "encounters.json",
@@ -2126,26 +2135,26 @@ void TestLowestHpHeal()
                   "      \"skills\": [\"rubble_strike\"],\n      \"experience\": 0,\n      "
                   "\"gold\": 0\n    },\n    {\n      \"id\": \"big\",\n      \"name\": \"Big\",\n"
                   "      \"description\": \"A made-up foe with a large pool.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 25,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 25,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\"],\n"
                   "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
                   "    },\n    {\n      \"id\": \"small\",\n      \"name\": \"Small\",\n"
                   "      \"description\": \"A made-up foe with a small pool.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 10,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 10,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"harden\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"harden\"],\n"
                   "      \"pattern\": [\"harden\"],\n      \"experience\": 0,\n      \"gold\": 0\n"
                   "    },\n    {\n      \"id\": \"mender\",\n      \"name\": \"Mender\",\n"
                   "      \"description\": \"A made-up foe that mends someone else.\",\n"
-                  "      \"level\": 1,\n      \"stats\": {\n        \"vitality\": 20,\n"
+                  "      \"level\": 1,\n      \"stats\": {\n        \"stamina\": 20,\n"
                   "        \"strength\": 0,\n        \"defense\": 0,\n        \"agility\": 1,\n"
-                  "        \"focus\": 0\n      },\n      \"skills\": [\"second_wind\"],\n"
+                  "        \"intellect\": 0, \"will\": 0\n      },\n      \"skills\": [\"second_wind\"],\n"
                   "      \"pattern\": [\"second_wind\"],\n      \"experience\": 0,\n"
                   "      \"gold\": 0\n    },\n    {\n      \"id\": \"mate\",\n      \"name\": "
                   "\"Mate\",\n      \"description\": \"A made-up ally.\",\n      \"level\": 1,\n"
-                  "      \"stats\": {\n        \"vitality\": 10,\n        \"strength\": 0,\n"
-                  "        \"defense\": 0,\n        \"agility\": 1,\n        \"focus\": 0\n"
+                  "      \"stats\": {\n        \"stamina\": 10,\n        \"strength\": 0,\n"
+                  "        \"defense\": 0,\n        \"agility\": 1,\n        \"intellect\": 0, \"will\": 0\n"
                   "      },\n      \"skills\": [\"harden\"],\n      \"pattern\": [\"harden\"],\n"
                   "      \"experience\": 0,\n      \"gold\": 0\n    }");
     ReplaceInFile(copy.Path / "encounters.json",
@@ -2250,12 +2259,13 @@ void TestCarriedHp()
     Battle full(data, std::make_unique<AgilityRoundModel>());
     Check(full.Start("fighter", 1, "wolf", error), "a lone fight starts");
     Check(full.Player().Hp == full.Player().MaxHp && full.Player().Focus == full.Player().MaxFocus &&
-              full.Player().Hp == 72 && full.Player().Focus == 8,
+              full.Player().Hp == 72 && full.Player().Focus == 19,
           "a fight with no opening pools still starts full");
 
     OpeningPools matched;
     matched.Hp = 72;
-    matched.Focus = 8;
+    matched.Focus = 19;
+    matched.Mana = 1;
     Battle same(data, std::make_unique<AgilityRoundModel>());
     Check(same.Start("fighter", 1, "wolf", matched, error), "a full pool start succeeds");
     const ActionResult sameBite = same.EnemyAct();
@@ -2293,24 +2303,25 @@ void TestSpells()
 
     Battle mage(data, playerFirst());
     Check(mage.Start("mage", 1, "wolf", error), "a mage fight starts");
-    Check(mage.Player().MaxHp == 56 && mage.Player().MaxFocus == 18 && mage.Player().Focus == 18,
-          "a level-1 mage has 56 health and 18 focus");
+    Check(mage.Player().MaxHp == 48 && mage.Player().MaxFocus == 15 && mage.Player().MaxMana == 7 &&
+              mage.Player().Focus == 15 && mage.Player().Mana == 7,
+          "a level-1 mage has 48 health, 15 focus, and 7 mana");
     const ActionResult ember = mage.UseSkill("ember");
-    Check(ember.Accepted && ember.Damage == 21 && mage.Player().Focus == 18 &&
-              mage.Enemy().Hp == 19,
-          "ember spends no focus and hits for 21");
+    Check(ember.Accepted && ember.Damage == 20 && mage.Player().Focus == 15 &&
+              mage.Player().Mana == 7 && mage.Enemy().Hp == 20,
+          "ember spends no mana and hits for 20");
     const ActionResult hex = mage.UseSkill("hex");
-    Check(hex.Accepted && hex.Damage == 17 && mage.Player().Focus == 16 &&
+    Check(hex.Accepted && hex.Damage == 16 && mage.Player().Focus == 15 && mage.Player().Mana == 5 &&
               Holds(mage.Enemy(), "hexed"),
-          "hex spends 2 focus and leaves Hexed");
+          "hex spends 2 mana and leaves Hexed");
 
     Battle cleric(data, playerFirst());
     Check(cleric.Start("cleric", 1, "wolf", error), "a cleric fight starts");
     cleric.SetPlayerHp(20);
     const ActionResult prayer = cleric.UseSkill("prayer");
     Check(prayer.Accepted && prayer.Healing == 22 && cleric.Player().Hp == 42 &&
-              cleric.Player().Focus == 14,
-          "prayer spends 2 focus and mends 22");
+              cleric.Player().Focus == cleric.Player().MaxFocus && cleric.Player().Mana == 10,
+          "prayer spends 2 mana and mends 22");
 
     Battle plain(data, playerFirst());
     Check(plain.Start("rogue", 1, "wolf", error), "a rogue fight starts");
@@ -2320,11 +2331,106 @@ void TestSpells()
     Battle marked(data, playerFirst());
     Check(marked.Start("rogue", 1, "wolf", error), "a second rogue fight starts");
     const ActionResult mark = marked.UseSkill("mark");
-    Check(mark.Accepted && mark.Damage == 14 && marked.Player().Focus == 8 &&
-              Holds(marked.Enemy(), "marked"),
+    Check(mark.Accepted && mark.Damage == 14 && marked.Player().Focus == 11 &&
+              marked.Player().Mana == marked.Player().MaxMana && Holds(marked.Enemy(), "marked"),
           "mark spends 2 focus and leaves Marked");
     const ActionResult follow = marked.UseSkill("ambush");
     Check(follow.Accepted && follow.Damage > ambush.Damage, "ambush hits harder on a marked foe");
+}
+
+// Wolf and bandit are fought on the carried wound. The moth and the archer, in the
+// room that holds the first rest, are fought at full health with the mana that
+// stretch left. Mage Hexes a large foe, then Embers. Cleric Smites the wounded
+// stretch and opens the rested fights with Sanctuary. A paid cast the pool cannot
+// cover is mana starvation.
+void TestBarrowMana()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    Check(data.Load(), "shipped data loads for a barrow cadence");
+    // Wolf and bandit are the wounded stretch before the barrow's first rest room.
+    // The moth and the archer are fought on full health with the mana that stretch
+    // left, which is the pool question: the paid spell still has to be affordable.
+    const char* wounded[] = {"wolf", "bandit"};
+    const char* rested[] = {"tomb_moth", "bone_archer"};
+    for (const char* classId : {"mage", "cleric"}) {
+        Hero hero;
+        Inventory empty;
+        std::string error;
+        Check(hero.Start(data, error) && empty.Start(data, error) &&
+                  hero.AdoptStarter(classId, error),
+              "the caster starts");
+        Vitals vitals;
+        FillVitals(vitals, HeroPools(data, hero, empty));
+        auto fightOne = [&](const char* fight, bool refillHp, bool pay) {
+            if (refillHp)
+                vitals.Hp = HeroPools(data, hero, empty).MaxHp;
+            const PoolCaps caps = HeroPools(data, hero, empty);
+            ClampResources(vitals, caps);
+            const PoolPair pools = PoolsFrom(vitals, caps);
+            Battle battle(data, std::make_unique<AgilityRoundModel>());
+            battle.SetBaseStats(hero.Attributes());
+            OpeningPools opening;
+            opening.Hp = pools.Hp;
+            opening.Focus = pools.Focus;
+            opening.Mana = pools.Mana;
+            Check(battle.Start(hero.ClassId(), hero.Level(), fight, opening, error),
+                  "a barrow fight starts");
+            i32 steps = 0;
+            bool spentPaid = false;
+            while (battle.Result() == BattleResult::Ongoing && steps < 80) {
+                ++steps;
+                if (battle.Actor() != CombatantSide::Player) {
+                    battle.EnemyAct();
+                    continue;
+                }
+                const bool mage = hero.ClassId() == "mage";
+                const char* spell = mage ? "ember" : "smite";
+                const char* paid = mage ? "hex" : "sanctuary";
+                // Hex is the opener on a large foe. The wolf dies to Ember before a Hex
+                // pays for the extra bite it would cost.
+                const bool wantPaid =
+                    pay && !spentPaid && (!mage || battle.Enemy().MaxHp > 50);
+                if (wantPaid) {
+                    if (battle.Player().Mana < 2) {
+                        Check(false, "mana ran out before the paid spell");
+                        return false;
+                    }
+                    spell = paid;
+                    spentPaid = true;
+                }
+                const ActionResult cast = battle.UseSkill(spell);
+                Check(cast.Accepted, "the cadence spell is spent");
+                if (!cast.Accepted)
+                    return false;
+            }
+            const std::string won = std::string(classId) + " finishes " + fight + " hp " +
+                                     std::to_string(battle.Player().Hp) + "/" +
+                                     std::to_string(battle.Player().MaxHp) + " foe " +
+                                     std::to_string(battle.Enemy().Hp);
+            Check(battle.Result() == BattleResult::Victory, won.c_str());
+            if (battle.Result() != BattleResult::Victory)
+                return false;
+            const PoolCaps fought = HeroPools(data, hero, empty);
+            KeepPools(vitals, battle.Player().Hp, battle.Player().Focus, battle.Player().Mana,
+                      fought);
+            const XpGrant grant = hero.GrantXp(battle.Experience());
+            if (grant.LevelAfter > grant.LevelBefore) {
+                const PoolCaps now = HeroPools(data, hero, empty);
+                ApplyLevelHp(vitals, fought.MaxHp, now.MaxHp, data.GetProgress().LevelHp);
+                ClampResources(vitals, now);
+            }
+            return true;
+        };
+        const bool mage = std::string(classId) == "mage";
+        for (const char* fight : wounded) {
+            if (!fightOne(fight, false, mage))
+                return;
+        }
+        for (const char* fight : rested) {
+            if (!fightOne(fight, true, true))
+                return;
+        }
+    }
 }
 
 void TestStunKeepsTurnStart()
@@ -2478,6 +2584,7 @@ int main()
     TestFormula();
     TestWolfFight();
     TestSpells();
+    TestBarrowMana();
     TestSkillsAndGuard();
     TestDefeatAndSkip();
     TestHotReloadAndPassive();

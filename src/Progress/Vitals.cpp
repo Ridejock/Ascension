@@ -28,6 +28,8 @@ PoolCaps Normalized(PoolCaps caps)
         caps.MaxHp = 1;
     if (caps.MaxFocus < 0)
         caps.MaxFocus = 0;
+    if (caps.MaxMana < 0)
+        caps.MaxMana = 0;
     return caps;
 }
 
@@ -67,8 +69,12 @@ PoolCaps HeroPools(const Database& data, const Hero& hero, const Inventory& bag)
     stats += bag.GearBonus();
     ApplyAlwaysStats(stats, data.HeroGrants(*klass, bag.WornIds(), hero.PickedIds()));
     const CombatRules& rules = data.GetRules();
-    caps.MaxHp = ClampPool(static_cast<i64>(stats.Vitality) * rules.HpPerVitality);
-    caps.MaxFocus = ClampPool(static_cast<i64>(stats.Focus) + rules.FocusBase);
+    i32 stamina = stats.Stamina;
+    if (stamina < 0)
+        stamina = 0;
+    caps.MaxHp = ClampPool(static_cast<i64>(stamina) * rules.HpPerStamina);
+    caps.MaxFocus = FocusMaxOf(stats, rules);
+    caps.MaxMana = ManaMaxOf(stats, rules);
     if (caps.MaxHp < 1)
         caps.MaxHp = 1;
     return caps;
@@ -79,15 +85,17 @@ void FillVitals(Vitals& vitals, PoolCaps caps)
     caps = Normalized(caps);
     vitals.Hp = caps.MaxHp;
     vitals.Focus = caps.MaxFocus;
+    vitals.Mana = caps.MaxMana;
     vitals.Known = true;
     vitals.ReturnToHub = false;
 }
 
-void KeepPools(Vitals& vitals, i32 hp, i32 focus, PoolCaps caps)
+void KeepPools(Vitals& vitals, i32 hp, i32 focus, i32 mana, PoolCaps caps)
 {
     caps = Normalized(caps);
     vitals.Hp = ClampTo(hp, 0, caps.MaxHp);
     vitals.Focus = ClampTo(focus, 0, caps.MaxFocus);
+    vitals.Mana = ClampTo(mana, 0, caps.MaxMana);
     vitals.Known = true;
     vitals.ReturnToHub = false;
 }
@@ -120,11 +128,11 @@ void ApplyLevelHp(Vitals& vitals, i32 oldMaxHp, i32 newMaxHp, LevelHpRule rule)
         vitals.Hp = 0;
 }
 
-void ClampFocus(Vitals& vitals, i32 maxFocus)
+void ClampResources(Vitals& vitals, PoolCaps caps)
 {
-    if (maxFocus < 0)
-        maxFocus = 0;
-    vitals.Focus = ClampTo(vitals.Focus, 0, maxFocus);
+    caps = Normalized(caps);
+    vitals.Focus = ClampTo(vitals.Focus, 0, caps.MaxFocus);
+    vitals.Mana = ClampTo(vitals.Mana, 0, caps.MaxMana);
 }
 
 PoolPair PoolsFrom(const Vitals& vitals, PoolCaps caps)
@@ -134,10 +142,12 @@ PoolPair PoolsFrom(const Vitals& vitals, PoolCaps caps)
     if (!vitals.Known) {
         pools.Hp = caps.MaxHp;
         pools.Focus = caps.MaxFocus;
+        pools.Mana = caps.MaxMana;
         return pools;
     }
     pools.Hp = ClampTo(vitals.Hp, 0, caps.MaxHp);
     pools.Focus = ClampTo(vitals.Focus, 0, caps.MaxFocus);
+    pools.Mana = ClampTo(vitals.Mana, 0, caps.MaxMana);
     return pools;
 }
 

@@ -1,29 +1,40 @@
 {
   "stats": [
     {
-      "id": "vitality",
-      "name": "Vitality",
-      "description": "How much punishment you can take before you fall."
-    },
-    {
       "id": "strength",
       "name": "Strength",
+      "short": "STR",
       "description": "Physical power behind a blow."
+    },
+    {
+      "id": "intellect",
+      "name": "Intellect",
+      "short": "INT",
+      "description": "Spell power, and a share of both Focus and Mana."
+    },
+    {
+      "id": "stamina",
+      "name": "Stamina",
+      "short": "STA",
+      "description": "How much punishment you can take, and the bulk of Focus."
     },
     {
       "id": "defense",
       "name": "Defense",
+      "short": "DEF",
       "description": "How well you hold a line when something hits back."
     },
     {
       "id": "agility",
       "name": "Agility",
+      "short": "AGI",
       "description": "Who acts first, and who steps out of the way."
     },
     {
-      "id": "focus",
-      "name": "Focus",
-      "description": "Fuel for skills. It comes back between fights."
+      "id": "will",
+      "name": "Will",
+      "short": "WIL",
+      "description": "The bulk of Mana."
     }
   ]
 }

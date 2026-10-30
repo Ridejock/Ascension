@@ -70,8 +70,10 @@ bool BeginNewGame(const Database& data, Hero& hero, Inventory& inventory, FreshS
     }
     FillVitals(out.Pools, HeroPools(data, hero, inventory));
     out.Run.ResourcesKnown = out.Pools.Known;
+    out.Run.ManaKnown = out.Pools.Known;
     out.Run.Hp = out.Pools.Hp;
     out.Run.Focus = out.Pools.Focus;
+    out.Run.Mana = out.Pools.Mana;
     out.Run.Standing = RunStanding::None;
     error.clear();
     return true;

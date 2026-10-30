@@ -3,12 +3,12 @@
     {
       "id": "arcane",
       "name": "Arcane",
-      "resource": "focus"
+      "resource": "mana"
     },
     {
       "id": "holy",
       "name": "Holy",
-      "resource": "focus"
+      "resource": "mana"
     }
   ]
 }

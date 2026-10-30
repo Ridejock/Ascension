@@ -83,7 +83,8 @@ const std::string* SpawnFoeId(const Database& data, const MapSpawn& spawn)
 
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
-                   i32 focus, i32 maxFocus, std::span<const std::string> cleared,
+                   i32 focus, i32 maxFocus, i32 mana, i32 maxMana,
+                   std::span<const std::string> cleared,
                    std::span<const SpawnPlace> places, const ArtGallery* art,
                    const SpawnGlides* motion)
 {
@@ -293,7 +294,8 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
 
     Emerald::DrawDebugText(renderer, {16.0f, 16.0f}, Upper(PlaceLabel(walker.Place())), label, 2);
     const std::string pools = "HP " + std::to_string(hp) + "/" + std::to_string(maxHp) +
-                              "   FOCUS " + std::to_string(focus) + "/" + std::to_string(maxFocus);
+                              "   FOCUS " + std::to_string(focus) + "/" + std::to_string(maxFocus) +
+                              "   MANA " + std::to_string(mana) + "/" + std::to_string(maxMana);
     const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
     Emerald::DrawDebugText(renderer, {16.0f, poolsY}, Upper(pools), label, 2);
     const usize shown = std::min(log.size(), static_cast<usize>(4));

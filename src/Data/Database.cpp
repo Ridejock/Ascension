@@ -3,6 +3,7 @@
 #include "Ascension/Data/Database.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
@@ -177,6 +178,23 @@ bool RequireString(const Json& object, const char* key, std::string& out, std::s
     return true;
 }
 
+bool OptionalString(const Json& object, const char* key, std::string& out, std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end())
+        return true;
+    if (!it->is_string()) {
+        error = std::string("'") + key + "' must be a string";
+        return false;
+    }
+    out = it->get<std::string>();
+    if (out.empty()) {
+        error = std::string("'") + key + "' must not be empty";
+        return false;
+    }
+    return true;
+}
+
 bool ReadInt(const Json& value, i32 min, i32 max, i32& out, std::string& error)
 {
     if (!value.is_number_integer()) {
@@ -189,6 +207,34 @@ bool ReadInt(const Json& value, i32 min, i32 max, i32& out, std::string& error)
         return false;
     }
     out = static_cast<i32>(number);
+    return true;
+}
+
+// A JSON number stored as thousandths. 1 is 1000, 0.25 is 250. Integers and fractions
+// both work. The range is on the thousandths value.
+bool RequireThousandths(const Json& object, const char* key, i32 min, i32 max, i32& out,
+                        std::string& error)
+{
+    const auto it = object.find(key);
+    if (it == object.end()) {
+        error = std::string("'") + key + "' is required";
+        return false;
+    }
+    if (!it->is_number()) {
+        error = std::string("'") + key + "' must be a number";
+        return false;
+    }
+    const double number = it->get<double>();
+    if (!std::isfinite(number)) {
+        error = std::string("'") + key + "' must be a number";
+        return false;
+    }
+    const long long milli = std::llround(number * 1000.0);
+    if (milli < min || milli > max) {
+        error = std::string("'") + key + "' is out of range";
+        return false;
+    }
+    out = static_cast<i32>(milli);
     return true;
 }
 
@@ -269,7 +315,8 @@ bool ReadStatBlock(const Json& object, bool requireAll, StatBlock& out, std::str
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(object, {"vitality", "strength", "defense", "agility", "focus"}, unknown)) {
+    if (!AllowKeys(object,
+                   {"strength", "intellect", "stamina", "defense", "agility", "will"}, unknown)) {
         error = "unknown stat " + Quote(unknown);
         return false;
     }
@@ -508,7 +555,7 @@ bool LoadStats(const Json& root, Parsed& parsed, std::string& error)
             return false;
         }
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "name", "description"}, unknown)) {
+        if (!AllowKeys(entry, {"id", "name", "short", "description"}, unknown)) {
             error = "unknown field " + Quote(unknown);
             return false;
         }
@@ -516,6 +563,8 @@ bool LoadStats(const Json& root, Parsed& parsed, std::string& error)
         if (!RequireString(entry, "id", stat.Id, error) ||
             !RequireString(entry, "name", stat.Name, error) ||
             !RequireString(entry, "description", stat.Description, error))
+            return false;
+        if (!OptionalString(entry, "short", stat.Short, error))
             return false;
         if (!IsId(stat.Id)) {
             error =
@@ -529,7 +578,7 @@ bool LoadStats(const Json& root, Parsed& parsed, std::string& error)
         }
         if (!known) {
             error = "unknown stat " + Quote(stat.Id) +
-                    " (the stats are vitality, strength, defense, agility, focus)";
+                    " (the stats are strength, intellect, stamina, defense, agility, will)";
             return false;
         }
         if (FindId(parsed.Stats, stat.Id) != nullptr) {
@@ -539,7 +588,7 @@ bool LoadStats(const Json& root, Parsed& parsed, std::string& error)
         parsed.Stats.push_back(std::move(stat));
     }
     if (parsed.Stats.size() != kStatIds.size()) {
-        error = "stats must list vitality, strength, defense, agility and focus";
+        error = "stats must list strength, intellect, stamina, defense, agility and will";
         return false;
     }
     // Canonical order, so the screen does not jump when the file is reordered.
@@ -590,6 +639,8 @@ bool ParseOp(std::string_view text, EffectOp& out)
         out = EffectOp::StatPerMissingHp;
     else if (text == "grantFocus")
         out = EffectOp::GrantFocus;
+    else if (text == "grantMana")
+        out = EffectOp::GrantMana;
     else if (text == "applyStatus")
         out = EffectOp::ApplyStatus;
     else if (text == "stunIfWindingUp")
@@ -608,7 +659,7 @@ bool TriggerAllows(EffectTrigger trigger, EffectOp op)
         return trigger == EffectTrigger::OnUse;
     if (op == EffectOp::Heal)
         return trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnTurnStart;
-    if (op == EffectOp::GrantFocus)
+    if (op == EffectOp::GrantFocus || op == EffectOp::GrantMana)
         return trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnBlock ||
                trigger == EffectTrigger::OnTurnStart || trigger == EffectTrigger::OnDamaged;
     if (op == EffectOp::ApplyStatus)
@@ -641,7 +692,7 @@ bool FieldUsed(EffectTrigger trigger, EffectOp op, std::string_view key)
         return key == "amount";
     if (trigger == EffectTrigger::OnUse && op == EffectOp::Harden)
         return key == "amount" || key == "turns";
-    if (op == EffectOp::GrantFocus &&
+    if ((op == EffectOp::GrantFocus || op == EffectOp::GrantMana) &&
         (trigger == EffectTrigger::OnUse || trigger == EffectTrigger::OnBlock ||
          trigger == EffectTrigger::OnTurnStart || trigger == EffectTrigger::OnDamaged))
         return key == "amount";
@@ -714,7 +765,8 @@ bool FieldBounds(EffectOp op, std::string_view key, i32& min, i32& max)
         } else if (op == EffectOp::Guard) {
             min = 0;
             max = 100;
-        } else if (op == EffectOp::GrantFocus || op == EffectOp::StatPerMissingHp) {
+        } else if (op == EffectOp::GrantFocus || op == EffectOp::GrantMana ||
+                   op == EffectOp::StatPerMissingHp) {
             min = 0;
             max = 99;
         } else if (op == EffectOp::Harden) {
@@ -866,8 +918,8 @@ bool RequireEffectFields(const EffectDef& effect, std::string& error)
     if (effect.Op == EffectOp::StatPerMissingHp)
         return need(effect.Stat.has_value(), "stat") && need(effect.Amount.has_value(), "amount") &&
                need(effect.Per.has_value(), "per") && need(effect.Max.has_value(), "max");
-    if (effect.Op == EffectOp::GrantFocus || effect.Op == EffectOp::Empower ||
-        effect.Op == EffectOp::Guard)
+    if (effect.Op == EffectOp::GrantFocus || effect.Op == EffectOp::GrantMana ||
+        effect.Op == EffectOp::Empower || effect.Op == EffectOp::Guard)
         return need(effect.Amount.has_value(), "amount");
     if (effect.Op == EffectOp::Damage || effect.Op == EffectOp::Heal)
         return need(effect.Power.has_value(), "power");
@@ -1283,8 +1335,8 @@ bool LoadEffects(const Json& root, Parsed& parsed, std::string& error)
 }
 
 // schools.json. An empty list is no schools. A skill that sets school must name one of
-// these. resource is the pool the spell spends. focus is the only pool, so the loader
-// rejects anything else instead of inventing a second bar.
+// these. resource is the pool the spell spends: focus or mana. Anything else fails the
+// load instead of inventing a third bar.
 bool LoadSchools(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("schools");
@@ -1316,8 +1368,8 @@ bool LoadSchools(const Json& root, Parsed& parsed, std::string& error)
             return fail(error);
         if (!RequireString(entry, "resource", school.Resource, error))
             return fail(error);
-        if (school.Resource != "focus")
-            return fail("'resource' must be \"focus\" (the only pool a spell can spend)");
+        if (school.Resource != "focus" && school.Resource != "mana")
+            return fail("'resource' must be \"focus\" or \"mana\"");
         parsed.Schools.push_back(std::move(school));
     }
     return true;
@@ -2638,23 +2690,26 @@ bool LoadCombat(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"hpPerVitality", "minDamage", "attackNumerator", "attackDenominator",
-                    "defenseNumerator", "defenseDenominator", "focusBase", "focusPerTurn",
-                    "focusOnWait", "maxFoes"},
+                   {"hpPerStamina", "minDamage", "attackNumerator", "attackDenominator",
+                    "defenseNumerator", "defenseDenominator", "poolK", "poolM", "focusPerTurn",
+                    "focusOnWait", "manaPerTurn", "manaOnWait", "maxFoes"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
     CombatRules rules;
-    if (!RequireInt(*body, "hpPerVitality", 1, 999, rules.HpPerVitality, error) ||
+    if (!RequireInt(*body, "hpPerStamina", 1, 999, rules.HpPerStamina, error) ||
         !RequireInt(*body, "minDamage", 0, 999, rules.MinDamage, error) ||
         !RequireInt(*body, "attackNumerator", 0, 999, rules.AttackNumerator, error) ||
         !RequireInt(*body, "attackDenominator", 1, 999, rules.AttackDenominator, error) ||
         !RequireInt(*body, "defenseNumerator", 0, 999, rules.DefenseNumerator, error) ||
         !RequireInt(*body, "defenseDenominator", 1, 999, rules.DefenseDenominator, error) ||
-        !RequireInt(*body, "focusBase", 0, 99, rules.FocusBase, error) ||
+        !RequireThousandths(*body, "poolK", 0, 10000, rules.PoolK, error) ||
+        !RequireThousandths(*body, "poolM", 0, 10000, rules.PoolM, error) ||
         !RequireInt(*body, "focusPerTurn", 0, 99, rules.FocusPerTurn, error) ||
         !RequireInt(*body, "focusOnWait", 0, 99, rules.FocusOnWait, error) ||
+        !RequireInt(*body, "manaPerTurn", 0, 99, rules.ManaPerTurn, error) ||
+        !RequireInt(*body, "manaOnWait", 0, 99, rules.ManaOnWait, error) ||
         !RequireInt(*body, "maxFoes", 1, 9, rules.MaxFoes, error))
         return false;
     parsed.Rules = rules;
@@ -4717,6 +4772,7 @@ bool LoadStyle(const Json& body, UiStyle& style, std::string& error)
         !RequireColor(body, "error", style.Error, error) ||
         !RequireColor(body, "hp", style.Hp, error) ||
         !RequireColor(body, "focus", style.Focus, error) ||
+        !RequireColor(body, "mana", style.Mana, error) ||
         !RequireColor(body, "highlight", style.Highlight, error) ||
         !RequireColor(body, "figure", style.Figure, error) ||
         !RequireColor(body, "foe", style.Foe, error))
@@ -4738,7 +4794,7 @@ bool LoadBattleUi(const Json& root, Parsed& parsed, std::string& error)
                     "hintClearance", "messageMinMilliseconds", "margin", "panelTop", "partyWidth",
                     "gutter", "bottomHeight", "bottomInset", "splitGap", "figureSize",
                     "turnPreview", "packScale", "ink", "dim", "frame", "panel", "error", "hp",
-                    "focus", "highlight", "figure", "foe"},
+                    "focus", "mana", "highlight", "figure", "foe"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -5340,11 +5396,12 @@ std::vector<HeroGrant> Database::HeroGrants(const ClassDef& klass,
 StatBlock Scaled(const StatBlock& block, i32 factor)
 {
     StatBlock out;
-    out.Vitality = block.Vitality * factor;
     out.Strength = block.Strength * factor;
+    out.Intellect = block.Intellect * factor;
+    out.Stamina = block.Stamina * factor;
     out.Defense = block.Defense * factor;
     out.Agility = block.Agility * factor;
-    out.Focus = block.Focus * factor;
+    out.Will = block.Will * factor;
     return out;
 }
 

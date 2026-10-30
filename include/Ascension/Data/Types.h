@@ -14,21 +14,23 @@
 
 namespace Ascension {
 
-// The combat stats every class, enemy and piece of gear is written in. These ids are the JSON
-// keys. Adding a stat means a new field here and a matching entry in stats.json; the loader
-// rejects either side getting ahead of the other.
-inline constexpr std::array<std::string_view, 5> kStatIds = {
-    "vitality", "strength", "defense", "agility", "focus",
+// The six primaries every class, enemy and piece of gear is written in. These ids are the
+// JSON keys. Adding a stat means a new field here and a matching entry in stats.json; the
+// loader rejects either side getting ahead of the other. Focus is not a primary: it is a
+// pool derived from stamina and intellect.
+inline constexpr std::array<std::string_view, 6> kStatIds = {
+    "strength", "intellect", "stamina", "defense", "agility", "will",
 };
 
-// A bundle of the five stats. Missing keys in a bonus object are zero. Unknown keys are errors
-// at load time, not zeros here.
+// A bundle of the six primaries. Missing keys in a bonus object are zero. Unknown keys are
+// errors at load time, not zeros here.
 struct StatBlock {
-    i32 Vitality = 0;
     i32 Strength = 0;
+    i32 Intellect = 0;
+    i32 Stamina = 0;
     i32 Defense = 0;
     i32 Agility = 0;
-    i32 Focus = 0;
+    i32 Will = 0;
 
     // 0 when `id` is not one of kStatIds.
     [[nodiscard]] i32 Get(std::string_view id) const;
@@ -44,6 +46,8 @@ struct StatBlock {
 struct StatDef {
     std::string Id;
     std::string Name;
+    // Sheet label (STR, INT, …). Empty means the screen uses Name.
+    std::string Short;
     std::string Description;
 };
 
@@ -80,6 +84,7 @@ enum class EffectOp : u8 {
     Stat,
     StatPerMissingHp,
     GrantFocus,
+    GrantMana,
     ApplyStatus,
     StunIfWindingUp,
 };
@@ -111,9 +116,9 @@ struct EffectDef {
 };
 
 // A spell school from schools.json. A skill that names one is a spell of that school.
-// Resource is the pool the skill's focus cost is paid from. The only pool is focus, so a
-// spell spends the same focus a physical skill spends. Adding a school is a row in that
-// file. The fight does not branch on the id.
+// Resource is the pool the skill's cost is paid from: "focus" or "mana". A physical skill
+// has no school and spends focus. Adding a school is a row in that file. The fight does
+// not branch on the school id, only on the resource that row names.
 struct SchoolDef {
     std::string Id;
     std::string Name;
@@ -168,26 +173,32 @@ struct StatusDef {
 //   max(MinDamage, power + scalingStat * AttackNumerator / AttackDenominator
 //                      - defense * DefenseNumerator / DefenseDenominator)
 // and an empower percent is applied to the attack term first. Heal uses the same attack term
-// with no defense. Max health is vitality times HpPerVitality. The hero's focus pool is
-// FocusBase plus their focus stat; it rises by FocusPerTurn at the start of their turn and by
-// another FocusOnWait when they wait. Denominators are at least 1.
+// with no defense. Max health is stamina times HpPerStamina. Focus and mana maxes are
+// floor(PoolK/1000 * primary + PoolM/1000 * intellect): focus uses stamina, mana uses will.
+// PoolK 1000 and PoolM 250 are k = 1 and m = 0.25. Both pools rise by their per-turn amount
+// at the start of the hero's turn, and by the wait amount when they wait. Denominators are
+// at least 1.
 struct CombatRules {
-    i32 HpPerVitality = 1;
+    i32 HpPerStamina = 1;
     i32 MinDamage = 0;
     i32 AttackNumerator = 1;
     i32 AttackDenominator = 1;
     i32 DefenseNumerator = 1;
     i32 DefenseDenominator = 1;
-    i32 FocusBase = 0;
+    // Thousandths. 1000 is 1. 250 is 0.25. Both pools share this pair.
+    i32 PoolK = 1000;
+    i32 PoolM = 250;
     i32 FocusPerTurn = 0;
     i32 FocusOnWait = 0;
+    i32 ManaPerTurn = 0;
+    i32 ManaOnWait = 0;
     // How many foes one fight seats. combat.json names it. A map contact seats this
     // many and leaves the rest queued. A summon stops at the same number. 3 in the
     // sample and in the shipped file.
     i32 MaxFoes = 3;
 };
 
-// What a level-up does to current HP. The new max is always the new vitality. Gained adds
+// What a level-up does to current HP. The new max is always the new stamina. Gained adds
 // the increase in that max (a full hero stays full, a wound keeps its missing health plus
 // nothing extra). Full refills. Kept leaves the wound, then clamps it to the new max.
 // Focus is not part of this rule. progress.json names which one the run uses.
@@ -545,20 +556,52 @@ struct DialogueDef {
 [[nodiscard]] const char* ToString(EffectOp op);
 [[nodiscard]] const char* ToString(GearSlot slot);
 
-// --- StatBlock (inline: five fields, no reason to hide them in a .cpp) ---
+// floor(k * primary + m * secondary), with k and m in thousandths (1000 = 1, 250 = 0.25).
+// A negative stat counts as zero. The result is clamped to 0..999999.
+[[nodiscard]] inline i32 PoolMax(i32 primary, i32 secondary, i32 kThousandths, i32 mThousandths)
+{
+    if (primary < 0)
+        primary = 0;
+    if (secondary < 0)
+        secondary = 0;
+    if (kThousandths < 0)
+        kThousandths = 0;
+    if (mThousandths < 0)
+        mThousandths = 0;
+    const i64 sum = static_cast<i64>(kThousandths) * primary +
+                    static_cast<i64>(mThousandths) * secondary;
+    i64 max = sum / 1000;
+    if (max > 999999)
+        max = 999999;
+    return static_cast<i32>(max);
+}
+
+[[nodiscard]] inline i32 FocusMaxOf(const StatBlock& stats, const CombatRules& rules)
+{
+    return PoolMax(stats.Stamina, stats.Intellect, rules.PoolK, rules.PoolM);
+}
+
+[[nodiscard]] inline i32 ManaMaxOf(const StatBlock& stats, const CombatRules& rules)
+{
+    return PoolMax(stats.Will, stats.Intellect, rules.PoolK, rules.PoolM);
+}
+
+// --- StatBlock (inline: six fields, no reason to hide them in a .cpp) ---
 
 inline const i32* FindStatValue(const StatBlock& block, std::string_view id)
 {
-    if (id == "vitality")
-        return &block.Vitality;
     if (id == "strength")
         return &block.Strength;
+    if (id == "intellect")
+        return &block.Intellect;
+    if (id == "stamina")
+        return &block.Stamina;
     if (id == "defense")
         return &block.Defense;
     if (id == "agility")
         return &block.Agility;
-    if (id == "focus")
-        return &block.Focus;
+    if (id == "will")
+        return &block.Will;
     return nullptr;
 }
 
@@ -569,7 +612,8 @@ inline i32* FindStatValue(StatBlock& block, std::string_view id)
 
 [[nodiscard]] inline i32 StatTotal(const StatBlock& block)
 {
-    return block.Vitality + block.Strength + block.Defense + block.Agility + block.Focus;
+    return block.Strength + block.Intellect + block.Stamina + block.Defense + block.Agility +
+           block.Will;
 }
 
 inline i32 StatBlock::Get(std::string_view id) const
@@ -589,11 +633,12 @@ inline bool StatBlock::Set(std::string_view id, i32 value)
 
 inline StatBlock& StatBlock::operator+=(const StatBlock& other)
 {
-    Vitality += other.Vitality;
     Strength += other.Strength;
+    Intellect += other.Intellect;
+    Stamina += other.Stamina;
     Defense += other.Defense;
     Agility += other.Agility;
-    Focus += other.Focus;
+    Will += other.Will;
     return *this;
 }
 
@@ -663,6 +708,8 @@ inline const char* ToString(EffectOp op)
         return "statPerMissingHp";
     if (op == EffectOp::GrantFocus)
         return "grantFocus";
+    if (op == EffectOp::GrantMana)
+        return "grantMana";
     if (op == EffectOp::ApplyStatus)
         return "applyStatus";
     if (op == EffectOp::StunIfWindingUp)

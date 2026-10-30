@@ -5,29 +5,33 @@
 
 namespace Ascension {
 
-// HP and focus between fights. Max is not stored: it is read from the hero, the worn
-// gear, and the combat rules whenever a fight, a rest, or a level-up needs it. Known
-// is false until the first fill, which is full health. ReturnToHub is set by a loss.
-// The map handoff clears it once the hero is standing on the return tile. Gold is not
-// a field here, so a loss cannot spend it.
+// HP, focus, and mana between fights. Max is not stored: it is read from the hero, the
+// worn gear, and the combat rules whenever a fight, a rest, or a level-up needs it.
+// Known is false until the first fill, which is full health and both pools. ReturnToHub
+// is set by a loss. The map handoff clears it once the hero is standing on the return
+// tile. Gold is not a field here, so a loss cannot spend it.
 struct Vitals {
     bool Known = false;
     i32 Hp = 0;
     i32 Focus = 0;
+    i32 Mana = 0;
     bool ReturnToHub = false;
 };
 
-// The pools a fight would give this hero right now. MaxHp is vitality times
-// hpPerVitality. MaxFocus is the focus stat plus focusBase. Always-on stat grants
-// are already in the totals, the same line Battle builds.
+// The pools a fight would give this hero right now. MaxHp is stamina times
+// hpPerStamina. MaxFocus is floor(k·stamina + m·intellect). MaxMana is
+// floor(k·will + m·intellect). Always-on stat grants are already in the totals,
+// the same line Battle builds.
 struct PoolCaps {
     i32 MaxHp = 1;
     i32 MaxFocus = 0;
+    i32 MaxMana = 0;
 };
 
 struct PoolPair {
     i32 Hp = 0;
     i32 Focus = 0;
+    i32 Mana = 0;
 };
 
 // Attributes, worn gear, then always-on stat grants. An unknown class is 1 HP and
@@ -39,16 +43,18 @@ void FillVitals(Vitals& vitals, PoolCaps caps);
 
 // A win. Stores the fight's pools, clamped to the caps that fight used. Clears
 // ReturnToHub: the hero is not being sent home.
-void KeepPools(Vitals& vitals, i32 hp, i32 focus, PoolCaps caps);
+void KeepPools(Vitals& vitals, i32 hp, i32 focus, i32 mana, PoolCaps caps);
 
-// A loss. Fills both pools and sets ReturnToHub. Does not read gold.
+// A loss. Fills every pool and sets ReturnToHub. Does not read gold.
 void LoseToHub(Vitals& vitals, PoolCaps caps);
 
 // The level-up rule from progress.json. oldMaxHp is the max before the levels,
-// newMaxHp the max after. Focus is left alone; call ClampFocus for the new cap.
+// newMaxHp the max after. Focus and mana are left alone; call ClampResources for
+// the new caps.
 void ApplyLevelHp(Vitals& vitals, i32 oldMaxHp, i32 newMaxHp, LevelHpRule rule);
 
-void ClampFocus(Vitals& vitals, i32 maxFocus);
+// Clamps current focus and mana into the new caps. Does not grant the increase.
+void ClampResources(Vitals& vitals, PoolCaps caps);
 
 // What the next fight starts from. Unknown vitals are the caps. A known wound is
 // clamped into the caps, so a higher max (a class bonus, a new piece) does not

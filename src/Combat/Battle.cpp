@@ -158,6 +158,12 @@ void CopyFightState(const CombatantState& from, CombatantState& to)
         to.Focus = 0;
     if (to.Focus > to.MaxFocus)
         to.Focus = to.MaxFocus;
+    const i32 spentMana = from.MaxMana - from.Mana;
+    to.Mana = to.MaxMana - spentMana;
+    if (to.Mana < 0)
+        to.Mana = 0;
+    if (to.Mana > to.MaxMana)
+        to.Mana = to.MaxMana;
 }
 
 CombatantSnapshot SnapOf(const CombatantState& who)
@@ -166,6 +172,7 @@ CombatantSnapshot SnapOf(const CombatantState& who)
     shot.Id = who.Id;
     shot.Hp = who.Hp;
     shot.Focus = who.Focus;
+    shot.Mana = who.Mana;
     shot.GuardPercent = who.GuardPercent;
     shot.EmpowerPercent = who.EmpowerPercent;
     shot.ReflectPercent = who.ReflectPercent;
@@ -229,6 +236,10 @@ void ApplySnap(CombatantState& who, const CombatantSnapshot& shot, bool hero)
     const i32 leastHp = hero ? 1 : 0;
     who.Hp = ClampPoolTo(shot.Hp, leastHp, who.MaxHp);
     who.Focus = ClampPoolTo(shot.Focus, 0, who.MaxFocus);
+    if (shot.Mana < 0)
+        who.Mana = who.MaxMana;
+    else
+        who.Mana = ClampPoolTo(shot.Mana, 0, who.MaxMana);
     who.GuardPercent = shot.GuardPercent < 0 ? 0 : shot.GuardPercent;
     who.EmpowerPercent = shot.EmpowerPercent;
     who.ReflectPercent = shot.ReflectPercent < 0 ? 0 : shot.ReflectPercent;
@@ -541,11 +552,17 @@ void Battle::MakeFoe(const EnemyDef& def, CombatantState& foe) const
     foe.Name = def.Name;
     foe.Stats = def.Stats;
     ApplyAlways(foe, false);
-    foe.MaxHp = ClampPool(static_cast<i64>(foe.Stats.Vitality) * rules.HpPerVitality);
-    // Enemies spend only the focus on their stat line, and it does not regenerate.
-    foe.MaxFocus = ClampPool(foe.Stats.Focus);
+    i32 stamina = foe.Stats.Stamina;
+    if (stamina < 0)
+        stamina = 0;
+    foe.MaxHp = ClampPool(static_cast<i64>(stamina) * rules.HpPerStamina);
+    // Enemies use the same pool formulas as the hero. Their skills are priced in the
+    // data, and the pools do not regenerate.
+    foe.MaxFocus = FocusMaxOf(foe.Stats, rules);
+    foe.MaxMana = ManaMaxOf(foe.Stats, rules);
     foe.Hp = foe.MaxHp;
     foe.Focus = foe.MaxFocus;
+    foe.Mana = foe.MaxMana;
 }
 
 bool Battle::Build(std::string& error, bool keepWounds)
@@ -592,10 +609,12 @@ bool Battle::Build(std::string& error, bool keepWounds)
     player.Stats = m_HasBaseStats ? m_BaseStats : m_Data->StatsAt(*klass, m_Level);
     player.Stats += m_Gear;
     ApplyAlways(player, true);
-    player.MaxHp = ClampPool(static_cast<i64>(player.Stats.Vitality) * rules.HpPerVitality);
-    // The hero's pool is the focus stat plus focusBase. Enemies spend only the focus on
-    // their stat line, and it does not regenerate, so a pattern is not gated by a pool.
-    player.MaxFocus = ClampPool(static_cast<i64>(player.Stats.Focus) + rules.FocusBase);
+    i32 stamina = player.Stats.Stamina;
+    if (stamina < 0)
+        stamina = 0;
+    player.MaxHp = ClampPool(static_cast<i64>(stamina) * rules.HpPerStamina);
+    player.MaxFocus = FocusMaxOf(player.Stats, rules);
+    player.MaxMana = ManaMaxOf(player.Stats, rules);
 
     std::vector<std::string> playerSkills;
     for (const HeroGrant& held : m_HeroGrants) {
@@ -645,6 +664,7 @@ bool Battle::Build(std::string& error, bool keepWounds)
     else {
         player.Hp = player.MaxHp;
         player.Focus = player.MaxFocus;
+        player.Mana = player.MaxMana;
     }
 
     m_Player = std::move(player);
@@ -663,14 +683,14 @@ bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId
                    std::string& error)
 {
     m_Roster.clear();
-    return StartFight(classId, level, enemyId, false, 0, 0, error);
+    return StartFight(classId, level, enemyId, false, 0, 0, 0, error);
 }
 
 bool Battle::Start(std::string_view classId, i32 level, std::string_view enemyId,
                    OpeningPools pools, std::string& error)
 {
     m_Roster.clear();
-    return StartFight(classId, level, enemyId, true, pools.Hp, pools.Focus, error);
+    return StartFight(classId, level, enemyId, true, pools.Hp, pools.Focus, pools.Mana, error);
 }
 
 bool Battle::Start(std::string_view classId, i32 level, std::string_view encounterId,
@@ -681,7 +701,7 @@ bool Battle::Start(std::string_view classId, i32 level, std::string_view encount
         return false;
     }
     m_Roster.assign(foeIds.begin(), foeIds.end());
-    if (!StartFight(classId, level, encounterId, true, pools.Hp, pools.Focus, error)) {
+    if (!StartFight(classId, level, encounterId, true, pools.Hp, pools.Focus, pools.Mana, error)) {
         m_Roster.clear();
         return false;
     }
@@ -689,7 +709,7 @@ bool Battle::Start(std::string_view classId, i32 level, std::string_view encount
 }
 
 bool Battle::StartFight(std::string_view classId, i32 level, std::string_view enemyId,
-                        bool usePools, i32 hp, i32 focus, std::string& error)
+                        bool usePools, i32 hp, i32 focus, i32 mana, std::string& error)
 {
     m_ClassId = std::string(classId);
     m_Level = level;
@@ -724,6 +744,7 @@ bool Battle::StartFight(std::string_view classId, i32 level, std::string_view en
     if (usePools) {
         m_Player.Hp = ClampPoolTo(hp, 0, m_Player.MaxHp);
         m_Player.Focus = ClampPoolTo(focus, 0, m_Player.MaxFocus);
+        m_Player.Mana = ClampPoolTo(mana, 0, m_Player.MaxMana);
     }
     m_Turns->Reset();
     if (m_Player.Hp <= 0)
@@ -858,6 +879,10 @@ std::string Battle::TraceState() const
     line += std::to_string(m_Player.Focus);
     line += "/";
     line += std::to_string(m_Player.MaxFocus);
+    line += " M ";
+    line += std::to_string(m_Player.Mana);
+    line += "/";
+    line += std::to_string(m_Player.MaxMana);
     line += " BL ";
     line += std::to_string(MissingFor(m_Player, "strength"));
     line += " guard ";
@@ -1034,6 +1059,32 @@ void Battle::GrantFocus(CombatantState& who, i32 amount) const
     who.Focus = static_cast<i32>(focus);
 }
 
+void Battle::GrantMana(CombatantState& who, i32 amount) const
+{
+    if (amount <= 0)
+        return;
+    i64 mana = static_cast<i64>(who.Mana) + amount;
+    if (mana > who.MaxMana)
+        mana = who.MaxMana;
+    if (mana < 0)
+        mana = 0;
+    who.Mana = static_cast<i32>(mana);
+}
+
+bool Battle::SpendsMana(const SkillDef& skill) const
+{
+    if (m_Data == nullptr || skill.School.empty())
+        return false;
+    const SchoolDef* school = m_Data->FindSchool(skill.School);
+    return school != nullptr && school->Resource == "mana";
+}
+
+bool Battle::CanPay(const CombatantState& who, const SkillDef& skill) const
+{
+    const i32 pool = SpendsMana(skill) ? who.Mana : who.Focus;
+    return skill.FocusCost <= pool;
+}
+
 bool Battle::Afflict(CombatantState& who, const StatusDef& status) const
 {
     if (m_Data != nullptr && ResistsStatus(who, status.Id, m_Data->GetStatuses()))
@@ -1093,6 +1144,8 @@ void Battle::RunTrigger(CombatantState& who, EffectTrigger trigger) const
                 continue;
             if (effect.Op == EffectOp::GrantFocus) {
                 GrantFocus(who, effect.Amount.value_or(0));
+            } else if (effect.Op == EffectOp::GrantMana) {
+                GrantMana(who, effect.Amount.value_or(0));
             } else if (effect.Op == EffectOp::Heal) {
                 RestoreHp(who, effect.Power.value_or(0));
             } else if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value()) {
@@ -1332,11 +1385,13 @@ Battle::TurnOpen Battle::PrepareTurn(CombatantState& user)
         open.Result.Result = m_Result;
         return open;
     }
-    // Stun skips the action. Turn-start focus and passives still run, and a drink
+    // Stun skips the action. Turn-start pools and passives still run, and a drink
     // still stays in the bag because the action below is not taken.
     RunTrigger(user, EffectTrigger::OnTurnStart);
-    if (&user == &m_Player)
+    if (&user == &m_Player) {
         GrantFocus(user, m_Rules.FocusPerTurn);
+        GrantMana(user, m_Rules.ManaPerTurn);
+    }
     if (tick.Skip) {
         open.Continue = false;
         open.Result.Accepted = true;
@@ -1443,6 +1498,17 @@ void Battle::SetPlayerFocus(i32 focus)
     if (focus > m_Player.MaxFocus)
         focus = m_Player.MaxFocus;
     m_Player.Focus = focus;
+}
+
+void Battle::SetPlayerMana(i32 mana)
+{
+    if (!m_Started)
+        return;
+    if (mana < 0)
+        mana = 0;
+    if (mana > m_Player.MaxMana)
+        mana = m_Player.MaxMana;
+    m_Player.Mana = mana;
 }
 
 void Battle::SetEnemyHp(i32 hp)
@@ -1716,10 +1782,14 @@ bool Battle::Spends(std::span<const StatusSpend> spends, const AimRef& aim,
 
 ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
 {
-    if (user.Focus < skill.FocusCost)
-        return Reject("Not enough focus.");
+    const bool mana = SpendsMana(skill);
+    if (!CanPay(user, skill))
+        return Reject(mana ? "Not enough mana." : "Not enough focus.");
 
-    user.Focus -= skill.FocusCost;
+    if (mana)
+        user.Mana -= skill.FocusCost;
+    else
+        user.Focus -= skill.FocusCost;
     ActionResult result;
     result.Accepted = true;
     result.SkillId = skill.Id;
@@ -1889,6 +1959,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
             sawHarden = true;
         } else if (effect.Op == EffectOp::GrantFocus) {
             GrantFocus(user, effect.Amount.value_or(0));
+        } else if (effect.Op == EffectOp::GrantMana) {
+            GrantMana(user, effect.Amount.value_or(0));
         } else if (effect.Op == EffectOp::ApplyStatus && effect.Status.has_value() &&
                    m_Data != nullptr) {
             const i32 every = effect.Every.value_or(1);
@@ -2146,7 +2218,7 @@ Battle::PatternHead Battle::PeekPattern(const CombatantState& who, const EnemyDe
         const SkillDef* skill = EnemySkill(who, enemy.Pattern[static_cast<usize>(patternIndex)]);
         if (skill == nullptr || skill->Kind != SkillKind::Active)
             continue;
-        if (skill->FocusCost > who.Focus)
+        if (!CanPay(who, *skill))
             continue;
         head.Skill = skill;
         head.Index = patternIndex;
@@ -2182,7 +2254,7 @@ const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
         const SkillDef* skill = EnemySkill(who, rule.Skill);
         if (skill == nullptr || skill->Kind != SkillKind::Active)
             continue;
-        if (skill->FocusCost > who.Focus)
+        if (!CanPay(who, *skill))
             continue;
         // The pattern head is consumed. An insert leaves the step for the next choice.
         if (head.Skill != nullptr && skill->Id == head.Skill->Id)
@@ -2202,7 +2274,7 @@ const SkillDef* Battle::TakeEnemySkill(CombatantState& who)
         const SkillDef* skill = &grant.Resolved;
         if (skill->Kind != SkillKind::Active)
             continue;
-        if (skill->FocusCost > who.Focus)
+        if (!CanPay(who, *skill))
             continue;
         if (best == nullptr) {
             best = skill;
@@ -2248,13 +2320,17 @@ ActionResult Battle::Wait()
     const TurnOpen open = PrepareTurn(m_Player);
     if (!open.Continue)
         return open.Result;
-    const i32 before = m_Player.Focus;
+    const i32 focusBefore = m_Player.Focus;
+    const i32 manaBefore = m_Player.Mana;
     GrantFocus(m_Player, m_Rules.FocusOnWait);
+    GrantMana(m_Player, m_Rules.ManaOnWait);
     ActionResult result;
     result.Accepted = true;
     result.Text = m_Player.Name + " waits.";
-    if (m_Player.Focus > before)
-        result.Text += " Focus +" + std::to_string(m_Player.Focus - before) + ".";
+    if (m_Player.Focus > focusBefore)
+        result.Text += " Focus +" + std::to_string(m_Player.Focus - focusBefore) + ".";
+    if (m_Player.Mana > manaBefore)
+        result.Text += " Mana +" + std::to_string(m_Player.Mana - manaBefore) + ".";
     PrefixOpening(result);
     result.Result = m_Result;
     AdvanceTurn();
