@@ -89,6 +89,22 @@ add_library(AscensionMap STATIC
 target_link_libraries(AscensionMap PUBLIC AscensionData)
 emerald_set_warnings(AscensionMap)
 
+# Dev tool. Writes data/maps/*.json and loads a copy before replacing the file.
+# Not installed into the player zip.
+add_library(AscensionMapEdit STATIC
+    src/MapEdit/MapEdit.cpp
+    include/Ascension/MapEdit/MapEdit.h
+)
+target_include_directories(AscensionMapEdit PUBLIC include)
+target_link_libraries(AscensionMapEdit
+    PUBLIC AscensionData
+    PRIVATE nlohmann_json::nlohmann_json)
+emerald_set_warnings(AscensionMapEdit)
+
+add_executable(mapedit src/MapEdit/Main.cpp)
+target_link_libraries(mapedit PRIVATE AscensionMapEdit)
+emerald_set_warnings(mapedit)
+
 # ---------------------------------------------------------------------------
 # Combat. The turn model is swappable; the sandbox uses one agility round.
 # ---------------------------------------------------------------------------
@@ -280,6 +296,13 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionDebugRunTests)
     add_test(NAME DebugRun COMMAND AscensionDebugRunTests)
+
+    add_executable(AscensionMapEditTests tests/MapEditTests.cpp tests/Check.h)
+    target_link_libraries(AscensionMapEditTests PRIVATE AscensionMapEdit)
+    target_compile_definitions(AscensionMapEditTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+    emerald_set_warnings(AscensionMapEditTests)
+    add_test(NAME MapEdit COMMAND AscensionMapEditTests)
 
     add_executable(AscensionInputTests tests/InputTests.cpp tests/FrontTests.cpp tests/Check.h)
     target_link_libraries(AscensionInputTests PRIVATE AscensionData)

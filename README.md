@@ -86,6 +86,7 @@ ctest --preset debug
 | `walk.json` | Move time, settle time, settle easing, tile size in pixels, the hero's inset, and the hero, exit, and spawn colors |
 | `movers.json` | Named map steps. `stand` is `idle`, which does not move. A spawn's `mover` names one |
 | `maps/*.json` | One character grid per map: legend, start, spawns, links, and talk, shop, and rest points |
+| [`design/maps.md`](design/maps.md) | How `mapedit` adds an overland, a dungeon, or a town. A person and a grokbot use the same commands |
 | `input.json` | Every action's keys and buttons, the menu repeat, the pause, title, and create lines, and the new-game confirm window |
 | `prompts.json` | Button glyphs per device family, and the icon and text scales for hint rows |
 | `battle_ui.json` | Type size, color, spacing, panels, and message hold for the fight screen. The shop uses the same type and color |
