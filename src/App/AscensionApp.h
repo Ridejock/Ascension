@@ -195,8 +195,9 @@ private:
     [[nodiscard]] std::string CloseLabel();
     void FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // The hint row already on this screen. Glyphs use prompts.json; missing art is the label.
-    // helpLine hides the row when the help action has toggled it off. The map tile
-    // prompt passes false: that line stays.
+    // A key name uses the battle-ui highlight; the caption stays dim. helpLine hides the
+    // row when the help action has toggled it off. The map tile prompt passes false: that
+    // line stays.
     void DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 maxX,
                    std::span<const HintChip> hints, bool helpLine);
     void EnsurePromptSheets();

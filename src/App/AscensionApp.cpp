@@ -2057,6 +2057,8 @@ void AscensionApp::DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 ma
     EnsurePromptSheets();
     const PromptRules& rules = m_Data.GetPrompts();
     const PromptMetrics metrics = MeasurePrompts(rules);
+    // Key names take the theme highlight. Captions stay on the dim ink beside them.
+    const Emerald::Vec4 keyColor = Paint(m_Data.GetBattleUi().Style.Highlight);
     const std::string family = m_PromptFamily.empty() ? rules.TextFamily : m_PromptFamily;
     const PromptSheet* sheet = FindPromptSheet(rules, family);
     const Emerald::Texture* texture = nullptr;
@@ -2107,7 +2109,7 @@ void AscensionApp::DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 ma
             renderer.DrawSprite(sprite, {pen, y}, options);
             pen += metrics.Icon;
         } else if (!label.empty()) {
-            Emerald::DrawDebugText(renderer, {pen, textY}, label, kDim, metrics.TextScale);
+            Emerald::DrawDebugText(renderer, {pen, textY}, label, keyColor, metrics.TextScale);
             pen += Emerald::MeasureDebugText(label, metrics.TextScale).x;
         }
         if (wordWidth > 0.0f) {
