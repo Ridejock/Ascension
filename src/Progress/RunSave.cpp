@@ -10,7 +10,15 @@ namespace Ascension {
 namespace {
 
 constexpr i32 kMaxEntries = 256;
-constexpr std::string_view kSlot = "run";
+
+i32 ClampSlotCount(i32 count)
+{
+    if (count < kMinSaveSlots)
+        return kMinSaveSlots;
+    if (count > kMaxSaveSlots)
+        return kMaxSaveSlots;
+    return count;
+}
 
 bool Listed(const std::vector<std::string>& ids, std::string_view id)
 {
@@ -661,6 +669,33 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     return true;
 }
 
+SaveSlot DescribeSlot(const Emerald::SaveSystem& system, std::string id, i32 number, bool legacy)
+{
+    SaveSlot slot;
+    slot.Id = std::move(id);
+    slot.Number = number;
+    slot.Legacy = legacy;
+    const Emerald::SaveSlotInfo info = system.GetInfo(slot.Id);
+    slot.Occupied = info.Exists;
+    if (!info.Exists)
+        return slot;
+    slot.SavedAt = info.SavedAt;
+    slot.FromBackup = info.FromBackup;
+    const Emerald::LoadResult loaded = system.Load(slot.Id);
+    if (!loaded)
+        return slot;
+    RunState run;
+    std::string why;
+    if (!Take(loaded.Data, run, why))
+        return slot;
+    slot.Readable = true;
+    slot.FromBackup = loaded.FromBackup;
+    slot.Name = run.Career.Name;
+    slot.ClassId = run.Career.ClassId;
+    slot.Xp = run.Career.Xp;
+    return slot;
+}
+
 RunSaveError MapError(Emerald::SaveError error)
 {
     if (error == Emerald::SaveError::NotFound)
@@ -687,7 +722,7 @@ std::filesystem::path RunSave::DefaultFolder()
     return Emerald::SaveSystem::DefaultFolder("Ridejock", "Ascension");
 }
 
-bool RunSave::Write(const RunState& run, std::string& error) const
+bool RunSave::Write(const RunState& run, std::string& error, std::string_view slot) const
 {
     Emerald::SaveData data;
     Store(run, data);
@@ -695,7 +730,7 @@ bool RunSave::Write(const RunState& run, std::string& error) const
     std::string summary = run.Career.ClassId + " xp " + std::to_string(run.Career.Xp);
     if (!run.Career.Name.empty())
         summary = run.Career.Name + " " + summary;
-    if (!system.Save(kSlot, data, summary)) {
+    if (!system.Save(slot, data, summary)) {
         error = "could not write the save";
         return false;
     }
@@ -703,10 +738,10 @@ bool RunSave::Write(const RunState& run, std::string& error) const
     return true;
 }
 
-RunLoad RunSave::Read() const
+RunLoad RunSave::Read(std::string_view slot) const
 {
     const Emerald::SaveSystem system = Open(m_Folder);
-    const Emerald::LoadResult loaded = system.Load(kSlot);
+    const Emerald::LoadResult loaded = system.Load(slot);
     RunLoad out;
     out.FileVersion = loaded.FileVersion;
     out.FromBackup = loaded.FromBackup;
@@ -724,6 +759,19 @@ RunLoad RunSave::Read() const
     }
     out.Error = RunSaveError::None;
     return out;
+}
+
+std::vector<SaveSlot> RunSave::List(i32 numberedCount) const
+{
+    const i32 count = ClampSlotCount(numberedCount);
+    const Emerald::SaveSystem system = Open(m_Folder);
+    std::vector<SaveSlot> slots;
+    slots.reserve(static_cast<usize>(count) + 1);
+    for (i32 number = 1; number <= count; ++number)
+        slots.push_back(DescribeSlot(system, NumberedSaveSlot(number), number, false));
+    if (system.Exists(kLegacySaveSlot))
+        slots.push_back(DescribeSlot(system, std::string(kLegacySaveSlot), 0, true));
+    return slots;
 }
 
 void AdoptLegacyMap(const Database& data, RunState& run)

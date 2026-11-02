@@ -18,6 +18,11 @@ struct ControlBind {
     std::vector<std::string> Buttons;
 };
 
+// How many numbered save slots input.json may name. The legacy run file is extra
+// and is not one of these.
+inline constexpr i32 kMinSaveSlots = 1;
+inline constexpr i32 kMaxSaveSlots = 8;
+
 // navInitialMilliseconds is the pause after the first press before a held direction
 // repeats. navRepeatMilliseconds is the pause between repeats after that. The walk
 // step uses walk.json; this pair is menus, the battle command cursor, and targeting.
@@ -27,6 +32,8 @@ struct ControlRules {
     i32 NavInitialMilliseconds = 280;
     i32 NavRepeatMilliseconds = 120;
     i32 DebugConfirmMilliseconds = 1500;
+    // Numbered slots (slot-1, slot-2, ...). The count is saveSlotCount.
+    i32 SaveSlotCount = 4;
     std::string DebugRespawned;
     std::string DebugRespawnBusy;
     std::string DebugNewGameArmed;
@@ -36,7 +43,9 @@ struct ControlRules {
     std::string PauseContinue;
     std::string PauseQuit;
     // Title and character create. Continue is dimmed when no save can be loaded.
-    // The name refusals are the name step's notice.
+    // New game is always a row. Slot lines use TitleSlot plus the number, or
+    // TitleLegacySlot for the old single file. The name refusals are the name
+    // step's notice.
     std::string TitleWordmark;
     std::string TitleTagline;
     std::string TitleContinue;
@@ -45,6 +54,11 @@ struct ControlRules {
     std::string TitleOverwrite;
     std::string TitleOverwriteYes;
     std::string TitleBack;
+    std::string TitleSlot;
+    std::string TitleSlotEmpty;
+    std::string TitleSlotDamaged;
+    std::string TitleLegacySlot;
+    std::string TitleChooseSlot;
     std::string CreateName;
     std::string CreateClass;
     std::string CreateBegin;

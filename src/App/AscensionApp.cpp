@@ -561,6 +561,31 @@ PoolCaps FoughtCaps(const CombatantState& player)
     return caps;
 }
 
+void FillSlotLine(MenuLine& line, const ControlRules& rules, const SaveSlot& slot,
+                 const Database& data)
+{
+    line.Text = slot.Legacy ? rules.TitleLegacySlot
+                            : rules.TitleSlot + " " + std::to_string(slot.Number);
+    if (!slot.Occupied) {
+        line.Text += "  ";
+        line.Text += rules.TitleSlotEmpty;
+        return;
+    }
+    if (!slot.Readable) {
+        line.Text += "  ";
+        line.Text += rules.TitleSlotDamaged;
+        return;
+    }
+    if (!slot.Name.empty()) {
+        line.Text += "  ";
+        line.Text += slot.Name;
+    }
+    if (const ClassDef* klass = data.FindClass(slot.ClassId))
+        line.Detail = klass->Name;
+    else if (!slot.ClassId.empty())
+        line.Detail = slot.ClassId;
+}
+
 } // namespace
 
 AscensionApp::AscensionApp(const Emerald::ApplicationSpec& spec, PlaytestOptions options)
@@ -1541,13 +1566,16 @@ void AscensionApp::ShowTitle()
     m_Front = {};
     m_Front.Phase = FrontPhase::Title;
     m_Front.Return = FrontPhase::Title;
-    const RunLoad loaded = RunSave(SaveFolder()).Read();
-    if (loaded) {
-        m_Front.SaveExists = true;
-        if (loaded.FromBackup)
-            Note("The save was damaged. The previous one was loaded.");
-    } else if (loaded.Error != RunSaveError::NotFound) {
-        Note("The save could not be read. A new run starts.");
+    CaptureSlots();
+    if (m_Front.Newest >= 0 && m_Slots[static_cast<usize>(m_Front.Newest)].FromBackup) {
+        Note("The save was damaged. The previous one was loaded.");
+    } else if (m_Front.Newest < 0) {
+        for (const SaveSlot& slot : m_Slots) {
+            if (slot.Occupied && !slot.Readable) {
+                Note("The save could not be read. A new run starts.");
+                break;
+            }
+        }
     }
     SyncTextInput();
 }
@@ -1612,8 +1640,14 @@ void AscensionApp::FinishBoot(bool resumed)
 void AscensionApp::ContinueSavedRun()
 {
     std::string why;
-    if (!TryResume(why)) {
-        m_Front.SaveExists = false;
+    const bool indexed = m_Front.Slot >= 0 && m_Front.Slot < static_cast<i32>(m_Slots.size());
+    const std::string slotId = indexed ? m_Slots[static_cast<usize>(m_Front.Slot)].Id : std::string{};
+    if (!indexed || !LoadSlot(slotId, why)) {
+        if (indexed) {
+            m_Slots[static_cast<usize>(m_Front.Slot)].Readable = false;
+            m_Front.Slots[static_cast<usize>(m_Front.Slot)].Readable = false;
+        }
+        m_Front.Newest = NewestSaveSlot(m_Slots);
         m_Front.Phase = FrontPhase::Title;
         m_Front.Row = kTitleRowContinue;
         if (why.empty())
@@ -1645,10 +1679,14 @@ void AscensionApp::CommitCreatedRun()
     m_Front.Return = FrontPhase::Playing;
     m_Front.Notice = FrontNotice::None;
     SyncTextInput();
-    // The title's Begin writes the run, so the next launch can Continue. F9 leaves
-    // the file until the next Save, the same way it did before create existed.
-    if (!debug)
+    // The title's Begin writes the chosen slot, so the next launch can Continue.
+    // F9 leaves the file until the next Save, and that save stays on the slot
+    // the running game already loaded.
+    if (!debug) {
+        if (m_Front.Slot >= 0 && m_Front.Slot < static_cast<i32>(m_Slots.size()))
+            m_ActiveSlot = m_Slots[static_cast<usize>(m_Front.Slot)].Id;
         WriteSave();
+    }
 }
 
 void AscensionApp::SyncTextInput()
@@ -2179,15 +2217,18 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const Emerald::Vec2 figSize{fig * 4.0f, fig * 6.5f};
     const f32 rowH = bodyH;
     const f32 rowGap = static_cast<f32>(style.RowGap);
-    const f32 listH = naming ? bodyH : (rows > 0 ? rowH * static_cast<f32>(rows) + rowGap : bodyH);
+    f32 listH = naming ? bodyH : (rows > 0 ? rowH * static_cast<f32>(rows) + rowGap : bodyH);
     const f32 figureH = showFigure ? figSize.y : 0.0f;
-    const f32 blockH = figureH > listH ? figureH : listH;
-    const bool detailed = m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin;
+    const bool detailed = m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin ||
+                          m_Front.Phase == FrontPhase::Title || m_Front.Phase == FrontPhase::Slots;
     const f32 detailH =
         detailed ? Emerald::DebugTextLineHeight(style.DetailScale) * 3.0f + group : 0.0f;
     std::string heading = rules.TitleWordmark;
     std::string sub = rules.TitleTagline;
-    if (m_Front.Phase == FrontPhase::Overwrite) {
+    if (m_Front.Phase == FrontPhase::Slots) {
+        heading = rules.TitleChooseSlot;
+        sub.clear();
+    } else if (m_Front.Phase == FrontPhase::Overwrite) {
         heading = rules.TitleOverwrite;
         sub.clear();
     } else if (m_Front.Phase == FrontPhase::Name) {
@@ -2205,11 +2246,19 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     }
     const f32 subH = sub.empty() ? 0.0f : bodyH;
     const f32 noticeH = bodyH;
-    const f32 panelH = pad + titleH + group + subH + (sub.empty() ? 0.0f : group) + blockH +
-                       detailH + group + noticeH + pad;
-    const f32 panelW = width > 760.0f ? 720.0f : width - 56.0f;
     const f32 hintTop = height - 36.0f;
     const f32 floor = hintTop - static_cast<f32>(style.HintClearance);
+    const f32 chrome = pad + titleH + group + subH + (sub.empty() ? 0.0f : group) + detailH +
+                       group + noticeH + pad;
+    // Slot rows can be taller than the screen. The list window scrolls; the hint bar stays put.
+    if (!showFigure && !naming && floor > 24.0f + chrome + bodyH) {
+        const f32 maxList = floor - 24.0f - chrome;
+        if (listH > maxList)
+            listH = maxList;
+    }
+    const f32 blockH = figureH > listH ? figureH : listH;
+    const f32 panelH = chrome + blockH;
+    const f32 panelW = width > 760.0f ? 720.0f : width - 56.0f;
     f32 panelX = (width - panelW) * 0.5f;
     if (panelX < 28.0f)
         panelX = 28.0f;
@@ -2275,16 +2324,26 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     } else if (menuW > 0.0f) {
         std::vector<MenuLine> menu;
         if (m_Front.Phase == FrontPhase::Title) {
-            MenuLine cont;
-            cont.Text = rules.TitleContinue;
-            cont.Enabled = m_Front.SaveExists;
-            MenuLine fresh;
-            fresh.Text = rules.TitleNewGame;
-            MenuLine quit;
-            quit.Text = rules.TitleQuit;
-            menu.push_back(std::move(cont));
-            menu.push_back(std::move(fresh));
-            menu.push_back(std::move(quit));
+            for (const TitleRow& row : TitleRows(m_Front)) {
+                MenuLine line;
+                line.Enabled = row.Enabled;
+                if (row.Kind == TitleKind::Continue)
+                    line.Text = rules.TitleContinue;
+                else if (row.Kind == TitleKind::NewGame)
+                    line.Text = rules.TitleNewGame;
+                else if (row.Kind == TitleKind::Quit)
+                    line.Text = rules.TitleQuit;
+                else if (row.Slot >= 0 && row.Slot < static_cast<i32>(m_Slots.size()))
+                    FillSlotLine(line, rules, m_Slots[static_cast<usize>(row.Slot)], m_Data);
+                menu.push_back(std::move(line));
+            }
+        } else if (m_Front.Phase == FrontPhase::Slots) {
+            for (const i32 index : SlotPickRows(m_Front)) {
+                MenuLine line;
+                if (index >= 0 && index < static_cast<i32>(m_Slots.size()))
+                    FillSlotLine(line, rules, m_Slots[static_cast<usize>(index)], m_Data);
+                menu.push_back(std::move(line));
+            }
         } else if (m_Front.Phase == FrontPhase::Overwrite) {
             MenuLine yes;
             yes.Text = rules.TitleOverwriteYes;
@@ -2933,15 +2992,7 @@ void AscensionApp::DebugNewGame()
         SyncTextInput();
         return;
     }
-    m_Front.Debug = false;
-    m_Front.Return = FrontPhase::Title;
-    if (m_Front.SaveExists) {
-        m_Front.Phase = FrontPhase::Overwrite;
-        m_Front.Row = kOverwriteRowYes;
-        m_Front.Notice = FrontNotice::None;
-    } else {
-        OpenFrontName(m_Front);
-    }
+    BeginTitleNewGame(m_Front);
     Note(rules.DebugNewGame);
     SyncTextInput();
 }
@@ -3444,17 +3495,48 @@ bool AscensionApp::WriteSave()
     RecordFight(run, fought);
     RunSave saves(SaveFolder());
     std::string error;
-    if (!saves.Write(run, error)) {
+    const std::string_view slot =
+        m_ActiveSlot.empty() ? kLegacySaveSlot : std::string_view(m_ActiveSlot);
+    if (!saves.Write(run, error, slot)) {
         Note(error.empty() ? "could not write the save" : error);
         return false;
     }
     return true;
 }
 
+void AscensionApp::CaptureSlots()
+{
+    m_Slots = RunSave(SaveFolder()).List(m_Data.GetControls().SaveSlotCount);
+    m_Front.Slots.clear();
+    m_Front.Slots.reserve(m_Slots.size());
+    for (const SaveSlot& slot : m_Slots) {
+        FrontSlot front;
+        front.Id = slot.Id;
+        front.Legacy = slot.Legacy;
+        front.Occupied = slot.Occupied;
+        front.Readable = slot.Readable;
+        m_Front.Slots.push_back(std::move(front));
+    }
+    m_Front.Newest = NewestSaveSlot(m_Slots);
+}
+
 bool AscensionApp::TryResume(std::string& error)
 {
+    const std::vector<SaveSlot> slots =
+        RunSave(SaveFolder()).List(m_Data.IsLoaded() ? m_Data.GetControls().SaveSlotCount
+                                                     : kMinSaveSlots);
+    const i32 newest = NewestSaveSlot(slots);
+    if (newest < 0) {
+        error.clear();
+        return false;
+    }
+    return LoadSlot(slots[static_cast<usize>(newest)].Id, error);
+}
+
+bool AscensionApp::LoadSlot(std::string_view slot, std::string& error)
+{
     const RunSave saves(SaveFolder());
-    const RunLoad loaded = saves.Read();
+    const RunLoad loaded = saves.Read(slot);
     if (!loaded) {
         if (loaded.Error != RunSaveError::NotFound)
             Note("The save could not be read. A new run starts.");
@@ -3506,6 +3588,7 @@ bool AscensionApp::TryResume(std::string& error)
         m_ResumeFight = run.Fight;
     if (loaded.FromBackup)
         Note("The save was damaged. The previous one was loaded.");
+    m_ActiveSlot = std::string(slot);
     error.clear();
     return true;
 }

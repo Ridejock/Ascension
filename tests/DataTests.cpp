@@ -2681,6 +2681,11 @@ void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
     ConsiderGlyphs("title", controls.TitleOverwrite, missing);
     ConsiderGlyphs("title", controls.TitleOverwriteYes, missing);
     ConsiderGlyphs("title", controls.TitleBack, missing);
+    ConsiderGlyphs("title", controls.TitleSlot, missing);
+    ConsiderGlyphs("title", controls.TitleSlotEmpty, missing);
+    ConsiderGlyphs("title", controls.TitleSlotDamaged, missing);
+    ConsiderGlyphs("title", controls.TitleLegacySlot, missing);
+    ConsiderGlyphs("title", controls.TitleChooseSlot, missing);
     ConsiderGlyphs("create", controls.CreateName, missing);
     ConsiderGlyphs("create", controls.CreateClass, missing);
     ConsiderGlyphs("create", controls.CreateBegin, missing);
