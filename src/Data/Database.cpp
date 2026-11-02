@@ -2829,11 +2829,13 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
     std::string unknown;
     if (!AllowKeys(*body,
                    {"navInitialMilliseconds", "navRepeatMilliseconds", "debugConfirmMilliseconds",
-                    "debugRespawned", "debugRespawnBusy", "debugNewGameArmed", "debugNewGame",
-                    "pauseTitle", "pauseContinue", "pauseQuit", "titleWordmark", "titleTagline",
-                    "titleContinue", "titleNewGame", "titleQuit", "titleOverwrite",
-                    "titleOverwriteYes", "titleBack", "createName", "createClass", "createBegin",
-                    "createNameEmpty", "createNameLong", "createNameBad", "actions"},
+                    "saveSlotCount", "debugRespawned", "debugRespawnBusy", "debugNewGameArmed",
+                    "debugNewGame", "pauseTitle", "pauseContinue", "pauseQuit", "titleWordmark",
+                    "titleTagline", "titleContinue", "titleNewGame", "titleQuit", "titleOverwrite",
+                    "titleOverwriteYes", "titleBack", "titleSlot", "titleSlotEmpty",
+                    "titleSlotDamaged", "titleLegacySlot", "titleChooseSlot", "createName",
+                    "createClass", "createBegin", "createNameEmpty", "createNameLong",
+                    "createNameBad", "actions"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2843,6 +2845,8 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
                     error) ||
         !RequireInt(*body, "navRepeatMilliseconds", 1, 2000, rules.NavRepeatMilliseconds, error) ||
         !RequireInt(*body, "debugConfirmMilliseconds", 1, 10000, rules.DebugConfirmMilliseconds,
+                    error) ||
+        !RequireInt(*body, "saveSlotCount", kMinSaveSlots, kMaxSaveSlots, rules.SaveSlotCount,
                     error) ||
         !RequireString(*body, "debugRespawned", rules.DebugRespawned, error) ||
         !RequireString(*body, "debugRespawnBusy", rules.DebugRespawnBusy, error) ||
@@ -2859,6 +2863,11 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
         !RequireString(*body, "titleOverwrite", rules.TitleOverwrite, error) ||
         !RequireString(*body, "titleOverwriteYes", rules.TitleOverwriteYes, error) ||
         !RequireString(*body, "titleBack", rules.TitleBack, error) ||
+        !RequireString(*body, "titleSlot", rules.TitleSlot, error) ||
+        !RequireString(*body, "titleSlotEmpty", rules.TitleSlotEmpty, error) ||
+        !RequireString(*body, "titleSlotDamaged", rules.TitleSlotDamaged, error) ||
+        !RequireString(*body, "titleLegacySlot", rules.TitleLegacySlot, error) ||
+        !RequireString(*body, "titleChooseSlot", rules.TitleChooseSlot, error) ||
         !RequireString(*body, "createName", rules.CreateName, error) ||
         !RequireString(*body, "createClass", rules.CreateClass, error) ||
         !RequireString(*body, "createBegin", rules.CreateBegin, error) ||

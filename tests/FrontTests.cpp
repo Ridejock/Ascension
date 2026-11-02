@@ -70,23 +70,73 @@ void TestTitleFlow()
               door.ClassRow == 1,
           "begin is the created hero");
 
+    FrontSlot empty;
+    empty.Id = "slot-1";
+    FrontSlot legacy;
+    legacy.Id = "run";
+    legacy.Legacy = true;
+    legacy.Occupied = true;
+    legacy.Readable = true;
     FrontDoor saved;
-    saved.SaveExists = true;
+    saved.Slots = {empty, legacy};
+    saved.Newest = 1;
+    const std::vector<TitleRow> open = TitleRows(saved);
+    Check(open.size() == 5 && open[kTitleRowContinue].Enabled && open[kTitleRowNew].Kind == TitleKind::NewGame &&
+              open[kTitleRowNew].Enabled && open[2].Kind == TitleKind::Slot && open[4].Kind == TitleKind::Quit,
+          "a save keeps New game beside Continue and the slots");
     saved.Row = kTitleRowNew;
-    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::None &&
-              saved.Phase == FrontPhase::Overwrite,
-          "new game over a save asks first");
-    Check(ApplyFrontAction(saved, kCancel, 4) == FrontStep::None &&
-              saved.Phase == FrontPhase::Title && saved.Row == kTitleRowNew,
-          "cancel leaves the save in place");
+    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::None && saved.Phase == FrontPhase::Name &&
+              saved.Slot == 0,
+          "new game with a save uses an empty slot");
+    Check(ApplyFrontAction(saved, kPause, 4) == FrontStep::None && saved.Phase == FrontPhase::Title &&
+              saved.Row == kTitleRowNew,
+          "escape from that name returns to new game");
     saved.Row = kTitleRowContinue;
-    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::Continue,
-          "continue loads the save");
+    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::Continue && saved.Slot == 1,
+          "continue loads the newest save");
     saved.Phase = FrontPhase::Title;
-    saved.Row = kTitleRowNew;
-    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::None, "new game asks again");
-    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::None && saved.Phase == FrontPhase::Name,
-          "overwrite opens the name");
+    saved.Row = 3;
+    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::Continue && saved.Slot == 1,
+          "the saved-run row loads that file");
+    saved.Phase = FrontPhase::Title;
+    saved.Row = 2;
+    Check(ApplyFrontAction(saved, kConfirm, 4) == FrontStep::None && saved.Phase == FrontPhase::Name &&
+              saved.Slot == 0,
+          "an empty slot starts a new game");
+
+    FrontSlot first;
+    first.Id = "slot-1";
+    first.Occupied = true;
+    first.Readable = true;
+    FrontSlot second;
+    second.Id = "slot-2";
+    second.Occupied = true;
+    second.Readable = true;
+    FrontDoor full;
+    full.Slots = {first, second};
+    full.Newest = 1;
+    full.Row = kTitleRowNew;
+    Check(TitleRows(full)[kTitleRowNew].Enabled, "new game stays available when every slot is full");
+    Check(ApplyFrontAction(full, kConfirm, 4) == FrontStep::None && full.Phase == FrontPhase::Slots,
+          "a full set asks which slot to replace");
+    Check(ApplyFrontAction(full, kCancel, 4) == FrontStep::None && full.Phase == FrontPhase::Title &&
+              full.Row == kTitleRowNew,
+          "cancel leaves every slot in place");
+    full.Row = kTitleRowNew;
+    Check(ApplyFrontAction(full, kConfirm, 4) == FrontStep::None, "new game asks again");
+    Check(ApplyFrontAction(full, kMoveSouth, 4) == FrontStep::None && full.Row == 1,
+          "south marks the next full slot");
+    Check(ApplyFrontAction(full, kConfirm, 4) == FrontStep::None && full.Phase == FrontPhase::Overwrite &&
+              full.Slot == 1,
+          "the marked slot asks before it is replaced");
+    Check(ApplyFrontAction(full, kCancel, 4) == FrontStep::None && full.Phase == FrontPhase::Slots &&
+              full.Row == 1,
+          "back from overwrite returns to that slot");
+    Check(ApplyFrontAction(full, kConfirm, 4) == FrontStep::None && full.Phase == FrontPhase::Overwrite,
+          "confirm asks again");
+    Check(ApplyFrontAction(full, kConfirm, 4) == FrontStep::None && full.Phase == FrontPhase::Name &&
+              full.Slot == 1,
+          "overwrite opens the name on that slot");
 
     FrontDoor blank;
     blank.Phase = FrontPhase::Name;

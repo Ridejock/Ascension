@@ -29,7 +29,7 @@ From a running game, Begin is the new run. The hero is the name and the starter 
 
 The line is `debugNewGame` (`New game.`), when create opens.
 
-The save file is not deleted and not rewritten. The next Save, or Quit game on the pause menu, writes this run over it. From the title, F9 is New game, and Begin writes the file the way the title's own New game does. A save still asks before it is replaced.
+The save file is not deleted and not rewritten. The next Save, or Quit game on the pause menu, writes this run over the slot that was loaded. From the title, F9 is New game, and Begin writes an empty numbered slot the way the title's own New game does. When every numbered slot already has a run, the slot list asks which one to replace. The old `run.sav` file is not that choice.
 
 ## Help
 

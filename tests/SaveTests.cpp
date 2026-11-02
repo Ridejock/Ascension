@@ -1,12 +1,14 @@
 // Save and load: a round trip of a run, a migration from the previous version, and a
 // truncated file that falls back to the previous copy. No window or GPU.
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
@@ -1342,6 +1344,84 @@ void TestAwardVictoryChoiceSave()
           "loading the settled save does not open the choice or the spawn");
 }
 
+void TestSaveSlots()
+{
+    SaveSlot older;
+    older.Id = "slot-1";
+    older.Readable = true;
+    older.SavedAt = 10;
+    SaveSlot newer;
+    newer.Id = "slot-2";
+    newer.Readable = true;
+    newer.SavedAt = 20;
+    SaveSlot blank;
+    blank.Id = "slot-3";
+    SaveSlot legacy;
+    legacy.Id = "run";
+    legacy.Legacy = true;
+    legacy.Readable = true;
+    legacy.SavedAt = 20;
+    const std::vector<SaveSlot> ranked = {older, newer, blank, legacy};
+    Check(NewestSaveSlot(ranked) == 1, "continue prefers the newer readable slot");
+    std::vector<SaveSlot> tie = {older, newer};
+    tie[0].SavedAt = 20;
+    tie[1].SavedAt = 20;
+    Check(NewestSaveSlot(tie) == 0, "an equal timestamp keeps the earlier slot");
+    Check(NewestSaveSlot({blank}) == -1, "an empty slot is not a continue");
+
+    RunState ada;
+    ada.Career.Name = "Ada";
+    ada.Career.ClassId = "fighter";
+    ada.Career.Xp = 8;
+    RunState mara;
+    mara.Career.Name = "Mara";
+    mara.Career.ClassId = "mage";
+    mara.Career.Xp = 20;
+    TempDir dir("ascension-save-slots");
+    RunSave saves(dir.Path);
+    std::string why;
+    Check(saves.Write(ada, why), "the legacy file is written");
+    Check(fs::exists(dir.Path / "run.sav"), "the legacy name is unchanged");
+    const std::vector<SaveSlot> onlyLegacy = saves.List(4);
+    Check(onlyLegacy.size() == 5 && !onlyLegacy[0].Occupied && onlyLegacy[4].Legacy &&
+              onlyLegacy[4].Readable && onlyLegacy[4].Name == "Ada" && onlyLegacy[4].Id == "run" &&
+              NewestSaveSlot(onlyLegacy) == 4,
+          "an old run.sav is listed after the empty numbered slots and is not moved");
+    Check(!fs::exists(dir.Path / "slot-1.sav"), "listing does not create a numbered file");
+
+    Check(saves.Write(ada, why, NumberedSaveSlot(1)), "slot 1 is written");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    Check(saves.Write(mara, why, NumberedSaveSlot(2)), "slot 2 is written later");
+    Check(fs::exists(dir.Path / "run.sav") && fs::exists(dir.Path / "slot-1.sav") &&
+              fs::exists(dir.Path / "slot-2.sav"),
+          "the legacy file stays beside the numbered slots");
+    std::vector<SaveSlot> listed = saves.List(4);
+    if (listed.size() >= 2 && listed[1].SavedAt <= listed[0].SavedAt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        Check(saves.Write(mara, why, NumberedSaveSlot(2)), "slot 2 is written again after the clock moves");
+        listed = saves.List(4);
+    }
+    Check(listed.size() == 5 && listed[0].Id == "slot-1" && listed[0].Name == "Ada" &&
+              listed[0].Number == 1 && listed[1].Id == "slot-2" && listed[1].Name == "Mara" &&
+              listed[1].ClassId == "mage" && listed[1].Xp == 20 && !listed[2].Occupied &&
+              !listed[3].Occupied && listed[4].Legacy && listed[4].Name == "Ada",
+          "the catalog is the numbered slots, then the untouched legacy file");
+    Check(NewestSaveSlot(listed) == 1 && listed[1].SavedAt > listed[0].SavedAt &&
+              listed[1].SavedAt > listed[4].SavedAt,
+          "continue selects the slot written last");
+    const RunLoad loaded = saves.Read(NumberedSaveSlot(2));
+    Check(static_cast<bool>(loaded) && loaded.Run.Career.Name == "Mara" &&
+              loaded.Run.Career.ClassId == "mage",
+          "a numbered slot loads on its own");
+    const RunLoad still = saves.Read();
+    Check(static_cast<bool>(still) && still.Run.Career.Name == "Ada",
+          "a read with no slot still opens run.sav");
+    Check(saves.List(0).size() == static_cast<usize>(kMinSaveSlots) + 1,
+          "a short count still keeps the legacy file");
+    Check(saves.List(100).size() == static_cast<usize>(kMaxSaveSlots) + 1,
+          "a long count stops at the slot cap");
+}
+
 void TestFoundOptional()
 {
     TempDir dir("ascension-save-found-absent");
@@ -1379,6 +1459,7 @@ int main()
     TestVersion5Sheet();
     TestVersion4Name();
     TestAwardVictoryChoiceSave();
+    TestSaveSlots();
     TestFoundOptional();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     Emerald::Log::Shutdown();

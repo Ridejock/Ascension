@@ -78,10 +78,14 @@ void TestShippedControls(const Database& data)
     Check(rules.PauseTitle == "Paused" && rules.PauseContinue == "Continue" &&
               rules.PauseQuit == "Quit game",
           "pause menu lines come from input.json");
+    Check(rules.SaveSlotCount == 4, "the title offers four numbered save slots");
     Check(rules.TitleWordmark == "Ascension" && rules.TitleTagline == "A name, a class, and the road." &&
               rules.TitleContinue == "Continue" && rules.TitleNewGame == "New game" &&
-              rules.TitleQuit == "Quit" && rules.TitleOverwrite == "Overwrite the saved run?" &&
-              rules.TitleOverwriteYes == "Overwrite" && rules.TitleBack == "Back",
+              rules.TitleQuit == "Quit" && rules.TitleOverwrite == "Overwrite this save?" &&
+              rules.TitleOverwriteYes == "Overwrite" && rules.TitleBack == "Back" &&
+              rules.TitleSlot == "Slot" && rules.TitleSlotEmpty == "Empty" &&
+              rules.TitleSlotDamaged == "Damaged" && rules.TitleLegacySlot == "Saved run" &&
+              rules.TitleChooseSlot == "Choose a slot",
           "title lines come from input.json");
     Check(rules.CreateName == "Name" && rules.CreateClass == "Class" && rules.CreateBegin == "Begin" &&
               rules.CreateNameEmpty == "Enter a name." && rules.CreateNameLong == "That name is too long." &&

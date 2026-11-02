@@ -2,7 +2,10 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
+
+#include "Ascension/Input/Controls.h"
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Map/Handoff.h"
@@ -205,10 +208,55 @@ struct RunLoad {
     explicit operator bool() const { return Error == RunSaveError::None; }
 };
 
-// One slot ("run") in a folder, written with Emerald's versioned text save. The current data
-// version is kVersion. A file from the previous version is migrated one step at a time. The
-// write goes to a temp file and is renamed over the slot, and a damaged file falls back to
-// the previous good copy. The folder is the per-user path unless a test passes its own.
+// The file written before numbered slots existed. It stays in the folder under this name.
+// A new game does not rename it and does not write over it unless the player loaded it.
+inline constexpr std::string_view kLegacySaveSlot = "run";
+
+// slot-1, slot-2, ... Emerald slot names are letters, digits, '_' and '-'.
+[[nodiscard]] inline std::string NumberedSaveSlot(i32 number)
+{
+    return "slot-" + std::to_string(number);
+}
+
+// One file in the save folder. Numbered slots are always listed, empty or not. The legacy
+// file is listed after them only when it is present, so an old run.sav is a slot beside
+// the numbered ones and is not moved.
+struct SaveSlot {
+    std::string Id;
+    i32 Number = 0;
+    bool Legacy = false;
+    bool Occupied = false;
+    bool Readable = false;
+    bool FromBackup = false;
+    // Unix seconds from the save header. 0 when the file is missing or unreadable.
+    i64 SavedAt = 0;
+    std::string Name;
+    std::string ClassId;
+    i32 Xp = 0;
+};
+
+// Index of the readable slot with the greatest SavedAt. A tie keeps the earlier slot.
+// -1 when none can be loaded. Continue uses this. The legacy file wins only when it
+// was written later than every numbered slot.
+[[nodiscard]] inline i32 NewestSaveSlot(const std::vector<SaveSlot>& slots)
+{
+    i32 best = -1;
+    for (i32 index = 0; index < static_cast<i32>(slots.size()); ++index) {
+        if (!slots[static_cast<usize>(index)].Readable)
+            continue;
+        if (best < 0 || slots[static_cast<usize>(index)].SavedAt >
+                            slots[static_cast<usize>(best)].SavedAt)
+            best = index;
+    }
+    return best;
+}
+
+// Numbered slots plus the legacy file, written with Emerald's versioned text save. The
+// current data version is kVersion. A file from the previous version is migrated one step
+// at a time when it is read. The write goes to a temp file and is renamed over that slot,
+// and a damaged file falls back to the previous good copy. The folder is the per-user path
+// unless a test passes its own. Write and Read with no slot name use the legacy file, so
+// a script that already writes run.sav still does.
 class RunSave {
 public:
     // Version 6. The hero's sheet is the six primaries, and the carried pools are HP,
@@ -229,8 +277,13 @@ public:
 
     [[nodiscard]] const std::filesystem::path& Folder() const { return m_Folder; }
 
-    bool Write(const RunState& run, std::string& error) const;
-    [[nodiscard]] RunLoad Read() const;
+    // `slot` is a numbered id or kLegacySaveSlot. An unknown name fails the write.
+    bool Write(const RunState& run, std::string& error,
+               std::string_view slot = kLegacySaveSlot) const;
+    [[nodiscard]] RunLoad Read(std::string_view slot = kLegacySaveSlot) const;
+    // `numberedCount` is saveSlotCount. It is clamped to kMinSaveSlots..kMaxSaveSlots.
+    // Empty numbered slots are included. The legacy file is appended only when it exists.
+    [[nodiscard]] std::vector<SaveSlot> List(i32 numberedCount) const;
 
 private:
     std::filesystem::path m_Folder;

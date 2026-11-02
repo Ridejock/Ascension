@@ -113,9 +113,13 @@ private:
     [[nodiscard]] bool SavesProgress() const;
     [[nodiscard]] std::filesystem::path SaveFolder() const;
     bool WriteSave();
-    // Loads the slot when this command does not build its own hero. A missing file is a new
-    // run. A damaged file with no backup is a new run as well.
+    // Loads the newest readable slot when this command does not build its own hero. A
+    // missing file is a new run. A damaged file with no backup is a new run as well.
     bool TryResume(std::string& error);
+    // Reads one slot into the running hero. Sets m_ActiveSlot when it loads.
+    bool LoadSlot(std::string_view slot, std::string& error);
+    // Fills m_Slots and the title catalog from the save folder. Does not rename files.
+    void CaptureSlots();
     void RememberFoe(std::string_view id);
     void RememberVictory();
     // The icon sheet and its accent layer. Nearest filtering, so a scaled pixel stays a square.
@@ -144,7 +148,8 @@ private:
     void DebugRespawnFoes();
     // DebugNewGame twice, inside debugConfirmMilliseconds, opens character create.
     // From a running game, Begin replaces the run and leaves the save file alone.
-    // From the title it is New game, including the overwrite ask.
+    // From the title it is New game: an empty numbered slot, or the slot list when
+    // every numbered slot is full.
     void DebugNewGame();
     // No save, or a save the player has not continued. Create is the other way in.
     void ShowTitle();
@@ -333,7 +338,12 @@ private:
     ConfirmWindow m_NewGameConfirm;
     // Title until a save is continued, a hero is created, or a playtest flag skips it.
     FrontDoor m_Front;
-    // ShowTitle reads the slot once. A later data reload does not ask again.
+    // Parallel to m_Front.Slots. Names and classes for the title rows.
+    std::vector<SaveSlot> m_Slots;
+    // The file WriteSave updates. Empty means the legacy run file, which is what a
+    // scripted hero writes when the title never chose a slot.
+    std::string m_ActiveSlot;
+    // ShowTitle reads the slots once. A later data reload does not ask again.
     bool m_SaveProbed = false;
     // Set when this frame's text event added to the name. Cleared at the end of the poll.
     bool m_NameTyped = false;
