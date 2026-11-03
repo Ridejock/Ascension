@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "Ascension/Data/Ascii.h"
 #include "Ascension/Data/Map.h"
 #include "Ascension/Data/Types.h"
 #include "Ascension/Data/Ui.h"
@@ -42,7 +43,7 @@ struct HeroGrant {
 
 // The JSON files in a data directory (stats, effects, schools, skills, statuses, classes, enemies,
 // encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input, prompts,
-// battle_ui, shop_ui), every
+// battle_ui, shop_ui, ascii), every
 // data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
 // assets/icons, checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file
@@ -105,6 +106,8 @@ public:
     [[nodiscard]] const BattleUi& GetBattleUi() const { return m_BattleUi; }
     // Shop list and detail. Type and color stay on GetBattleUi().
     [[nodiscard]] const ShopUi& GetShopUi() const { return m_ShopUi; }
+    // Which atlas character a tile, prop, foe, or class draws in ASCII mode.
+    [[nodiscard]] const AsciiRules& GetAscii() const { return m_Ascii; }
 
     [[nodiscard]] const StatDef* FindStat(std::string_view id) const;
     [[nodiscard]] const SchoolDef* FindSchool(std::string_view id) const;
@@ -203,6 +206,7 @@ private:
     PromptRules m_Prompts;
     BattleUi m_BattleUi;
     ShopUi m_ShopUi;
+    AsciiRules m_Ascii;
     // Field names from effects.json "better". The merge reads these; it does not decide
     // higher or lower from the field's name.
     std::vector<std::string> m_HigherFields;

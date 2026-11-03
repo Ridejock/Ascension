@@ -69,7 +69,8 @@ void TestShippedControls(const Database& data)
     Check(rules.NavInitialMilliseconds == 280, "nav initial pause is 280ms");
     Check(rules.NavRepeatMilliseconds == 120, "nav repeat is 120ms");
     Check(rules.DebugConfirmMilliseconds == 1500, "new game confirm window is 1500ms");
-    Check(rules.DebugRespawned == "Foes returned." && rules.DebugRespawnBusy == "Finish the fight." &&
+    Check(rules.DebugRespawned == "Foes returned." &&
+              rules.DebugRespawnBusy == "Finish the fight." &&
               rules.DebugNewGameArmed == "Press again to start a new game." &&
               rules.DebugNewGame == "New game.",
           "debug notes come from input.json");
@@ -77,7 +78,8 @@ void TestShippedControls(const Database& data)
               rules.PauseQuit == "Quit game",
           "pause menu lines come from input.json");
     Check(rules.SaveSlotCount == 4, "the title offers four numbered save slots");
-    Check(rules.TitleWordmark == "Ascension" && rules.TitleTagline == "A name, a class, and the road." &&
+    Check(rules.TitleWordmark == "Ascension" &&
+              rules.TitleTagline == "A name, a class, and the road." &&
               rules.TitleContinue == "Continue" && rules.TitleNewGame == "New game" &&
               rules.TitleQuit == "Quit" && rules.TitleOverwrite == "Overwrite this save?" &&
               rules.TitleOverwriteYes == "Overwrite" && rules.TitleBack == "Back" &&
@@ -85,8 +87,9 @@ void TestShippedControls(const Database& data)
               rules.TitleSlotDamaged == "Damaged" && rules.TitleLegacySlot == "Saved run" &&
               rules.TitleChooseSlot == "Choose a slot",
           "title lines come from input.json");
-    Check(rules.CreateName == "Name" && rules.CreateClass == "Class" && rules.CreateBegin == "Begin" &&
-              rules.CreateNameEmpty == "Enter a name." && rules.CreateNameLong == "That name is too long." &&
+    Check(rules.CreateName == "Name" && rules.CreateClass == "Class" &&
+              rules.CreateBegin == "Begin" && rules.CreateNameEmpty == "Enter a name." &&
+              rules.CreateNameLong == "That name is too long." &&
               rules.CreateNameBad == "That name cannot be used.",
           "create lines come from input.json");
     Check(rules.Actions.size() == kControlActions.size(), "every control action is listed once");
@@ -94,6 +97,10 @@ void TestShippedControls(const Database& data)
         Check(FindControl(rules, action) != nullptr, "a required action is present");
     const ControlBind* respawn = FindControl(rules, kDebugRespawnFoes);
     const ControlBind* restart = FindControl(rules, kDebugNewGame);
+    const ControlBind* ascii = FindControl(rules, kAscii);
+    Check(ascii != nullptr && ascii->Keys.size() == 1 && ascii->Keys[0] == "F8" &&
+              ascii->Buttons.empty(),
+          "ascii is F8 and has no pad button");
     Check(respawn != nullptr && respawn->Keys.size() == 1 && respawn->Keys[0] == "F6" &&
               respawn->Buttons.empty(),
           "respawn is F6 and has no pad button");
@@ -120,17 +127,22 @@ void TestShippedControls(const Database& data)
     }
     const PromptMetrics metrics = MeasurePrompts(prompts);
     const f32 cap = static_cast<f32>(Emerald::kDebugTextRows * prompts.TextScale);
-    Check(metrics.Icon == 16.0f && metrics.Cap == cap, "the icon box and the cap use the data scales");
+    Check(metrics.Icon == 16.0f && metrics.Cap == cap,
+          "the icon box and the cap use the data scales");
     Check(metrics.TextOffset == (metrics.Icon - metrics.Cap) * 0.5f,
           "hint text is centered on the icon");
-    Check(PromptFamilyForType(prompts, "Xbox One/Series") == "xbox", "xbox one uses the xbox sheet");
+    Check(PromptFamilyForType(prompts, "Xbox One/Series") == "xbox",
+          "xbox one uses the xbox sheet");
     Check(PromptFamilyForType(prompts, "PS5") == "playstation", "ps5 uses the playstation sheet");
-    Check(PromptFamilyForType(prompts, "Switch Pro") == "switch", "switch pro uses the switch sheet");
-    Check(PromptFamilyForType(prompts, "Joy-Con pair") == "switch", "joy-cons use the switch sheet");
+    Check(PromptFamilyForType(prompts, "Switch Pro") == "switch",
+          "switch pro uses the switch sheet");
+    Check(PromptFamilyForType(prompts, "Joy-Con pair") == "switch",
+          "joy-cons use the switch sheet");
     Check(PromptFamilyForType(prompts, "GameCube") == "switch", "gamecube uses the switch sheet");
     Check(PromptFamilyForType(prompts, "Standard") == "xbox", "a standard pad uses the xbox sheet");
     Check(PromptFamilyForType(prompts, "Unknown") == "xbox", "an unknown pad uses the xbox sheet");
-    Check(PromptFamilyForType(prompts, "Not A Pad") == "xbox", "an unlisted type uses the xbox sheet");
+    Check(PromptFamilyForType(prompts, "Not A Pad") == "xbox",
+          "an unlisted type uses the xbox sheet");
 }
 
 void TestMapping()
@@ -227,20 +239,13 @@ void TestMapping()
 
     Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Num2),
           "a skill key needs the player's turn");
-    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Right),
-          "aiming needs the player's turn");
-    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Space),
-          "waiting needs the player's turn");
-    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::N),
-          "N is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::R),
-          "restart is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::E),
-          "confirm is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F6),
-          "respawn is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F9),
-          "new game is not a combat key");
+    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Right), "aiming needs the player's turn");
+    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Space), "waiting needs the player's turn");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::N), "N is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::R), "restart is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::E), "confirm is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F6), "respawn is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F9), "new game is not a combat key");
 
     keyboard.BeginFrame();
     pads.BeginFrame();
@@ -254,6 +259,12 @@ void TestMapping()
     Check(input.WasActionPressed(kDebugNewGame) && !input.WasActionPressed(kDebugRespawnFoes),
           "F9 is new game");
     keyboard.OnKeyUp(Emerald::Key::F9);
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    keyboard.OnKeyDown(Emerald::Key::F8);
+    Check(input.WasActionPressed(kAscii) && !input.WasActionPressed(kDebugNewGame), "F8 is ascii");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F8), "ascii is not a combat key");
+    keyboard.OnKeyUp(Emerald::Key::F8);
     pads.BeginFrame();
     keyboard.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::South, true);
@@ -261,14 +272,11 @@ void TestMapping()
           "a face button does not respawn or start over");
     pads.OnButton(1, Emerald::GamepadButton::South, false);
 
-    const std::vector<std::string_view> up =
-        input.FindActionsUsing(Emerald::Key::Up);
-    const std::vector<std::string_view> enter =
-        input.FindActionsUsing(Emerald::Key::Enter);
+    const std::vector<std::string_view> up = input.FindActionsUsing(Emerald::Key::Up);
+    const std::vector<std::string_view> enter = input.FindActionsUsing(Emerald::Key::Enter);
     const std::vector<std::string_view> south =
         input.FindActionsUsing(Emerald::GamepadButton::South);
-    const std::vector<std::string_view> east =
-        input.FindActionsUsing(Emerald::GamepadButton::East);
+    const std::vector<std::string_view> east = input.FindActionsUsing(Emerald::GamepadButton::East);
     const std::vector<std::string_view> dpad =
         input.FindActionsUsing(Emerald::GamepadButton::DPadUp);
     Check(HasAction(up, kMoveNorth), "up moves the talk menu");
@@ -430,7 +438,8 @@ void TestRejectedData()
     {
         TempCopy copy;
         ReplaceIn(copy.Path / "input.json",
-                  "{ \"name\": \"Confirm\", \"keys\": [\"E\", \"Return\", \"Keypad Enter\"], \"buttons\": [\"South\"] }",
+                  "{ \"name\": \"Confirm\", \"keys\": [\"E\", \"Return\", \"Keypad Enter\"], "
+                  "\"buttons\": [\"South\"] }",
                   "{ \"name\": \"Confirm\", \"keys\": [\"E\"], \"buttons\": [\"South\"] },\n"
                   "      { \"name\": \"Confirm\", \"keys\": [\"Return\"], \"buttons\": [] }");
         Database data(copy.Path);
@@ -440,8 +449,8 @@ void TestRejectedData()
     }
     {
         TempCopy copy;
-        const std::string confirm =
-            "{ \"name\": \"Confirm\", \"keys\": [\"E\", \"Return\", \"Keypad Enter\"], \"buttons\": [\"South\"] },\n";
+        const std::string confirm = "{ \"name\": \"Confirm\", \"keys\": [\"E\", \"Return\", "
+                                    "\"Keypad Enter\"], \"buttons\": [\"South\"] },\n";
         ReplaceIn(copy.Path / "input.json", confirm, "");
         Database data(copy.Path);
         DataError error;

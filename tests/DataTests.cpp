@@ -10,6 +10,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Database.h"
+#include "Ascension/View/AsciiGlyphs.h"
 #include "Check.h"
 #include "FoeAlert.h"
 #include "GearLine.h"
@@ -557,7 +558,8 @@ void TestValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "progress.json", "\"levelHp\": \"gained\"",
                       "\"levelHp\": \"heal\"");
-        TestRejected(copy.Path, "progress.json", "levelHp", "levelHp must name gained, full, or kept");
+        TestRejected(copy.Path, "progress.json", "levelHp",
+                     "levelHp must name gained, full, or kept");
     }
     {
         TempCopy copy;
@@ -1920,8 +1922,8 @@ void TestShippedDescriptions()
     Check(mythicItems == 1 && fang != nullptr && fang->Id == "alphas_fang" &&
               fang->Slot == GearSlot::Accessory && fang->Icon == "ring" &&
               data.FindIcon("ring") != nullptr && fang->Bonus.Strength == 2 &&
-              fang->Bonus.Agility == 2 && fang->Value == 80 &&
-              fang->Grants.size() == 1 && fang->Grants[0].Id == "fang_bloodlust" && !fangStocked,
+              fang->Bonus.Agility == 2 && fang->Value == 80 && fang->Grants.size() == 1 &&
+              fang->Grants[0].Id == "fang_bloodlust" && !fangStocked,
           "Alpha's Fang is the only mythic, an accessory, and Pell does not sell it");
     Check(fangSkill != nullptr && fangSkill->Id != "bloodlust" &&
               fangSkill->Id != "dire_bloodlust" && fangSkill->FocusCost == 1 &&
@@ -2461,11 +2463,10 @@ void TestAiValidation()
         DataError error;
         Check(data.Load(&error), "an ally count rule loads");
         const EnemyDef* sentry = data.FindEnemy("barrow_sentry");
-        const bool loaded = sentry != nullptr && sentry->Ai.size() == 1 &&
-                            sentry->Ai[0].Action == AiAction::Skill &&
-                            sentry->Ai[0].Skill == "harden" &&
-                            sentry->Ai[0].If.AllyCountAtMost == 0 &&
-                            sentry->Ai[0].If.AllyCountAtLeast == 0;
+        const bool loaded =
+            sentry != nullptr && sentry->Ai.size() == 1 &&
+            sentry->Ai[0].Action == AiAction::Skill && sentry->Ai[0].Skill == "harden" &&
+            sentry->Ai[0].If.AllyCountAtMost == 0 && sentry->Ai[0].If.AllyCountAtLeast == 0;
         Check(loaded, "ally counts are stored, and 0 means the foe is alone");
     }
 }
@@ -2475,7 +2476,8 @@ struct MissingGlyph {
     std::string Where;
 };
 
-void ConsiderGlyphs(std::string_view where, std::string_view text, std::vector<MissingGlyph>& missing)
+void ConsiderGlyphs(std::string_view where, std::string_view text,
+                    std::vector<MissingGlyph>& missing)
 {
     for (unsigned char raw : text) {
         const char code = static_cast<char>(raw);
@@ -2542,7 +2544,8 @@ const char* kUiLabels[] = {
     "Paused.",
     "UP DOWN MOVE    E SPEAK    I CLOSE",
     "E CONTINUE    I CLOSE",
-    "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    X SELL    U UNEQUIP    I CLOSE    R FIGHT    N NEXT",
+    "UP DOWN MOVE    LEFT RIGHT BAG OR STOCK    E EQUIP OR BUY    X SELL    U UNEQUIP    I CLOSE   "
+    " R FIGHT    N NEXT",
     "SPACE WAIT    R FIGHT    N NEXT FOE    F5 SAVE",
     "CONTINUE",
     "QUIT GAME",
@@ -2864,15 +2867,14 @@ void TestMapReload()
               second->Spawns[0].Once,
           "hot reload updates the spawn flag");
 
-    WriteFile(copy.Path / "maps" / "fixture_c.json",
-              "{\n"
-              "  \"map\": {\n"
-              "    \"id\": \"fixture_c\",\n"
-              "    \"rows\": [\"...\", \"...\", \"...\"],\n"
-              "    \"legend\": { \".\": \"floor\" },\n"
-              "    \"start\": { \"x\": 1, \"y\": 1 }\n"
-              "  }\n"
-              "}\n");
+    WriteFile(copy.Path / "maps" / "fixture_c.json", "{\n"
+                                                     "  \"map\": {\n"
+                                                     "    \"id\": \"fixture_c\",\n"
+                                                     "    \"rows\": [\"...\", \"...\", \"...\"],\n"
+                                                     "    \"legend\": { \".\": \"floor\" },\n"
+                                                     "    \"start\": { \"x\": 1, \"y\": 1 }\n"
+                                                     "  }\n"
+                                                     "}\n");
     BumpTime(copy.Path / "maps" / "fixture_c.json");
     Check(data.CheckForChanges(&error) == 0, "a new map file waits a check");
     Check(data.CheckForChanges(&error) == 1, "a settled new map file reloads");
@@ -2912,7 +2914,8 @@ void TestMapValidation()
     {
         TempCopy copy;
         fs::remove(copy.Path / "tiles.json");
-        TestRejected(copy.Path, "tiles.json", "could not be read", "a missing tiles file is an error");
+        TestRejected(copy.Path, "tiles.json", "could not be read",
+                     "a missing tiles file is an error");
     }
     {
         TempCopy copy;
@@ -2944,8 +2947,10 @@ void TestMapValidation()
     {
         TempCopy copy;
         ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"#.#..#\"", "\"#.#.?#\"");
-        TestRejected(copy.Path, "maps/fixture_a.json", "legend", "a character missing from the legend fails");
-        TestRejected(copy.Path, "maps/fixture_a.json", "?", "the broken legend names the character");
+        TestRejected(copy.Path, "maps/fixture_a.json", "legend",
+                     "a character missing from the legend fails");
+        TestRejected(copy.Path, "maps/fixture_a.json", "?",
+                     "the broken legend names the character");
     }
     {
         TempCopy copy;
@@ -2954,7 +2959,8 @@ void TestMapValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\".\": \"floor\"", "\"..\": \"floor\"");
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\".\": \"floor\"",
+                      "\"..\": \"floor\"");
         TestRejected(copy.Path, "maps/fixture_a.json", "one character",
                      "a legend key must be one character");
     }
@@ -2979,33 +2985,39 @@ void TestMapValidation()
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "maps" / "fixture_a.json",
-                      "{ \"kind\": \"talk\", \"tile\": { \"x\": 2, \"y\": 1 }, \"dialogue\": \"pell\" }",
-                      "{ \"kind\": \"talk\", \"tile\": { \"x\": 2, \"y\": 1 } }");
-        TestRejected(copy.Path, "maps/fixture_a.json", "dialogue", "a talk point needs a dialogue id");
+        ReplaceInFile(
+            copy.Path / "maps" / "fixture_a.json",
+            "{ \"kind\": \"talk\", \"tile\": { \"x\": 2, \"y\": 1 }, \"dialogue\": \"pell\" }",
+            "{ \"kind\": \"talk\", \"tile\": { \"x\": 2, \"y\": 1 } }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "dialogue",
+                     "a talk point needs a dialogue id");
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"kind\": \"shop\"", "\"kind\": \"inn\"");
+        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"kind\": \"shop\"",
+                      "\"kind\": \"inn\"");
         TestRejected(copy.Path, "maps/fixture_a.json", "inn", "an unknown point kind is rejected");
     }
     {
         TempCopy copy;
         ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"map\": \"fixture_b\"",
                       "\"map\": \"no_such_map\"");
-        TestRejected(copy.Path, "maps/fixture_a.json", "no_such_map", "a missing exit map is named");
+        TestRejected(copy.Path, "maps/fixture_a.json", "no_such_map",
+                     "a missing exit map is named");
     }
     {
         TempCopy copy;
         ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"arrival\": { \"x\": 1, \"y\": 2 }",
                       "\"arrival\": { \"x\": 9, \"y\": 9 }");
-        TestRejected(copy.Path, "maps/fixture_a.json", "outside", "an exit arrival outside the map fails");
+        TestRejected(copy.Path, "maps/fixture_a.json", "outside",
+                     "an exit arrival outside the map fails");
     }
     {
         TempCopy copy;
         ReplaceInFile(copy.Path / "maps" / "fixture_b.json", "\"arrival\": { \"x\": 4, \"y\": 2 }",
                       "\"arrival\": { \"x\": 0, \"y\": 0 }");
-        TestRejected(copy.Path, "maps/fixture_b.json", "solid", "an exit arrival on a solid tile fails");
+        TestRejected(copy.Path, "maps/fixture_b.json", "solid",
+                     "an exit arrival on a solid tile fails");
     }
     {
         TempCopy copy;
@@ -3017,7 +3029,8 @@ void TestMapValidation()
         TempCopy copy;
         ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"x\": 4, \"y\": 1",
                       "\"x\": 1, \"y\": 1");
-        TestRejected(copy.Path, "maps/fixture_a.json", "start", "a spawn cannot stand on the start");
+        TestRejected(copy.Path, "maps/fixture_a.json", "start",
+                     "a spawn cannot stand on the start");
     }
     {
         TempCopy copy;
@@ -3058,19 +3071,23 @@ void TestMapValidation()
     {
         TempCopy copy;
         fs::remove(copy.Path / "movers.json");
-        TestRejected(copy.Path, "movers.json", "could not be read", "a missing movers file is an error");
+        TestRejected(copy.Path, "movers.json", "could not be read",
+                     "a missing movers file is an error");
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
-                      "\"encounter\": \"wolf\", \"aura\": { \"radius\": 1, \"status\": \"no_such\" }");
+        ReplaceInFile(
+            copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
+            "\"encounter\": \"wolf\", \"aura\": { \"radius\": 1, \"status\": \"no_such\" }");
         TestRejected(copy.Path, "maps/fixture_a.json", "no_such", "an aura status must exist");
     }
     {
         TempCopy copy;
-        ReplaceInFile(copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
-                      "\"encounter\": \"wolf\", \"aura\": { \"radius\": -1, \"status\": \"exposed\" }");
-        TestRejected(copy.Path, "maps/fixture_a.json", "radius", "an aura radius cannot be negative");
+        ReplaceInFile(
+            copy.Path / "maps" / "fixture_a.json", "\"encounter\": \"wolf\"",
+            "\"encounter\": \"wolf\", \"aura\": { \"radius\": -1, \"status\": \"exposed\" }");
+        TestRejected(copy.Path, "maps/fixture_a.json", "radius",
+                     "an aura radius cannot be negative");
     }
     {
         TempCopy copy;
@@ -3154,9 +3171,10 @@ void CheckCampaignMaps(const char* dir)
     Check(hubs == 1 && hub != nullptr && hub->Hub, "one hub, and its id is hub");
     if (hub == nullptr)
         return;
-    Check(hub->Start.X == 8 && hub->Start.Y == 14 && hub->Spawns.empty() && hub->Links.size() == 2 &&
-              hub->Links[0].Map == "overland" && hub->Links[1].Map == "sluice" &&
-              hub->Links[1].Tile.X == 0 && hub->Links[1].Tile.Y == 9,
+    Check(hub->Start.X == 8 && hub->Start.Y == 14 && hub->Spawns.empty() &&
+              hub->Links.size() == 2 && hub->Links[0].Map == "overland" &&
+              hub->Links[1].Map == "sluice" && hub->Links[1].Tile.X == 0 &&
+              hub->Links[1].Tile.Y == 9,
           "the hub starts on its rest, leaves east to the road, and west to the sluice");
     const MapPoint* rest = FindPoint(*hub, MapPointKind::Rest);
     const MapPoint* talk = FindPoint(*hub, MapPointKind::Talk);
@@ -3225,8 +3243,9 @@ void CheckCampaignMaps(const char* dir)
           "the road links the village to the barrow and has the wolf");
     const MapDef* sluice = data.FindMap("sluice");
     Check(sluice != nullptr && !sluice->Hub && sluice->Spawns.size() == 1 &&
-              sluice->Spawns[0].Id == "sluice_wolf" && sluice->Spawns[0].Encounter == "sluice_wolf" &&
-              sluice->Links.size() == 1 && sluice->Links[0].Map == "hub",
+              sluice->Spawns[0].Id == "sluice_wolf" &&
+              sluice->Spawns[0].Encounter == "sluice_wolf" && sluice->Links.size() == 1 &&
+              sluice->Links[0].Map == "hub",
           "the sluice is one wolf and a door back to the hub");
     const char* rooms[] = {"barrow_1", "barrow_2", "barrow_3", "barrow_4",
                            "barrow_5", "barrow_6", "barrow_7", "barrow_side"};
@@ -3338,9 +3357,195 @@ void TestMaps()
     TestMapValidation();
 }
 
+int InkOf(const Emerald::Image& image, char code, bool& grey)
+{
+    const i32 index = AsciiGlyphIndex(code);
+    const i32 originX = (index % kAsciiAtlasColumns) * kAsciiGlyphPixels;
+    const i32 originY = (index / kAsciiAtlasColumns) * kAsciiGlyphPixels;
+    int ink = 0;
+    grey = true;
+    for (i32 y = 0; y < kAsciiGlyphPixels; ++y) {
+        for (i32 x = 0; x < kAsciiGlyphPixels; ++x) {
+            const usize offset =
+                (static_cast<usize>(originY + y) * static_cast<usize>(image.Width) +
+                 static_cast<usize>(originX + x)) *
+                4;
+            const u8 red = image.Pixels[offset];
+            const u8 green = image.Pixels[offset + 1];
+            const u8 blue = image.Pixels[offset + 2];
+            const u8 alpha = image.Pixels[offset + 3];
+            if (alpha == 0) {
+                if (red != 0 || green != 0 || blue != 0)
+                    grey = false;
+                continue;
+            }
+            if (red != 255 || green != 255 || blue != 255 || alpha != 255)
+                grey = false;
+            ++ink;
+        }
+    }
+    return ink;
+}
+
+bool SameInk(const Emerald::Image& image, char left, char right)
+{
+    const i32 a = AsciiGlyphIndex(left);
+    const i32 b = AsciiGlyphIndex(right);
+    for (i32 y = 0; y < kAsciiGlyphPixels; ++y) {
+        for (i32 x = 0; x < kAsciiGlyphPixels; ++x) {
+            const auto sample = [&](i32 index) {
+                const i32 ox = (index % kAsciiAtlasColumns) * kAsciiGlyphPixels;
+                const i32 oy = (index / kAsciiAtlasColumns) * kAsciiGlyphPixels;
+                const usize offset = (static_cast<usize>(oy + y) * static_cast<usize>(image.Width) +
+                                      static_cast<usize>(ox + x)) *
+                                     4;
+                return image.Pixels[offset + 3];
+            };
+            if (sample(a) != sample(b))
+                return false;
+        }
+    }
+    return true;
+}
+
+void TestAscii()
+{
+    Check(kAsciiHero == '@', "the map hero is @");
+    Check(kAsciiGlyphPixels == 8 && kAsciiFigureScale == 2,
+          "a map cell is an 8px glyph, and a figure is twice that");
+    Check(AsciiGlyphsWellFormed(), "the glyph array is eight by eight and unique");
+    Check(AsciiGlyphKnown('#') && AsciiGlyphKnown('~') && AsciiGlyphKnown('@') &&
+              AsciiGlyphKnown('?'),
+          "wall, water, hero, and fallback are baked");
+    Check(!AsciiGlyphKnown('!'), "an unbaked mark is not a glyph");
+    Check(AsciiGlyphIndex('!') == AsciiGlyphIndex('?'), "an unknown character draws ?");
+
+    const AsciiAtlas atlas = RasterizeAsciiAtlas();
+    const usize bytes =
+        static_cast<usize>(atlas.Image.Width) * static_cast<usize>(atlas.Image.Height) * 4;
+    Check(atlas.Count > 0 && atlas.Image.Width == kAsciiAtlasColumns * kAsciiGlyphPixels &&
+              atlas.Image.Pixels.size() == bytes,
+          "the atlas is one grey image of the glyph cells");
+    bool hashGrey = false;
+    bool tildeGrey = false;
+    bool heroGrey = false;
+    bool markGrey = false;
+    const int hashInk = InkOf(atlas.Image, '#', hashGrey);
+    const int tildeInk = InkOf(atlas.Image, '~', tildeGrey);
+    const int heroInk = InkOf(atlas.Image, '@', heroGrey);
+    const int markInk = InkOf(atlas.Image, '?', markGrey);
+    Check(hashGrey && tildeGrey && heroGrey && markGrey, "ink is white-grey and empty is clear");
+    Check(hashInk > 8 && tildeInk > 4 && heroInk > 8 && markInk > 4, "# ~ @ and ? have ink");
+    Check(!SameInk(atlas.Image, '#', '~') && !SameInk(atlas.Image, '@', '#'),
+          "wall, water, and the hero are different glyphs");
+
+    Database shipped(ASCENSION_SHIPPED_DATA_DIR);
+    DataError shippedError;
+    Check(shipped.Load(&shippedError), "shipped data loads ascii.json");
+    if (!shippedError.Message.empty())
+        std::printf("    %s\n", shippedError.Message.c_str());
+    if (!shipped.IsLoaded())
+        return;
+    const AsciiRules& rules = shipped.GetAscii();
+    Check(FindAsciiGlyph(rules.Tiles, "wall", '?') == '#' &&
+              FindAsciiGlyph(rules.Tiles, "water", '?') == '~' &&
+              FindAsciiGlyph(rules.Tiles, "floor", '?') == '.',
+          "wall, water, and floor keep their characters");
+    Check(FindAsciiGlyph(rules.Classes, "templar", '?') == 'T' &&
+              FindAsciiGlyph(rules.Classes, "fighter", '?') == 'F',
+          "a class letter is not the map hero");
+    const MapDef* hub = shipped.FindMap("hub");
+    Check(hub != nullptr, "the hub is loaded");
+    if (hub == nullptr)
+        return;
+    i32 wallX = -1;
+    i32 wallY = -1;
+    i32 waterX = -1;
+    i32 waterY = -1;
+    i32 openX = -1;
+    i32 openY = -1;
+    i32 houseX = -1;
+    i32 houseY = -1;
+    for (i32 y = 0; y < hub->Height; ++y) {
+        for (i32 x = 0; x < hub->Width; ++x) {
+            const std::string* cell = hub->Cell(x, y);
+            if (cell == nullptr)
+                continue;
+            if (wallX < 0 && *cell == "wall" && !MapBlocks(*hub, x, y)) {
+                wallX = x;
+                wallY = y;
+            }
+            if (waterX < 0 && *cell == "water") {
+                waterX = x;
+                waterY = y;
+            }
+        }
+    }
+    for (const MapProp& prop : hub->Props) {
+        if (prop.Id != "shop_house")
+            continue;
+        for (i32 y = prop.Tile.Y; y < prop.Tile.Y + prop.Height; ++y) {
+            for (i32 x = prop.Tile.X; x < prop.Tile.X + prop.Width; ++x) {
+                if (houseX < 0 && MapPropBlocks(prop, x, y)) {
+                    houseX = x;
+                    houseY = y;
+                }
+                if (openX < 0 && !MapPropBlocks(prop, x, y)) {
+                    openX = x;
+                    openY = y;
+                }
+            }
+        }
+    }
+    Check(wallX >= 0 && AsciiCellGlyph(rules, *hub, wallX, wallY, false, false, {}) == '#',
+          "a wall cell is #");
+    Check(AsciiCellGlyph(rules, *hub, wallX, wallY, true, false, {}) == '@',
+          "the hero replaces the wall");
+    Check(AsciiCellGlyph(rules, *hub, wallX, wallY, false, true, "wolf") == 'w',
+          "a wolf replaces the wall");
+    Check(AsciiCellGlyph(rules, *hub, wallX, wallY, true, true, "wolf") == '@',
+          "the hero replaces the wolf");
+    Check(waterX >= 0 && AsciiCellGlyph(rules, *hub, waterX, waterY, false, false, {}) == '~',
+          "water is ~");
+    Check(houseX >= 0 && AsciiCellGlyph(rules, *hub, houseX, houseY, false, false, {}) == 'h',
+          "a blocked house cell is h");
+    Check(openX >= 0 && AsciiCellGlyph(rules, *hub, openX, openY, false, false, {}) == '.',
+          "an open house cell keeps the floor");
+    i32 unmapped = 0;
+    for (const TileDef& tile : shipped.GetTiles()) {
+        if (FindAsciiGlyph(rules.Tiles, tile.Id, '\0') == '\0')
+            ++unmapped;
+    }
+    for (const ClassDef& klass : shipped.GetClasses()) {
+        if (FindAsciiGlyph(rules.Classes, klass.Id, '\0') == '\0')
+            ++unmapped;
+    }
+    for (const EnemyDef& enemy : shipped.GetEnemies()) {
+        if (FindAsciiGlyph(rules.Foes, enemy.Id, '\0') == '\0')
+            ++unmapped;
+    }
+    for (const MapDef& map : shipped.GetMaps()) {
+        for (const MapProp& prop : map.Props) {
+            if (FindAsciiGlyph(rules.Props, prop.Id, '\0') == '\0')
+                ++unmapped;
+        }
+    }
+    Check(unmapped == 0, "every shipped tile, class, foe, and prop names an atlas glyph");
+
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "ascii.json", "\"wall\": \"#\"", "\"wall\": \"!\"");
+        Database data(copy.Path);
+        DataError error;
+        Check(!data.Load(&error), "a glyph missing from the atlas fails the load");
+        Check(error.Message.find("!") != std::string::npos, "the error names the missing glyph");
+    }
+}
+
 int main()
 {
     TestSample();
+    TestAscii();
     TestMaps();
     TestEveryRequiredFoe();
     TestHotReload();

@@ -57,9 +57,12 @@ add_library(AscensionData STATIC
     src/Data/Database.cpp
     src/Data/Talk.cpp
     src/Data/ArtPack.cpp
+    src/View/AsciiGlyphs.cpp
     src/Input/Controls.cpp
     src/Input/Prompts.cpp
     include/Ascension/Data/Database.h
+    include/Ascension/Data/Ascii.h
+    include/Ascension/View/AsciiGlyphs.h
     include/Ascension/Data/Ui.h
     include/Ascension/Data/ArtPack.h
     include/Ascension/Data/Map.h

@@ -7,7 +7,9 @@
 #include <vector>
 
 #include "ArtGallery.h"
+#include "Ascension/View/AsciiGlyphs.h"
 #include "Emerald/Renderer/DebugText.h"
+#include "Emerald/Renderer/Texture.h"
 
 namespace Ascension {
 
@@ -60,6 +62,11 @@ MapTile SpawnDrawTile(const MapSpawn& spawn, std::span<const SpawnPlace> places)
     return spawn.Tile;
 }
 
+i32 NearestCell(f32 value)
+{
+    return static_cast<i32>(std::floor(static_cast<double>(value) + 0.5));
+}
+
 // The foe drawn on a spawn tile. The encounter lists that foe first. A pack with
 // no enemies, or a missing encounter, keeps the built-in square.
 const std::string* SpawnFoeId(const Database& data, const MapSpawn& spawn)
@@ -75,9 +82,8 @@ const std::string* SpawnFoeId(const Database& data, const MapSpawn& spawn)
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
                    i32 focus, i32 maxFocus, i32 mana, i32 maxMana,
-                   std::span<const std::string> cleared,
-                   std::span<const SpawnPlace> places, const ArtGallery* art,
-                   const SpawnGlides* motion)
+                   std::span<const std::string> cleared, std::span<const SpawnPlace> places,
+                   const ArtGallery* art, const SpawnGlides* motion, const Emerald::Texture* ascii)
 {
     const UiStyle& style = data.GetBattleUi().Style;
     const Emerald::Vec4 label = ByteColor(style.Ink.Red, style.Ink.Green, style.Ink.Blue);
@@ -90,9 +96,71 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     }
 
     const f32 tile = static_cast<f32>(rules.TilePixels);
+    const WalkPoint heroPoint = walker.DrawTile();
+    if (ascii != nullptr && ascii->HasGpuTexture()) {
+        // One 8px glyph per map cell, not one glyph stretched to the 64px picture tile.
+        // The camera is in those cells, so a window holds many more of the map.
+        const f32 cell = static_cast<f32>(kAsciiGlyphPixels);
+        const WalkFrame frame =
+            FrameMap(*map, heroPoint.X, heroPoint.Y, width / cell, height / cell);
+        const i32 firstX = static_cast<i32>(std::floor(static_cast<double>(frame.OriginX)));
+        const i32 firstY = static_cast<i32>(std::floor(static_cast<double>(frame.OriginY)));
+        const i32 lastX =
+            static_cast<i32>(std::ceil(static_cast<double>(frame.OriginX + frame.TilesWide)));
+        const i32 lastY =
+            static_cast<i32>(std::ceil(static_cast<double>(frame.OriginY + frame.TilesHigh)));
+        renderer.FillRect({0.0f, 0.0f}, {width, height}, kAsciiPaper);
+        const i32 heroX = NearestCell(heroPoint.X);
+        const i32 heroY = NearestCell(heroPoint.Y);
+        for (i32 y = firstY; y < lastY; ++y) {
+            if (y < 0 || y >= map->Height)
+                continue;
+            for (i32 x = firstX; x < lastX; ++x) {
+                if (x < 0 || x >= map->Width)
+                    continue;
+                bool standing = false;
+                std::string_view foeId;
+                for (const MapSpawn& spawn : map->Spawns) {
+                    if (SpawnCleared(cleared, spawn.Id))
+                        continue;
+                    const MapTile at = SpawnDrawTile(spawn, places);
+                    const WalkPoint drawn = motion != nullptr ? motion->Sample(spawn.Id, at)
+                                                              : WalkPoint{static_cast<f32>(at.X),
+                                                                          static_cast<f32>(at.Y)};
+                    if (NearestCell(drawn.X) != x || NearestCell(drawn.Y) != y)
+                        continue;
+                    standing = true;
+                    foeId = {};
+                    if (const std::string* id = SpawnFoeId(data, spawn))
+                        foeId = *id;
+                }
+                const char glyph = AsciiCellGlyph(data.GetAscii(), *map, x, y,
+                                                  x == heroX && y == heroY, standing, foeId);
+                const f32 left = (static_cast<f32>(x) - frame.OriginX) * cell;
+                const f32 top = (static_cast<f32>(y) - frame.OriginY) * cell;
+                DrawAsciiGlyph(renderer, *ascii, glyph, {left, top}, {cell, cell}, kAsciiInk);
+            }
+        }
+        Emerald::DrawDebugText(renderer, {16.0f, 16.0f}, Upper(PlaceLabel(walker.Place())), label,
+                               2);
+        const std::string pools = "HP " + std::to_string(hp) + "/" + std::to_string(maxHp) +
+                                  "   FOCUS " + std::to_string(focus) + "/" +
+                                  std::to_string(maxFocus) + "   MANA " + std::to_string(mana) +
+                                  "/" + std::to_string(maxMana);
+        const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
+        Emerald::DrawDebugText(renderer, {16.0f, poolsY}, Upper(pools), label, 2);
+        const usize shown = std::min(log.size(), static_cast<usize>(4));
+        const f32 lineStep = Emerald::DebugTextLineHeight(1) + 2.0f;
+        f32 logY = height - 16.0f - static_cast<f32>(shown) * lineStep;
+        for (usize index = 0; index < shown; ++index) {
+            const std::string& line = log[log.size() - shown + index];
+            Emerald::DrawDebugText(renderer, {16.0f, logY}, Upper(line), dim, 1);
+            logY += lineStep;
+        }
+        return;
+    }
     const f32 tilesWide = width / tile;
     const f32 tilesHigh = height / tile;
-    const WalkPoint heroPoint = walker.DrawTile();
     const WalkFrame frame = FrameMap(*map, heroPoint.X, heroPoint.Y, tilesWide, tilesHigh);
     const i32 firstX = static_cast<i32>(std::floor(static_cast<double>(frame.OriginX)));
     const i32 firstY = static_cast<i32>(std::floor(static_cast<double>(frame.OriginY)));
@@ -126,8 +194,8 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             place.Map = map->Id;
             place.X = x;
             place.Y = y;
-            if (!packed || !DrawArt(renderer, art, ArtSlot::Tile, def->Id, {left, top}, {tile, tile},
-                                    white, place))
+            if (!packed || !DrawArt(renderer, art, ArtSlot::Tile, def->Id, {left, top},
+                                    {tile, tile}, white, place))
                 DrawCell(renderer, left, top, tile, ByteColor(def->Red, def->Green, def->Blue));
             bool linked = false;
             for (const MapLink& door : map->Links) {
@@ -188,9 +256,9 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             if (SpawnCleared(cleared, spawn.Id))
                 continue;
             const MapTile at = SpawnDrawTile(spawn, places);
-            const WalkPoint drawn =
-                motion != nullptr ? motion->Sample(spawn.Id, at)
-                                  : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
+            const WalkPoint drawn = motion != nullptr
+                                        ? motion->Sample(spawn.Id, at)
+                                        : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
             if (drawn.X + 1.0f < static_cast<f32>(firstX) || drawn.X >= static_cast<f32>(lastX) ||
                 drawn.Y + 1.0f < static_cast<f32>(firstY) || drawn.Y >= static_cast<f32>(lastY))
                 continue;
@@ -265,22 +333,21 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         if (piece.Layer == 2) {
             const MapSpawn& spawn = map->Spawns[piece.Index];
             const MapTile at = SpawnDrawTile(spawn, places);
-            const WalkPoint drawn =
-                motion != nullptr ? motion->Sample(spawn.Id, at)
-                                  : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
+            const WalkPoint drawn = motion != nullptr
+                                        ? motion->Sample(spawn.Id, at)
+                                        : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
             const f32 left = (drawn.X - frame.OriginX) * tile + inset;
             const f32 top = (drawn.Y - frame.OriginY) * tile + inset;
             const std::string* foeId = packed ? SpawnFoeId(data, spawn) : nullptr;
-            if (foeId == nullptr ||
-                !DrawArt(renderer, art, ArtSlot::FoeOverland, *foeId, {left, top}, {inner, inner},
-                         white))
+            if (foeId == nullptr || !DrawArt(renderer, art, ArtSlot::FoeOverland, *foeId,
+                                             {left, top}, {inner, inner}, white))
                 DrawCell(renderer, left, top, inner, spawnColor);
             continue;
         }
         const f32 left = (heroPoint.X - frame.OriginX) * tile + inset;
         const f32 top = (heroPoint.Y - frame.OriginY) * tile + inset;
-        if (!packed || !DrawArt(renderer, art, ArtSlot::HeroMarker, "", {left, top}, {inner, inner},
-                                white))
+        if (!packed ||
+            !DrawArt(renderer, art, ArtSlot::HeroMarker, "", {left, top}, {inner, inner}, white))
             DrawCell(renderer, left, top, inner, heroColor);
     }
 
