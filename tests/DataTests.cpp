@@ -1770,10 +1770,10 @@ void TestShippedDescriptions()
     const SkillDef* wind = data.FindSkill("second_wind");
     const EffectDef* mend = wind != nullptr ? wind->FindEffect("mend") : nullptr;
     const EffectDef* opened = wind != nullptr ? wind->FindEffect("open") : nullptr;
-    Check(wind != nullptr && wind->FocusCost == 3 && mend != nullptr && mend->Power == 8 &&
+    Check(wind != nullptr && wind->FocusCost == 3 && mend != nullptr && mend->Power == 12 &&
               mend->Scaling == "intellect" && opened != nullptr &&
               opened->Op == EffectOp::ApplyStatus && opened->Status == "exposed",
-          "second wind costs 3, heals 8 plus Intellect, and applies Exposed");
+          "second wind costs 3, heals 12 plus Intellect, and applies Exposed");
     const std::string windText = wind != nullptr ? data.DescribeSkill(*wind) : std::string();
     Check(windText.find("higher Intellect mends more") != std::string::npos &&
               windText.find("You are Exposed while you recover") != std::string::npos,

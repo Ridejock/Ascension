@@ -7,7 +7,7 @@
     "defenseNumerator": 1,
     "defenseDenominator": 2,
     "poolK": 1,
-    "poolM": 0.25,
+    "poolM": 0.5,
     "focusPerTurn": 1,
     "focusOnWait": 2,
     "manaPerTurn": 1,

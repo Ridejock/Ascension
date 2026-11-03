@@ -2303,15 +2303,16 @@ void TestSpells()
 
     Battle mage(data, playerFirst());
     Check(mage.Start("mage", 1, "wolf", error), "a mage fight starts");
-    Check(mage.Player().MaxHp == 48 && mage.Player().MaxFocus == 15 && mage.Player().MaxMana == 7 &&
-              mage.Player().Focus == 15 && mage.Player().Mana == 7,
-          "a level-1 mage has 48 health, 15 focus, and 7 mana");
+    Check(mage.Player().MaxHp == 48 && mage.Player().MaxFocus == 18 && mage.Player().MaxMana == 10 &&
+              mage.Player().Focus == 18 && mage.Player().Mana == 10,
+          "a level-1 mage has 48 health, 18 focus, and 10 mana");
     const ActionResult ember = mage.UseSkill("ember");
-    Check(ember.Accepted && ember.Damage == 20 && mage.Player().Focus == 15 &&
-              mage.Player().Mana == 7 && mage.Enemy().Hp == 20,
-          "ember spends no mana and hits for 20");
+    Check(ember.Accepted && ember.Damage == 20 && mage.Player().Focus == 18 &&
+              mage.Player().Mana == 9 && mage.Enemy().Hp == 20,
+          "ember spends 1 mana and hits for 20");
     const ActionResult hex = mage.UseSkill("hex");
-    Check(hex.Accepted && hex.Damage == 16 && mage.Player().Focus == 15 && mage.Player().Mana == 5 &&
+    // The pool was under its max, so the turn opens with 1 mana, then Hex spends 2.
+    Check(hex.Accepted && hex.Damage == 16 && mage.Player().Focus == 18 && mage.Player().Mana == 8 &&
               Holds(mage.Enemy(), "hexed"),
           "hex spends 2 mana and leaves Hexed");
 
@@ -2320,7 +2321,7 @@ void TestSpells()
     cleric.SetPlayerHp(20);
     const ActionResult prayer = cleric.UseSkill("prayer");
     Check(prayer.Accepted && prayer.Healing == 22 && cleric.Player().Hp == 42 &&
-              cleric.Player().Focus == cleric.Player().MaxFocus && cleric.Player().Mana == 10,
+              cleric.Player().Focus == cleric.Player().MaxFocus && cleric.Player().Mana == 11,
           "prayer spends 2 mana and mends 22");
 
     Battle plain(data, playerFirst());
@@ -2331,9 +2332,9 @@ void TestSpells()
     Battle marked(data, playerFirst());
     Check(marked.Start("rogue", 1, "wolf", error), "a second rogue fight starts");
     const ActionResult mark = marked.UseSkill("mark");
-    Check(mark.Accepted && mark.Damage == 14 && marked.Player().Focus == 11 &&
+    Check(mark.Accepted && mark.Damage == 14 && marked.Player().Focus == 13 &&
               marked.Player().Mana == marked.Player().MaxMana && Holds(marked.Enemy(), "marked"),
-          "mark spends 2 focus and leaves Marked");
+          "mark spends 1 focus and leaves Marked");
     const ActionResult follow = marked.UseSkill("ambush");
     Check(follow.Accepted && follow.Damage > ambush.Damage, "ambush hits harder on a marked foe");
 }
@@ -2431,6 +2432,177 @@ void TestBarrowMana()
                 return;
         }
     }
+}
+
+// Ember and Smite cost 1, which the per-turn mana replaces, so the basic cast stays
+// available. Hex costs 2, so mashing it on a long fight is refused before the foe falls.
+void TestSchoolSustain()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    Check(data.Load(), "shipped data loads for school sustain");
+    std::string error;
+    auto playerFirst = [] {
+        return std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player});
+    };
+
+    Battle basic(data, playerFirst());
+    Check(basic.Start("mage", 1, "oathkeeper_varn", error), "ember is measured on a long fight");
+    i32 embers = 0;
+    for (i32 step = 0; step < 12; ++step) {
+        const ActionResult cast = basic.UseSkill("ember");
+        if (!cast.Accepted)
+            break;
+        ++embers;
+    }
+    Check(embers == 12 && basic.Player().Mana >= 1 && basic.Result() == BattleResult::Ongoing,
+          "ember stays castable across a long fight");
+
+    Battle spam(data, playerFirst());
+    Check(spam.Start("mage", 1, "oathkeeper_varn", error), "hex spam is measured on a long fight");
+    i32 hexes = 0;
+    for (i32 step = 0; step < 40; ++step) {
+        const ActionResult cast = spam.UseSkill("hex");
+        if (!cast.Accepted)
+            break;
+        ++hexes;
+    }
+    Check(hexes >= 4 && hexes < 40 && !spam.UseSkill("hex").Accepted &&
+              spam.Result() == BattleResult::Ongoing,
+          "hex can open several turns and then the mana pool refuses it");
+    if (hexes < 4 || hexes >= 40)
+        std::printf("    hexes %d mana %d\n", hexes, spam.Player().Mana);
+}
+
+// Heavy Blow is the Fighter's focus spend. Mark into Ambush is the Rogue's. Both are
+// still payable on the bone archer, the fourth fight of the wing before the first rest.
+void TestBarrowFocus()
+{
+    Database data(ASCENSION_SHIPPED_DATA_DIR);
+    Check(data.Load(), "shipped data loads for a focus cadence");
+    const char* wing[] = {"wolf", "bandit", "tomb_moth", "bone_archer"};
+
+    Hero fighter;
+    Inventory fighterBag;
+    std::string error;
+    Check(fighter.Start(data, error) && fighterBag.Start(data, error) &&
+              fighter.AdoptStarter("fighter", error),
+          "the fighter starts");
+    {
+        auto playerFirst = [] {
+            return std::make_unique<ScriptedTurns>(std::vector<CombatantSide>{CombatantSide::Player});
+        };
+        Battle strike(data, playerFirst());
+        Battle heavy(data, playerFirst());
+        Check(strike.Start("fighter", 1, "wolf", error) && heavy.Start("fighter", 1, "wolf", error),
+              "strike and heavy blow share a wolf");
+        const ActionResult swung = strike.UseSkill("strike");
+        const ActionResult committed = heavy.UseSkill("heavy_blow");
+        Check(swung.Accepted && committed.Accepted && committed.Damage > swung.Damage,
+              "heavy blow hits harder than strike");
+    }
+    Vitals fighterVitals;
+    FillVitals(fighterVitals, HeroPools(data, fighter, fighterBag));
+    bool heavyOnArcher = false;
+    for (const char* fight : wing) {
+        const PoolCaps caps = HeroPools(data, fighter, fighterBag);
+        ClampResources(fighterVitals, caps);
+        const PoolPair pools = PoolsFrom(fighterVitals, caps);
+        Battle battle(data, std::make_unique<AgilityRoundModel>());
+        battle.SetBaseStats(fighter.Attributes());
+        OpeningPools opening;
+        opening.Hp = pools.Hp;
+        opening.Focus = pools.Focus;
+        opening.Mana = pools.Mana;
+        Check(battle.Start(fighter.ClassId(), fighter.Level(), fight, opening, error),
+              "a fighter barrow fight starts");
+        i32 steps = 0;
+        while (battle.Result() == BattleResult::Ongoing && steps < 80) {
+            ++steps;
+            if (battle.Actor() != CombatantSide::Player) {
+                battle.EnemyAct();
+                continue;
+            }
+            ActionResult used = battle.UseSkill("heavy_blow");
+            if (!used.Accepted)
+                used = battle.UseSkill("strike");
+            Check(used.Accepted, "the fighter has a blow");
+            if (!used.Accepted)
+                return;
+            if (std::string(fight) == "bone_archer" && used.SkillId == "heavy_blow")
+                heavyOnArcher = true;
+        }
+        const std::string won = std::string("fighter finishes ") + fight + " hp " +
+                                 std::to_string(battle.Player().Hp) + " focus " +
+                                 std::to_string(battle.Player().Focus);
+        Check(battle.Result() == BattleResult::Victory, won.c_str());
+        if (battle.Result() != BattleResult::Victory)
+            return;
+        const PoolCaps fought = HeroPools(data, fighter, fighterBag);
+        KeepPools(fighterVitals, battle.Player().Hp, battle.Player().Focus, battle.Player().Mana,
+                  fought);
+        const XpGrant grant = fighter.GrantXp(battle.Experience());
+        if (grant.LevelAfter > grant.LevelBefore) {
+            const PoolCaps now = HeroPools(data, fighter, fighterBag);
+            ApplyLevelHp(fighterVitals, fought.MaxHp, now.MaxHp, data.GetProgress().LevelHp);
+            ClampResources(fighterVitals, now);
+        }
+    }
+    Check(heavyOnArcher, "heavy blow is still spent on the bone archer");
+
+    Hero rogue;
+    Inventory rogueBag;
+    Check(rogue.Start(data, error) && rogueBag.Start(data, error) &&
+              rogue.AdoptStarter("rogue", error),
+          "the rogue starts");
+    Vitals rogueVitals;
+    FillVitals(rogueVitals, HeroPools(data, rogue, rogueBag));
+    bool ambushOnArcher = false;
+    for (const char* fight : wing) {
+        const PoolCaps caps = HeroPools(data, rogue, rogueBag);
+        ClampResources(rogueVitals, caps);
+        const PoolPair pools = PoolsFrom(rogueVitals, caps);
+        Battle battle(data, std::make_unique<AgilityRoundModel>());
+        battle.SetBaseStats(rogue.Attributes());
+        OpeningPools opening;
+        opening.Hp = pools.Hp;
+        opening.Focus = pools.Focus;
+        opening.Mana = pools.Mana;
+        Check(battle.Start(rogue.ClassId(), rogue.Level(), fight, opening, error),
+              "a rogue barrow fight starts");
+        i32 steps = 0;
+        while (battle.Result() == BattleResult::Ongoing && steps < 80) {
+            ++steps;
+            if (battle.Actor() != CombatantSide::Player) {
+                battle.EnemyAct();
+                continue;
+            }
+            const bool marked = Holds(battle.Enemy(), "marked");
+            ActionResult used = battle.UseSkill(marked ? "ambush" : "mark");
+            if (!used.Accepted)
+                used = battle.UseSkill("stab");
+            Check(used.Accepted, "the rogue has a blade");
+            if (!used.Accepted)
+                return;
+            if (std::string(fight) == "bone_archer" && used.SkillId == "ambush")
+                ambushOnArcher = true;
+        }
+        const std::string won = std::string("rogue finishes ") + fight + " hp " +
+                                 std::to_string(battle.Player().Hp) + " focus " +
+                                 std::to_string(battle.Player().Focus);
+        Check(battle.Result() == BattleResult::Victory, won.c_str());
+        if (battle.Result() != BattleResult::Victory)
+            return;
+        const PoolCaps fought = HeroPools(data, rogue, rogueBag);
+        KeepPools(rogueVitals, battle.Player().Hp, battle.Player().Focus, battle.Player().Mana,
+                  fought);
+        const XpGrant grant = rogue.GrantXp(battle.Experience());
+        if (grant.LevelAfter > grant.LevelBefore) {
+            const PoolCaps now = HeroPools(data, rogue, rogueBag);
+            ApplyLevelHp(rogueVitals, fought.MaxHp, now.MaxHp, data.GetProgress().LevelHp);
+            ClampResources(rogueVitals, now);
+        }
+    }
+    Check(ambushOnArcher, "ambush is still spent on the bone archer");
 }
 
 void TestStunKeepsTurnStart()
@@ -2585,6 +2757,8 @@ int main()
     TestWolfFight();
     TestSpells();
     TestBarrowMana();
+    TestSchoolSustain();
+    TestBarrowFocus();
     TestSkillsAndGuard();
     TestDefeatAndSkip();
     TestHotReloadAndPassive();
