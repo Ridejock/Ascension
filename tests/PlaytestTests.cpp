@@ -10,8 +10,6 @@
 #include <string_view>
 #include <vector>
 
-#include <SDL3/SDL_scancode.h>
-
 #include "Check.h"
 #include "FightSim.h"
 #include "Playtest.h"
@@ -140,10 +138,10 @@ void TestParseExampleAndEngineFlags()
     Check(options.ClassId == "berserker", "--class berserker");
     Check(options.Fight.Id == "oathkeeper_varn", "--enemy keeps the id for ResolveFight");
     Check(options.Transcript == "varn.txt", "--transcript keeps the file");
-    Check(options.Keys.size() == 4 && options.Keys[0] == SDL_SCANCODE_1 &&
-              options.Keys[1] == SDL_SCANCODE_1 && options.Keys[2] == SDL_SCANCODE_3 &&
-              options.Keys[3] == SDL_SCANCODE_1,
-          "keys are one scancode per name");
+    Check(options.Keys.size() == 4 && options.Keys[0] == Emerald::Key::Num1 &&
+              options.Keys[1] == Emerald::Key::Num1 && options.Keys[2] == Emerald::Key::Num3 &&
+              options.Keys[3] == Emerald::Key::Num1,
+          "keys are one key per name");
 
     PlaytestOptions mixed;
     Check(Parse({"--frames", "9", "--screenshot=shot.png", "--profile", "--level=4", "--capture",
@@ -157,17 +155,17 @@ void TestParseExampleAndEngineFlags()
     PlaytestOptions keys;
     Check(Parse({"--keys", "8 c e u x i r n space up down left right escape"}, keys, why),
           "the README key names parse");
-    Check(keys.Keys.size() == 14 && keys.Keys[0] == SDL_SCANCODE_8 &&
-              keys.Keys[1] == SDL_SCANCODE_C && keys.Keys[8] == SDL_SCANCODE_SPACE &&
-              keys.Keys[9] == SDL_SCANCODE_UP && keys.Keys[12] == SDL_SCANCODE_RIGHT &&
-              keys.Keys[13] == SDL_SCANCODE_ESCAPE,
-          "letters, space, arrows, and escape map to scancodes");
+    Check(keys.Keys.size() == 14 && keys.Keys[0] == Emerald::Key::Num8 &&
+              keys.Keys[1] == Emerald::Key::C && keys.Keys[8] == Emerald::Key::Space &&
+              keys.Keys[9] == Emerald::Key::Up && keys.Keys[12] == Emerald::Key::Right &&
+              keys.Keys[13] == Emerald::Key::Escape,
+          "letters, space, arrows, and escape map to keys");
 
     PlaytestOptions wasd;
     Check(Parse({"--keys", "w a s d"}, wasd, why), "map step keys parse");
-    Check(wasd.Keys.size() == 4 && wasd.Keys[0] == SDL_SCANCODE_W &&
-              wasd.Keys[1] == SDL_SCANCODE_A && wasd.Keys[2] == SDL_SCANCODE_S &&
-              wasd.Keys[3] == SDL_SCANCODE_D,
+    Check(wasd.Keys.size() == 4 && wasd.Keys[0] == Emerald::Key::W &&
+              wasd.Keys[1] == Emerald::Key::A && wasd.Keys[2] == Emerald::Key::S &&
+              wasd.Keys[3] == Emerald::Key::D,
           "w a s d are the map step keys");
 
     PlaytestOptions map;
@@ -197,7 +195,7 @@ void TestParseExampleAndEngineFlags()
     WriteFile(keysPath, "1\n1 c\n");
     PlaytestOptions fromFile;
     Check(Parse({"--keys-file", keysPath.string()}, fromFile, why), "a keys file parses");
-    Check(fromFile.Keys.size() == 3 && fromFile.Keys[2] == SDL_SCANCODE_C,
+    Check(fromFile.Keys.size() == 3 && fromFile.Keys[2] == Emerald::Key::C,
           "the file is whitespace");
     Check(!Parse({"--keys", "1", "--keys-file", keysPath.string()}, fromFile, why),
           "keys and a keys file together fail");
@@ -230,7 +228,7 @@ void TestParseExampleAndEngineFlags()
     Check(Parse({"--save-dir", "playtest-saves", "--keys", "f5 escape"}, saved, why),
           "--save-dir and f5 parse");
     Check(saved.SaveDir == "playtest-saves" && saved.Keys.size() == 2 &&
-              saved.Keys[0] == SDL_SCANCODE_F5 && saved.Keys[1] == SDL_SCANCODE_ESCAPE,
+              saved.Keys[0] == Emerald::Key::F5 && saved.Keys[1] == Emerald::Key::Escape,
           "the save folder and the save key are kept");
     Check(!saved.DefinesRun(), "a save-dir command does not build a hero");
     PlaytestOptions built;
@@ -839,10 +837,10 @@ void TestPellRumorKeys()
     std::string why;
     PlaytestOptions options;
     Check(Parse({"--keys-file", keysPath.string()}, options, why), "the rumor key file parses");
-    const SDL_Scancode expect[] = {
-        SDL_SCANCODE_1,    SDL_SCANCODE_1,    SDL_SCANCODE_1, SDL_SCANCODE_I,
-        SDL_SCANCODE_DOWN, SDL_SCANCODE_E,    SDL_SCANCODE_E, SDL_SCANCODE_E,
-        SDL_SCANCODE_E,    SDL_SCANCODE_DOWN, SDL_SCANCODE_E,
+    const Emerald::Key expect[] = {
+        Emerald::Key::Num1, Emerald::Key::Num1, Emerald::Key::Num1, Emerald::Key::I,
+        Emerald::Key::Down, Emerald::Key::E,    Emerald::Key::E,    Emerald::Key::E,
+        Emerald::Key::E,    Emerald::Key::Down, Emerald::Key::E,
     };
     Check(options.Keys.size() == std::size(expect), "the rumor walk is eleven keys");
     if (options.Keys.size() == std::size(expect)) {

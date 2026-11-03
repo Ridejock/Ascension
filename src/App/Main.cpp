@@ -6,8 +6,6 @@
 #include <string_view>
 #include <vector>
 
-#include <SDL3/SDL_gpu.h>
-
 #include "Ascension/Data/ArtPack.h"
 #include "Emerald/Core/DevOptions.h"
 #include "Emerald/Core/Paths.h"
@@ -36,8 +34,6 @@ int main(int argc, char** argv)
 
     Emerald::ApplicationSpec spec;
     spec.Window.Title = "Ascension";
-    spec.Window.Width = 1280;
-    spec.Window.Height = 720;
     spec.Args = {argv, static_cast<usize>(argc)};
     // The formats emerald_add_shaders actually compiled (shadercross, not fxc).
     spec.ShaderFormats = EMERALD_SHADER_FORMATS;

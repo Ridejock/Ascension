@@ -38,7 +38,6 @@ public:
 
 protected:
     void OnStart() override;
-    void OnEvent(const SDL_Event& event) override;
     void OnUpdate(f32 dt) override;
     void OnRender2D(Emerald::Renderer2D& renderer) override;
 
@@ -127,7 +126,7 @@ private:
     // --choose, once the evolution choice is open, then --pick for each open skill pick.
     // Both wait until a fight is not underway. False when a pick failed and the run is stopping.
     bool TakeAutoPath();
-    // One scripted key per frame. The scancode is turned into the actions bound to it,
+    // One scripted key per frame. The key is turned into the actions bound to it,
     // then HandleAction. The window does not need focus. The run ends after the last
     // key unless --frames is longer. Window key-downs are ignored until the script ends.
     void PlayScriptedKey();
@@ -162,6 +161,7 @@ private:
     void PollFront(f32 dt);
     void TakeFrontStep(FrontStep step);
     void SyncTextInput();
+    void TakeTypedName();
     void DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // E is Confirm and a letter. A text event for that key does not also submit.
     [[nodiscard]] bool NameConfirmSuppressed();
@@ -220,7 +220,7 @@ private:
     std::ofstream m_Transcript;
     usize m_KeyCursor = 0;
     usize m_PickCursor = 0;
-    // True while PlayScriptedKey is applying the actions bound to the scripted scancode.
+    // True while PlayScriptedKey is applying the actions bound to the scripted key.
     // Other key-downs in that moment belong to the window, not the script.
     bool m_ApplyingScript = false;
 

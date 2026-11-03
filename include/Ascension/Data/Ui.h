@@ -5,6 +5,8 @@
 namespace Ascension {
 
 // One #RRGGBB color from the screen data. The draw code turns it into a float color.
+// The numbers below match data/battle_ui.json. They are the fallback a screen uses when
+// that file has not loaded. A successful load replaces every field.
 struct UiRgb {
     u8 Red = 0;
     u8 Green = 0;
@@ -29,23 +31,24 @@ struct UiStyle {
     i32 BarWidth = 300;
     i32 HintClearance = 20;
     i32 MessageMinMilliseconds = 1100;
-    UiRgb Ink{};
-    UiRgb Dim{};
-    UiRgb Frame{};
-    UiRgb Panel{};
-    UiRgb Error{};
-    UiRgb Hp{};
-    UiRgb Focus{};
-    UiRgb Mana{};
-    UiRgb Highlight{};
-    UiRgb Figure{};
-    UiRgb Foe{};
+    UiRgb Ink{237, 232, 214};
+    UiRgb Dim{158, 168, 153};
+    UiRgb Frame{184, 163, 97};
+    UiRgb Panel{26, 31, 28};
+    UiRgb Error{242, 115, 97};
+    UiRgb Hp{199, 82, 77};
+    UiRgb Focus{168, 117, 214};
+    UiRgb Mana{91, 143, 214};
+    UiRgb Highlight{240, 215, 140};
+    UiRgb Figure{199, 158, 82};
+    UiRgb Foe{158, 71, 61};
 };
 
-// Where the battle panels sit, on top of UiStyle. The hint row at the bottom of the
-// window is not part of this: that bar stays where the prompt draw puts it.
+// Where the battle panels sit, on top of UiStyle.
 // BottomInset is the empty pixels under the lower panel. BottomHeight is that panel.
 // SplitGap is the gap between the side panels and the lower panel.
+// HintX is the prompt row's left edge. HintFromBottom is how far that row sits above
+// the bottom of the window.
 struct BattleUi {
     UiStyle Style;
     i32 Margin = 28;
@@ -58,6 +61,8 @@ struct BattleUi {
     i32 FigureSize = 18;
     i32 TurnPreview = 4;
     i32 PackScale = 2;
+    i32 HintX = 48;
+    i32 HintFromBottom = 36;
 };
 
 // Shop-only layout. Type, color, padding, and message timing come from BattleUi::Style.

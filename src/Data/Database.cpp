@@ -4802,7 +4802,8 @@ bool LoadBattleUi(const Json& root, Parsed& parsed, std::string& error)
                     "lineGap", "groupGap", "rowGap", "panelPad", "barHeight", "barWidth",
                     "hintClearance", "messageMinMilliseconds", "margin", "panelTop", "partyWidth",
                     "gutter", "bottomHeight", "bottomInset", "splitGap", "figureSize",
-                    "turnPreview", "packScale", "ink", "dim", "frame", "panel", "error", "hp",
+                    "turnPreview", "packScale", "hintX", "hintFromBottom", "ink", "dim", "frame",
+                    "panel", "error", "hp",
                     "focus", "mana", "highlight", "figure", "foe"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
@@ -4820,7 +4821,9 @@ bool LoadBattleUi(const Json& root, Parsed& parsed, std::string& error)
         !RequireInt(*body, "splitGap", 0, 80, screen.SplitGap, error) ||
         !RequireInt(*body, "figureSize", 8, 64, screen.FigureSize, error) ||
         !RequireInt(*body, "turnPreview", 0, 8, screen.TurnPreview, error) ||
-        !RequireInt(*body, "packScale", 1, 8, screen.PackScale, error))
+        !RequireInt(*body, "packScale", 1, 8, screen.PackScale, error) ||
+        !RequireInt(*body, "hintX", 0, 400, screen.HintX, error) ||
+        !RequireInt(*body, "hintFromBottom", 0, 200, screen.HintFromBottom, error))
         return false;
     parsed.BattleScreen = screen;
     return true;

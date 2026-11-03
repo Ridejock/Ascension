@@ -9,8 +9,8 @@
 
 namespace Ascension {
 
-// One action's bindings, as input.json names them. Emerald's own names: key names from
-// SDL ("E", "Return", "Space") and button names from GamepadButton ("South", "DPadUp",
+// One action's bindings, as input.json names them. Emerald's own names: key names
+// ("E", "Return", "Space") and button names from GamepadButton ("South", "DPadUp",
 // "LeftStickUp"). The game asks about the action; it does not name a key or a button.
 struct ControlBind {
     std::string Name;

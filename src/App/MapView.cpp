@@ -13,15 +13,6 @@ namespace Ascension {
 
 namespace {
 
-// Palette white and steel2, for the name and the log. The grid itself uses the
-// colors in the data.
-constexpr u8 kLabelRed = 244;
-constexpr u8 kLabelGreen = 241;
-constexpr u8 kLabelBlue = 232;
-constexpr u8 kLogRed = 149;
-constexpr u8 kLogGreen = 155;
-constexpr u8 kLogBlue = 171;
-
 Emerald::Vec4 ByteColor(u8 red, u8 green, u8 blue)
 {
     return {static_cast<f32>(red) / 255.0f, static_cast<f32>(green) / 255.0f,
@@ -88,8 +79,9 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                    std::span<const SpawnPlace> places, const ArtGallery* art,
                    const SpawnGlides* motion)
 {
-    const Emerald::Vec4 label = ByteColor(kLabelRed, kLabelGreen, kLabelBlue);
-    const Emerald::Vec4 dim = ByteColor(kLogRed, kLogGreen, kLogBlue);
+    const UiStyle& style = data.GetBattleUi().Style;
+    const Emerald::Vec4 label = ByteColor(style.Ink.Red, style.Ink.Green, style.Ink.Blue);
+    const Emerald::Vec4 dim = ByteColor(style.Dim.Red, style.Dim.Green, style.Dim.Blue);
     const WalkRules& rules = data.GetWalk();
     const MapDef* map = walker.Placed() ? data.FindMap(walker.Place().MapId) : nullptr;
     if (map == nullptr || rules.TilePixels < 1) {

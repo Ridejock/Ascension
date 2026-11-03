@@ -7,9 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#include <SDL3/SDL_scancode.h>
-
 #include "Ascension/Progress/Hero.h"
+#include "Emerald/Input/Keyboard.h"
 #include "Ascension/Progress/Inventory.h"
 
 namespace Ascension {
@@ -58,7 +57,7 @@ struct PlaytestOptions {
     std::optional<i32> Gold;
     std::vector<PlaytestItem> Give;
     std::vector<std::string> Equip;
-    std::vector<SDL_Scancode> Keys;
+    std::vector<Emerald::Key> Keys;
     std::string ChooseId;
     // --pick, in the order they were passed. Applied one open pick at a time.
     std::vector<std::string> PickIds;

@@ -2,7 +2,7 @@
 
 The owner playtest could not read the fight or the shop. Text was small and tight, the acting fighter was a short label, and the command and shop rows did not say what the cursor would do.
 
-The hint row along the bottom (the prompt icons from `prompts.json`) is unchanged: same glyphs, same scale, same place (`x = 48`, `y = height - 36`). The new panels stop above it.
+The hint row along the bottom (the prompt icons from `prompts.json`) is unchanged: same glyphs, same scale. Its place is `hintX` and `hintFromBottom` in `battle_ui.json` (48, and 36 pixels up from the bottom). The new panels stop above it.
 
 ## Before
 
@@ -27,6 +27,8 @@ Type, color, gaps, panel rectangles, the message hold, and the turn preview coun
 | Inside a panel | `panelPad` | 22 |
 | Message hold | `messageMinMilliseconds` | 1100 |
 | Upcoming turns | `turnPreview` | 4 |
+| Hint row, from the left | `hintX` | 48 |
+| Hint row, up from the bottom | `hintFromBottom` | 36 |
 | Shop rows on screen | `shopUi.listRows` | 7 |
 | Shop icons | `shopUi.iconScale` | 2 |
 
