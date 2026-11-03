@@ -1,0 +1,18 @@
+{
+  "titles": [
+    {
+      "id": "wolf_cull",
+      "name": "Wolf Cull",
+      "description": "The System counted a wolf. Strength +1.",
+      "deed": { "on": "kill", "id": "wolf", "atLeast": 1 },
+      "bonus": { "stat": "strength", "amount": 1 }
+    },
+    {
+      "id": "goblin_slayer",
+      "name": "Goblin Slayer",
+      "description": "After a hundred goblins, blows bite harder against humanoids.",
+      "deed": { "on": "kill", "tag": "goblin", "atLeast": 100 },
+      "bonus": { "damagePercent": 10, "against": "humanoid" }
+    }
+  ]
+}

@@ -180,6 +180,20 @@ private:
     [[nodiscard]] int ChoiceCount() const;
     [[nodiscard]] int CommandCount() const;
     [[nodiscard]] bool Choosing() const;
+
+    // Which System or class choice is waiting, once the fight is not still going.
+    // None during a blow, so a deed that opens mid-fight does not take the keys.
+    enum class ChoiceKind : u8 {
+        None,
+        Class,
+        SpendClass,
+        SpendFree,
+        Path,
+        Skill,
+        Title,
+        SystemSkill
+    };
+    [[nodiscard]] ChoiceKind PendingChoice() const;
     [[nodiscard]] bool CursorActive() const;
     [[nodiscard]] bool Pressed(std::string_view action);
     // Held directions repeat after the initial pause, then at the repeat pause.

@@ -55,6 +55,9 @@ struct CombatantState {
     bool ShardDue = false;
     std::vector<std::string> SkillUseIds;
     std::vector<i32> SkillUseCounts;
+    // Family labels from the enemy row. The player's list stays empty; title damage
+    // reads the defender's tags.
+    std::vector<std::string> Tags;
 
     [[nodiscard]] bool Alive() const { return Hp > 0; }
 };
@@ -286,6 +289,12 @@ public:
     // Skill ids the hero kept from the class's picks. Same timing as SetWornItems. An id the
     // class does not offer adds nothing.
     void SetPickedSkills(std::vector<std::string> skillIds);
+    // Catalog skills the System has granted. Same timing as SetPickedSkills. An id the
+    // class already grants is not added twice. An unknown id adds nothing.
+    void SetGrantedSkills(std::vector<std::string> skillIds);
+    // Title damage against a defender tag. Same timing as SetBaseStats. Empty leaves
+    // damage as the formula already wrote it.
+    void SetTagDamage(std::vector<TagDamage> rows);
 
     // Replaces the class stat line (level growth and class grants) before gear and passives.
     // The sandbox passes the hero's attributes. Leave it unset and Start keeps the class formula.
@@ -456,6 +465,8 @@ private:
     StatBlock m_Gear;
     std::vector<std::string> m_WornItems;
     std::vector<std::string> m_PickedSkills;
+    std::vector<std::string> m_GrantedSkills;
+    std::vector<TagDamage> m_TagDamage;
     // Merged hero skills for this fight. Rebuilt in Build. Pointers into it last until the
     // next Build.
     std::vector<HeroGrant> m_HeroGrants;

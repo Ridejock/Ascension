@@ -3,6 +3,7 @@
     {
       "id": "wolf",
       "name": "Wolf",
+      "tags": ["beast"],
       "description": "Hungry, fast, and rarely alone.",
       "level": 1,
       "stats": {

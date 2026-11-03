@@ -259,15 +259,18 @@ struct SaveSlot {
 // a script that already writes run.sav still does.
 class RunSave {
 public:
-    // Version 6. The hero's sheet is the six primaries, and the carried pools are HP,
-    // focus, and mana. A version 5 file keeps its class and name. A custom build's
-    // vitality becomes stamina and its focus attribute becomes will; intellect is 0
-    // until spent. A missing mana key is filled to the new max on load, not stored as
-    // zero. Version 5 is the named hero. Version 4 is a map id and a tile, cleared
-    // spawns are string ids, and HP and focus are kept between fights, including after
-    // a flee. Found ids and dialogue flags were already optional in version 3: a missing
-    // list claimed nothing and set no talk flags.
-    static constexpr u32 kVersion = 6;
+    // Version 7. The System ledger (counters, titles, skill offers, granted skills, and
+    // spent free points) is stored, plus free.floor. A version 6 file has none of those
+    // keys. The migration marks it free.legacy so the load settles free points at the
+    // level already reached, instead of asking for every past level at once. Version 6
+    // is the six primaries, and the carried pools are HP, focus, and mana. A version 5
+    // file keeps its class and name. A custom build's vitality becomes stamina and its
+    // focus attribute becomes will; intellect is 0 until spent. A missing mana key is
+    // filled to the new max on load, not stored as zero. Version 5 is the named hero.
+    // Version 4 is a map id and a tile, cleared spawns are string ids, and HP and focus
+    // are kept between fights, including after a flee. Found ids and dialogue flags were
+    // already optional in version 3: a missing list claimed nothing and set no talk flags.
+    static constexpr u32 kVersion = 7;
 
     explicit RunSave(std::filesystem::path folder);
 

@@ -3,6 +3,7 @@
     {
       "id": "wolf",
       "name": "Wolf",
+      "tags": ["beast"],
       "description": "Hungry, fast, and rarely alone.",
       "level": 1,
       "stats": {
@@ -21,6 +22,7 @@
     {
       "id": "sluice_wolf",
       "name": "Sluice Wolf",
+      "tags": ["beast"],
       "description": "A wet wolf denned in the sluice under the pond.",
       "level": 1,
       "stats": {
@@ -39,6 +41,7 @@
     {
       "id": "bandit",
       "name": "Bandit",
+      "tags": ["humanoid"],
       "description": "A road thief with a nicked blade. Every few cuts, the wound stays open.",
       "level": 3,
       "stats": {
@@ -73,6 +76,7 @@
     {
       "id": "bone_archer",
       "name": "Bone Archer",
+      "tags": ["humanoid"],
       "description": "A barrow archer who draws on the dead. The shot is obvious before it lands. A bone bolt flies after the draw, even if the shot never does.",
       "level": 5,
       "stats": {
@@ -91,6 +95,7 @@
     {
       "id": "dire_wolf",
       "name": "Dire Wolf",
+      "tags": ["beast"],
       "description": "A barrow-fed wolf that runs at the front of the pack. Bigger, and slower to fall.",
       "level": 5,
       "stats": {
@@ -122,6 +127,7 @@
     {
       "id": "barrow_sentry",
       "name": "Barrow Sentry",
+      "tags": ["humanoid"],
       "description": "Stone set to watch the Stillbarrow door. It hardens when the barrow is pressed.",
       "level": 6,
       "stats": {
@@ -140,6 +146,7 @@
     {
       "id": "bear",
       "name": "Bear",
+      "tags": ["beast"],
       "description": "A lone bear past the Stillbarrow door. It mauls until the wound sticks, and low health turns it Enraged.",
       "level": 7,
       "stats": {
@@ -172,6 +179,7 @@
     {
       "id": "oathkeeper_varn",
       "name": "Oathkeeper Varn",
+      "tags": ["humanoid"],
       "description": "Oathkeeper Varn keeps the Stillbarrow. Once he is worn down, he cannot be stunned, and the barrow throws rubble shards into the fight.",
       "level": 8,
       "boss": true,
@@ -211,6 +219,7 @@
     {
       "id": "cairn_warden",
       "name": "Cairn Warden",
+      "tags": ["humanoid"],
       "description": "A cairn that stands up. While its stone is closed, a blow is wasted; the turn is better spent on breath or guard.",
       "level": 7,
       "stats": {
@@ -229,6 +238,7 @@
     {
       "id": "barrow_brute",
       "name": "Barrow Brute",
+      "tags": ["humanoid"],
       "description": "A huge barrow thrall. When it bellows, it cannot be stunned or Exposed until the next big swing lands; only a guard takes the weight.",
       "level": 8,
       "stats": {

@@ -22,7 +22,14 @@
         "will": 0
       },
       "skills": ["strike", "brace", "heavy_blow", "second_wind"],
-      "passives": []
+      "passives": [],
+      "systemSkills": [
+        {
+          "id": "field_mend",
+          "skill": "shield_wall",
+          "deed": { "on": "tag", "tag": "heal", "atLeast": 4 }
+        }
+      ]
     },
     {
       "id": "berserker",
@@ -63,6 +70,26 @@
         "will": 0
       },
       "skills": ["shield_wall", "riposte"],
+      "passives": ["bulwark"]
+    },
+    {
+      "id": "oathbound",
+      "name": "Oathbound",
+      "description": "A {from} who kept mending. The System offers this at level {evolveLevel}.",
+      "evolvesFrom": "fighter",
+      "evolveLevel": 5,
+      "offer": "meld",
+      "meld": { "on": "tag", "tag": "heal", "atLeast": 8 },
+      "bonus": { "will": 2, "defense": 2 },
+      "growth": {
+        "stamina": 2,
+        "defense": 2,
+        "will": 1,
+        "strength": 0,
+        "agility": 0,
+        "intellect": 0
+      },
+      "skills": ["shield_wall"],
       "passives": ["bulwark"]
     }
   ]

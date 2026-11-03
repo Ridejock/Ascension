@@ -177,7 +177,9 @@ void TestSample()
     Check(data.Passives(*fighter).empty(), "fighter has no passive");
 
     const auto evolutions = data.EvolutionsOf("fighter");
-    Check(evolutions.size() == 2, "fighter has two evolutions");
+    Check(evolutions.size() == 3 && evolutions[2]->Id == "oathbound" &&
+              evolutions[2]->Offer == EvolutionOffer::Meld,
+          "fighter has two guaranteed evolutions and the oathbound meld");
     Check(berserker->IsEvolution() && berserker->EvolvesFrom == "fighter" &&
               berserker->EvolveLevel == 5,
           "berserker is a level-5 evolution of fighter");
@@ -1738,9 +1740,11 @@ void TestShippedStarters()
               priest->Skills.size() == 1 && templar->Skills.size() == 1,
           "each evolution adds one skill and one passive");
     const auto fighterPaths = data.EvolutionsOf("fighter");
-    Check(fighterPaths.size() == 2 && fighterPaths[0]->Id == "berserker" &&
-              fighterPaths[1]->Id == "guardian",
-          "fighter still evolves into berserker, then guardian");
+    Check(fighterPaths.size() == 3 && fighterPaths[0]->Id == "berserker" &&
+              fighterPaths[0]->Offer == EvolutionOffer::Guaranteed &&
+              fighterPaths[1]->Id == "guardian" && fighterPaths[2]->Id == "oathbound" &&
+              fighterPaths[2]->Offer == EvolutionOffer::Meld,
+          "fighter still evolves into berserker, then guardian, and a meld");
     const std::string fighterText = data.Describe(*data.FindClass("fighter"));
     const std::string mageText = data.Describe(*mage);
     const std::string rogueText = data.Describe(*rogue);

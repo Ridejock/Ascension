@@ -67,6 +67,7 @@
     {
       "id": "minor_potion",
       "name": "Minor Potion",
+      "tags": ["heal"],
       "description": "A bitter draught that knits a wound.",
       "icon": "potion",
       "rarity": "common",

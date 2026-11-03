@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Ascension/Data/Database.h"
+#include "Ascension/Progress/System.h"
 
 namespace Ascension {
 
@@ -43,6 +44,10 @@ struct CareerRecord {
     std::string SpendId;
     std::vector<StatBlock> LevelSteps;
     std::vector<AttributeSource> Sources;
+    // The System ledger. FreeLegacy is set by a version 6 migration and is not written
+    // back: Import snaps FreeFloor to the loaded level so those levels are not paid again.
+    SystemState System;
+    bool FreeLegacy = false;
 };
 
 // The Fighter's career: XP, level, skill uses, and the evolution they picked. Skill ids and the
@@ -75,8 +80,27 @@ public:
 
     [[nodiscard]] i32 UsesOf(std::string_view skillId) const;
     [[nodiscard]] i32 RankOf(std::string_view skillId) const;
-    // Counts one use. Returns the rank after this use (unchanged when `skillId` is unknown).
+    // Counts one use and tells the System. Returns the rank after this use (unchanged when
+    // `skillId` is unknown).
     i32 NoteUse(std::string_view skillId);
+    // A foe that fell. Tags come from the enemy row, so a deed can count a family.
+    void NoteKill(std::string_view enemyId);
+    // A consumable that was drunk. Tags come from the item row.
+    void NoteItem(std::string_view itemId);
+
+    [[nodiscard]] const SystemState& System() const { return m_System; }
+    [[nodiscard]] bool TitlePending() const { return !m_System.TitleOffers.empty(); }
+    [[nodiscard]] std::vector<std::string> TitleOffers() const { return m_System.TitleOffers; }
+    bool AcceptTitle(std::string_view id, std::string& error);
+    [[nodiscard]] bool SystemSkillPending() const { return !m_System.SkillOffers.empty(); }
+    [[nodiscard]] std::vector<std::string> SystemSkillOffers() const { return m_System.SkillOffers; }
+    bool AcceptSystemSkill(std::string_view offerId, std::string& error);
+    [[nodiscard]] std::vector<std::string> GrantedSkillIds() const { return m_System.GrantedSkills; }
+    // Free points still to spend. Derived from the class rarity, the level, and the floor.
+    [[nodiscard]] i32 FreePool() const;
+    [[nodiscard]] i32 FreeFloor() const { return m_System.FreeFloor; }
+    bool SpendFreePoint(std::string_view statId, std::string& error);
+    [[nodiscard]] std::vector<TagDamage> TitleDamage() const;
 
     // The rank this skill would have if the next accepted use counted. Unknown ids stay put.
     // The sandbox asks for this before the blow, so the use that crosses a rank deals the new
@@ -172,6 +196,7 @@ public:
     bool ImportCareer(const CareerRecord& in, std::string& error);
 
 private:
+    void TellSystem(const SystemEvent& event);
     void NoteLevelSteps();
     [[nodiscard]] StatBlock GrowthForStep(const ClassDef& klass, i32 step) const;
     [[nodiscard]] std::vector<StatBlock> LevelSteps() const;
@@ -192,6 +217,7 @@ private:
     std::string m_SpendId;
     std::vector<StatBlock> m_LevelSteps;
     std::vector<AttributeSource> m_ClassSources;
+    SystemState m_System;
 };
 
 } // namespace Ascension

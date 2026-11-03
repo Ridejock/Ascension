@@ -1,10 +1,10 @@
 {
   "rarities": [
-    { "id": "common", "name": "Common", "color": "#9DA3AD" },
-    { "id": "uncommon", "name": "Uncommon", "color": "#5EC45E" },
-    { "id": "rare", "name": "Rare", "color": "#4A90E2" },
-    { "id": "epic", "name": "Epic", "color": "#A35BD9" },
-    { "id": "legendary", "name": "Legendary", "color": "#F0902E" },
-    { "id": "mythic", "name": "Mythic", "color": "#E8503A", "uniquePerType": true }
+    { "id": "common", "name": "Common", "color": "#9DA3AD", "freePoints": 1 },
+    { "id": "uncommon", "name": "Uncommon", "color": "#5EC45E", "freePoints": 2 },
+    { "id": "rare", "name": "Rare", "color": "#4A90E2", "freePoints": 3 },
+    { "id": "epic", "name": "Epic", "color": "#A35BD9", "freePoints": 4 },
+    { "id": "legendary", "name": "Legendary", "color": "#F0902E", "freePoints": 5 },
+    { "id": "mythic", "name": "Mythic", "color": "#E8503A", "uniquePerType": true, "freePoints": 6 }
   ]
 }

@@ -38,6 +38,7 @@
     {
       "id": "second_wind",
       "name": "Second Wind",
+      "tags": ["heal"],
       "description": "Catch your breath and knit a wound; higher {mend.scaling} mends more. You are {open.status} while you recover.",
       "kind": "active",
       "target": "self",
@@ -438,6 +439,7 @@
     {
       "id": "rally",
       "name": "Rally",
+      "tags": ["heal"],
       "description": "Set your guard and catch your breath in one motion.",
       "kind": "active",
       "target": "self",
@@ -632,6 +634,7 @@
     {
       "id": "prayer",
       "name": "Prayer",
+      "tags": ["heal"],
       "description": "A {school} prayer. Higher {mend.scaling} mends more.",
       "kind": "active",
       "target": "self",

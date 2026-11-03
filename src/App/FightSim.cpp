@@ -821,6 +821,8 @@ SimRun SimulateBuild(const Database& data, const RunSpec& spec)
     battle.SetGear(inventory.GearBonus());
     battle.SetWornItems(inventory.WornIds());
     battle.SetPickedSkills(hero.PickedIds());
+    battle.SetGrantedSkills(hero.GrantedSkillIds());
+    battle.SetTagDamage(hero.TitleDamage());
     PushRanks(battle, hero, data, {});
     std::string why;
     if (spec.UsePools) {

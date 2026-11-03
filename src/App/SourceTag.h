@@ -13,7 +13,9 @@ namespace Ascension {
     std::string tag;
     for (const GrantOrigin& origin : grant.Origins) {
         std::string name = origin.Id;
-        if (origin.Source == GrantSource::Item) {
+        if (origin.Source == GrantSource::System) {
+            name = "System";
+        } else if (origin.Source == GrantSource::Item) {
             const ItemDef* piece = data.FindItem(origin.Id);
             if (piece != nullptr)
                 name = piece->Name;
