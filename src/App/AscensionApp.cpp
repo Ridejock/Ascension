@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 #include "FoeAlert.h"
@@ -9,10 +10,13 @@
 #include "MapView.h"
 #include "SourceTag.h"
 
+#include "Ascension/View/AsciiGlyphs.h"
+#include "Emerald/Assets/Image.h"
 #include "Emerald/Input/InputBindings.h"
 #include "Emerald/Math/Mat4.h"
 #include "Emerald/Renderer/DebugText.h"
 #include "Emerald/Renderer/Sprite.h"
+#include "Emerald/Renderer/Texture.h"
 #include "Emerald/Renderer/TextureAtlas.h"
 
 namespace Ascension {
@@ -90,12 +94,42 @@ void DrawFigure(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, f32 
     renderer.FillRect(origin + Emerald::Vec2{s * 2.3f, s * 4.4f}, {s * 0.8f, s * 2.1f}, color);
 }
 
+// The class letter in the hero's figure slot. The map hero is '@' and does not use this.
+bool DrawAsciiHero(Emerald::Renderer2D& renderer, const Database& data,
+                   const Emerald::Texture* ascii, std::string_view classId,
+                   const Emerald::Vec2& origin, const Emerald::Vec2& size)
+{
+    if (ascii == nullptr)
+        return false;
+    renderer.FillRect(origin, size, kAsciiPaper);
+    const f32 padX = size.x * 0.18f;
+    const f32 padY = size.y * 0.12f;
+    const char glyph = classId.empty()
+                           ? kAsciiFallback
+                           : FindAsciiGlyph(data.GetAscii().Classes, classId, kAsciiFallback);
+    DrawAsciiGlyph(renderer, *ascii, glyph, origin + Emerald::Vec2{padX, padY},
+                   {size.x - padX * 2.0f, size.y - padY * 2.0f}, kAsciiInk);
+    return true;
+}
+
 // A pack battle image is drawn when the manifest lists this foe. Otherwise a foe
 // with a data color is a square of that color, and anyone else keeps the figure.
+// `ascii` replaces that picture with the foe's glyph.
 void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const ArtGallery* art,
                  const CombatantState& foe, const Emerald::Vec2& origin, f32 size, bool alive,
-                 const Emerald::Vec4& fallback, const Emerald::Vec4& dead)
+                 const Emerald::Vec4& fallback, const Emerald::Vec4& dead,
+                 const Emerald::Texture* ascii)
 {
+    const Emerald::Vec2 slot{size * 4.0f, size * 6.5f};
+    if (ascii != nullptr) {
+        renderer.FillRect(origin, slot, kAsciiPaper);
+        const f32 padX = slot.x * 0.18f;
+        const f32 padY = slot.y * 0.12f;
+        const char glyph = FindAsciiGlyph(data.GetAscii().Foes, foe.Id, kAsciiFallback);
+        DrawAsciiGlyph(renderer, *ascii, glyph, origin + Emerald::Vec2{padX, padY},
+                       {slot.x - padX * 2.0f, slot.y - padY * 2.0f}, alive ? kAsciiInk : kAsciiDim);
+        return;
+    }
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     if (art != nullptr && !art->IsEmpty() &&
         DrawArt(renderer, art, ArtSlot::FoeBattle, foe.Id, origin, {size * 4.0f, size * 6.5f},
@@ -103,9 +137,9 @@ void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const ArtG
         return;
     const EnemyDef* def = data.FindEnemy(foe.Id);
     if (def != nullptr && def->HasColor) {
-        const Emerald::Vec4 tint = alive ? Emerald::Vec4{def->Red / 255.0f, def->Green / 255.0f,
-                                                         def->Blue / 255.0f, 1.0f}
-                                         : dead;
+        const Emerald::Vec4 tint =
+            alive ? Emerald::Vec4{def->Red / 255.0f, def->Green / 255.0f, def->Blue / 255.0f, 1.0f}
+                  : dead;
         const f32 side = size * 4.0f;
         renderer.FillRect(origin + Emerald::Vec2{0.0f, size * 1.25f}, {side, side}, tint);
         return;
@@ -140,8 +174,8 @@ void DrawHalo(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, const 
     renderer.DrawFrame(origin, size, kSelectBand, color);
 }
 
-void DrawPanel(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, const Emerald::Vec2& size,
-               const Emerald::Vec4& fill, const Emerald::Vec4& edge)
+void DrawPanel(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin,
+               const Emerald::Vec2& size, const Emerald::Vec4& fill, const Emerald::Vec4& edge)
 {
     renderer.FillPanel(origin, size, fill, edge);
 }
@@ -458,7 +492,8 @@ std::string GearDelta(const Database& data, const Inventory& bag, const ItemDef&
     std::string line;
     bool any = false;
     for (const StatDef& stat : data.GetStats()) {
-        const i32 delta = item.Bonus.Get(stat.Id) - (worn != nullptr ? worn->Bonus.Get(stat.Id) : 0);
+        const i32 delta =
+            item.Bonus.Get(stat.Id) - (worn != nullptr ? worn->Bonus.Get(stat.Id) : 0);
         if (delta == 0)
             continue;
         any = true;
@@ -494,10 +529,10 @@ PoolCaps FoughtCaps(const CombatantState& player)
 }
 
 void FillSlotLine(MenuLine& line, const ControlRules& rules, const SaveSlot& slot,
-                 const Database& data)
+                  const Database& data)
 {
-    line.Text = slot.Legacy ? rules.TitleLegacySlot
-                            : rules.TitleSlot + " " + std::to_string(slot.Number);
+    line.Text =
+        slot.Legacy ? rules.TitleLegacySlot : rules.TitleSlot + " " + std::to_string(slot.Number);
     if (!slot.Occupied) {
         line.Text += "  ";
         line.Text += rules.TitleSlotEmpty;
@@ -557,8 +592,7 @@ void AscensionApp::PacePresented(f32 dt)
 {
     if (!m_Data.IsLoaded())
         return;
-    const f32 hold =
-        static_cast<f32>(m_Data.GetBattleUi().Style.MessageMinMilliseconds) / 1000.0f;
+    const f32 hold = static_cast<f32>(m_Data.GetBattleUi().Style.MessageMinMilliseconds) / 1000.0f;
     m_ShownAge += dt;
     if (!m_Pending.empty() && (m_Shown.empty() || m_ShownAge >= hold)) {
         m_Shown = m_Pending.front();
@@ -566,7 +600,8 @@ void AscensionApp::PacePresented(f32 dt)
         m_ShownAge = 0.0f;
     }
     const bool scripting = m_KeyCursor < m_Play.Keys.size();
-    if (scripting || m_Pause.Open || m_Battle == nullptr || m_Talk || m_Camp || m_Picking || m_Aiming)
+    if (scripting || m_Pause.Open || m_Battle == nullptr || m_Talk || m_Camp || m_Picking ||
+        m_Aiming)
         return;
     if (m_Battle->Result() != BattleResult::Ongoing || m_Battle->Actor() != CombatantSide::Enemy)
         return;
@@ -740,9 +775,9 @@ void AscensionApp::ResolveFoe()
 {
     if (m_Battle == nullptr)
         return;
-    for (i32 step = 0; step < 8 && m_Battle != nullptr &&
-                       m_Battle->Result() == BattleResult::Ongoing &&
-                       m_Battle->Actor() == CombatantSide::Enemy;
+    for (i32 step = 0;
+         step < 8 && m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing &&
+         m_Battle->Actor() == CombatantSide::Enemy;
          ++step) {
         const i32 markedBefore = m_Battle->TargetIndex();
         const ActionResult act = m_Battle->EnemyAct();
@@ -1042,8 +1077,8 @@ void AscensionApp::MaybeSettle()
         return;
     if (result == BattleResult::Fled && !m_VitalsSettled) {
         const PoolCaps fought = FoughtCaps(m_Battle->Player());
-        KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, m_Battle->Player().Mana,
-                  fought);
+        KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus,
+                  m_Battle->Player().Mana, fought);
         m_VitalsSettled = true;
     }
 
@@ -1419,8 +1454,7 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     m_PlaceTile = m_Walker.Place().Tile;
     Note("Map " + m_Walker.Place().MapId + ".");
     const char* block = m_Hero.IsReady() ? m_Hero.NextFightBlock() : nullptr;
-    const LoadedSpawn plan =
-        PlanLoadedSpawn(m_Standing, m_ResumeSpawn, m_ResumeFight.Known, block);
+    const LoadedSpawn plan = PlanLoadedSpawn(m_Standing, m_ResumeSpawn, m_ResumeFight.Known, block);
     if (plan == LoadedSpawn::Hold || plan == LoadedSpawn::Settle)
         m_HoldVictory = true;
     if (plan == LoadedSpawn::Resume || m_HoldVictory)
@@ -1550,8 +1584,8 @@ void AscensionApp::FinishBoot(bool resumed)
     // not build a hero.
     if (m_Play.Fight.Id.empty()) {
         if (!EnterOverland(m_Play.MapId)) {
-            m_StartError = m_Play.MapId.empty() ? "no hub map"
-                                                : "map '" + m_Play.MapId + "' does not exist";
+            m_StartError =
+                m_Play.MapId.empty() ? "no hub map" : "map '" + m_Play.MapId + "' does not exist";
             std::fprintf(stderr, "%s\n", m_StartError.c_str());
             Note(m_StartError);
             Quit();
@@ -1573,7 +1607,8 @@ void AscensionApp::ContinueSavedRun()
 {
     std::string why;
     const bool indexed = m_Front.Slot >= 0 && m_Front.Slot < static_cast<i32>(m_Slots.size());
-    const std::string slotId = indexed ? m_Slots[static_cast<usize>(m_Front.Slot)].Id : std::string{};
+    const std::string slotId =
+        indexed ? m_Slots[static_cast<usize>(m_Front.Slot)].Id : std::string{};
     if (!indexed || !LoadSlot(slotId, why)) {
         if (indexed) {
             m_Slots[static_cast<usize>(m_Front.Slot)].Readable = false;
@@ -1693,8 +1728,8 @@ void AscensionApp::TypeNameFromKeys()
     if (m_Front.Phase != FrontPhase::Name || m_NameTyped)
         return;
     const Emerald::Keyboard& keys = GetInput().GetKeyboard();
-    const bool shift = keys.IsKeyDown(Emerald::Key::LeftShift) ||
-                       keys.IsKeyDown(Emerald::Key::RightShift);
+    const bool shift =
+        keys.IsKeyDown(Emerald::Key::LeftShift) || keys.IsKeyDown(Emerald::Key::RightShift);
     std::string chunk;
     for (int index = 0; index < 26; ++index) {
         const Emerald::Key key = Emerald::LetterKey(index);
@@ -1703,10 +1738,10 @@ void AscensionApp::TypeNameFromKeys()
         const char lower = static_cast<char>('a' + index);
         chunk.push_back(shift ? static_cast<char>(lower - 'a' + 'A') : lower);
     }
-    const Emerald::Key digits[] = {
-        Emerald::Key::Num1, Emerald::Key::Num2, Emerald::Key::Num3, Emerald::Key::Num4,
-        Emerald::Key::Num5, Emerald::Key::Num6, Emerald::Key::Num7, Emerald::Key::Num8,
-        Emerald::Key::Num9, Emerald::Key::Num0};
+    const Emerald::Key digits[] = {Emerald::Key::Num1, Emerald::Key::Num2, Emerald::Key::Num3,
+                                   Emerald::Key::Num4, Emerald::Key::Num5, Emerald::Key::Num6,
+                                   Emerald::Key::Num7, Emerald::Key::Num8, Emerald::Key::Num9,
+                                   Emerald::Key::Num0};
     const char digitChars[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
     for (int index = 0; index < 10; ++index) {
         if (keys.WasKeyPressed(digits[index]))
@@ -1748,6 +1783,8 @@ void AscensionApp::PollFront(f32 dt)
     TypeNameFromKeys();
     if (Pressed(kHelp))
         m_ShowHelp = !m_ShowHelp;
+    if (Pressed(kAscii))
+        ToggleAscii();
     if (Pressed(kDebugNewGame)) {
         const FrontPhase before = m_Front.Phase;
         DebugNewGame();
@@ -1872,8 +1909,7 @@ int AscensionApp::ChoiceCount() const
     const bool pickingClass = m_Hero.ChoosingStarter();
     const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
     const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
-    const bool pickingSkill =
-        m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+    const bool pickingSkill = m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
     if (pickingClass) {
         const int starters = static_cast<int>(m_Hero.StarterIds().size());
         return starters < kMaxHotkeys ? starters : kMaxHotkeys;
@@ -1956,7 +1992,8 @@ void AscensionApp::NotePromptDevice()
         m_PromptFamily = rules.TextFamily;
     const Emerald::Gamepads& pads = input.GetGamepads();
     if (pads.GetPressedButton().has_value())
-        m_PromptFamily = PromptFamilyForType(rules, Emerald::GetGamepadTypeName(pads.GetLastUsedType()));
+        m_PromptFamily =
+            PromptFamilyForType(rules, Emerald::GetGamepadTypeName(pads.GetLastUsedType()));
 }
 
 void AscensionApp::EnsurePromptSheets()
@@ -1999,8 +2036,9 @@ void AscensionApp::DrawHints(Emerald::Renderer2D& renderer, f32 x, f32 y, f32 ma
     f32 pen = x;
     bool first = true;
     for (const HintChip& hint : hints) {
-        const PromptMark mark =
-            hint.Action.empty() ? PromptMark{} : ResolvePrompt(GetInput(), rules, hint.Action, family);
+        const PromptMark mark = hint.Action.empty()
+                                    ? PromptMark{}
+                                    : ResolvePrompt(GetInput(), rules, hint.Action, family);
         const PromptTile* tile = nullptr;
         if (mark.Icon && sheet != nullptr && texture != nullptr)
             tile = FindPromptTile(*sheet, mark.Tile);
@@ -2056,6 +2094,7 @@ void AscensionApp::RetargetPauseHints(std::vector<HintChip>& hints) const
     AddHint(hints, kMoveSouth, "MOVE");
     AddHint(hints, kConfirm, "CONFIRM");
     AddHint(hints, kCancel, "CANCEL");
+    AddHint(hints, kAscii, "ASCII");
 }
 
 void AscensionApp::DrawPauseMenu(Emerald::Renderer2D& renderer, f32 width, f32 height)
@@ -2106,7 +2145,8 @@ void AscensionApp::DrawPauseMenu(Emerald::Renderer2D& renderer, f32 width, f32 h
     rows.push_back(std::move(cont));
     rows.push_back(std::move(quit));
     const f32 menuFloor = panelY + panelH - pad;
-    DrawMenu(renderer, rows, m_Pause.Row, {textX, y}, textW > 0.0f ? textW : 0.0f, menuFloor, style);
+    DrawMenu(renderer, rows, m_Pause.Row, {textX, y}, textW > 0.0f ? textW : 0.0f, menuFloor,
+             style);
 }
 
 void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 height)
@@ -2143,14 +2183,16 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const i32 starters = static_cast<i32>(m_Data.Starters().size());
     const i32 rows = FrontRowCount(m_Front, starters);
     const bool naming = m_Front.Phase == FrontPhase::Name;
-    const bool showFigure = m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin;
+    const bool showFigure =
+        m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin;
     const f32 fig = static_cast<f32>(ui.FigureSize);
     const Emerald::Vec2 figSize{fig * 4.0f, fig * 6.5f};
     const f32 rowH = bodyH;
     const f32 rowGap = static_cast<f32>(style.RowGap);
     f32 listH = naming ? bodyH : (rows > 0 ? rowH * static_cast<f32>(rows) + rowGap : bodyH);
     const f32 figureH = showFigure ? figSize.y : 0.0f;
-    const bool detailed = m_Front.Phase == FrontPhase::Class || m_Front.Phase == FrontPhase::Begin ||
+    const bool detailed = m_Front.Phase == FrontPhase::Class ||
+                          m_Front.Phase == FrontPhase::Begin ||
                           m_Front.Phase == FrontPhase::Title || m_Front.Phase == FrontPhase::Slots;
     const f32 detailH =
         detailed ? Emerald::DebugTextLineHeight(style.DetailScale) * 3.0f + group : 0.0f;
@@ -2235,13 +2277,15 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             const ClassDef* klass = m_Data.Starters()[static_cast<usize>(m_Front.ClassRow)];
             if (klass != nullptr)
                 classId = klass->Id;
-        } else if (m_Front.Phase == FrontPhase::Class && m_Front.Row >= 0 && m_Front.Row < starters) {
+        } else if (m_Front.Phase == FrontPhase::Class && m_Front.Row >= 0 &&
+                   m_Front.Row < starters) {
             const ClassDef* klass = m_Data.Starters()[static_cast<usize>(m_Front.Row)];
             if (klass != nullptr)
                 classId = klass->Id;
         }
-        if (classId.empty() || m_Gallery.IsEmpty() ||
-            !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, classId, figAt, figSize, white))
+        if (!DrawAsciiHero(renderer, m_Data, AsciiTexture(), classId, figAt, figSize) &&
+            (classId.empty() || m_Gallery.IsEmpty() ||
+             !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, classId, figAt, figSize, white)))
             DrawFigure(renderer, figAt, fig, Paint(style.Figure));
         menuX = textX + figSize.x + rowGap;
         menuW = textW - figSize.x - rowGap;
@@ -2308,7 +2352,8 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     }
 
     const std::string notice = FrontNoticeLine();
-    const std::string foot = !notice.empty() ? notice : (m_Log.empty() ? std::string{} : m_Log.back());
+    const std::string foot =
+        !notice.empty() ? notice : (m_Log.empty() ? std::string{} : m_Log.back());
     if (!foot.empty() && textW > 0.0f) {
         const f32 footY = panelY + panelH - pad - noticeH;
         Emerald::DrawDebugText(renderer, {textX, footY}, FitLine(foot, style.BodyScale, textW),
@@ -2320,7 +2365,51 @@ void AscensionApp::FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 hei
 {
     if (m_Pause.Open)
         DrawPauseMenu(renderer, width, height);
+    DrawAsciiBadge(renderer, width);
     renderer.End();
+}
+
+const Emerald::Texture* AscensionApp::AsciiTexture() const
+{
+    if (!m_Ascii || m_AsciiSheet == nullptr || !m_AsciiSheet->HasGpuTexture())
+        return nullptr;
+    return m_AsciiSheet.get();
+}
+
+bool AscensionApp::EnsureAsciiSheet()
+{
+    if (m_AsciiSheet != nullptr && m_AsciiSheet->HasGpuTexture())
+        return true;
+    const AsciiAtlas atlas = RasterizeAsciiAtlas();
+    Emerald::TextureOptions options;
+    options.Filter = Emerald::TextureFilter::Nearest;
+    std::optional<Emerald::Texture> texture =
+        Emerald::Texture::Create(GetRenderer().GetDevice(), atlas.Image, options);
+    if (!texture || !texture->HasGpuTexture())
+        return false;
+    m_AsciiSheet = std::make_unique<Emerald::Texture>(std::move(*texture));
+    return true;
+}
+
+void AscensionApp::ToggleAscii()
+{
+    if (!m_Ascii && !EnsureAsciiSheet()) {
+        Note("ASCII atlas could not be built.");
+        return;
+    }
+    m_Ascii = !m_Ascii;
+    Note(m_Ascii ? "ASCII." : "Pictures.");
+}
+
+void AscensionApp::DrawAsciiBadge(Emerald::Renderer2D& renderer, f32 width)
+{
+    if (!m_Ascii)
+        return;
+    const f32 band = Emerald::MeasureDebugText("ASCII", 2).x;
+    f32 x = width - 16.0f - band;
+    if (x < 8.0f)
+        x = 8.0f;
+    Emerald::DrawDebugText(renderer, {x, 8.0f}, "ASCII", kAsciiInk, 2);
 }
 
 void AscensionApp::InspectTile()
@@ -2391,6 +2480,8 @@ void AscensionApp::PollActions(f32 dt)
         if (m_Front.Phase != FrontPhase::Playing)
             return;
     }
+    if (Pressed(kAscii))
+        HandleAction(kAscii);
     if (m_Pause.Open) {
         if (Pressed(kSave))
             HandleAction(kSave);
@@ -2435,17 +2526,17 @@ void AscensionApp::PollActions(f32 dt)
             hold.Repeating = false;
         }
     } else {
-        const std::string_view nav[] = {kMoveNorth, kMoveSouth, kMoveWest, kMoveEast, kCyclePrev,
-                                        kCycleNext};
+        const std::string_view nav[] = {kMoveNorth, kMoveSouth, kMoveWest,
+                                        kMoveEast,  kCyclePrev, kCycleNext};
         for (int index = 0; index < 6; ++index) {
             if (NavStep(m_Nav[index], nav[index], dt))
                 HandleAction(nav[index]);
         }
     }
 
-    const std::string_view shots[] = {kConfirm, kCancel,  kMenu,   kContext, kInteract, kWait,
-                                      kFlee,    kUnequip, kRetry,  kNext,    kSlot1,    kSlot2,
-                                      kSlot3,   kSlot4,   kSlot5,  kSlot6,   kSlot7,    kSlot8};
+    const std::string_view shots[] = {kConfirm, kCancel,  kMenu,  kContext, kInteract, kWait,
+                                      kFlee,    kUnequip, kRetry, kNext,    kSlot1,    kSlot2,
+                                      kSlot3,   kSlot4,   kSlot5, kSlot6,   kSlot7,    kSlot8};
     for (const std::string_view action : shots) {
         if (Pressed(action))
             HandleAction(action);
@@ -2497,8 +2588,7 @@ void AscensionApp::ChooseHotkey(int digit)
     const bool pickingClass = m_Hero.ChoosingStarter();
     const bool spending = !pickingClass && m_Hero.ClassPool() > 0;
     const bool choosingPath = m_Hero.ChoicePending() && !pickingClass && !spending;
-    const bool pickingSkill =
-        m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
+    const bool pickingSkill = m_Hero.PickPending() && !pickingClass && !spending && !choosingPath;
     if (!pickingClass && !spending && !choosingPath && !pickingSkill)
         return;
     if (digit < 0 || digit >= kMaxHotkeys)
@@ -2773,8 +2863,8 @@ void AscensionApp::HandleBattle(std::string_view action)
         return;
     }
     const bool vertical = action == kMoveNorth || action == kMoveSouth;
-    const bool horizontal = action == kMoveWest || action == kMoveEast || action == kCyclePrev ||
-                            action == kCycleNext;
+    const bool horizontal =
+        action == kMoveWest || action == kMoveEast || action == kCyclePrev || action == kCycleNext;
     if (vertical) {
         const int count = CommandCount();
         if (count <= 0)
@@ -2842,8 +2932,8 @@ void AscensionApp::DebugRespawnFoes()
     // Ongoing, or a map fight still on screen after the blow (a path is open, so
     // the spawn is not cleared yet). Clearing the lists there would bring the foe
     // back and the settle would remove them again.
-    const bool busy = m_Battle != nullptr &&
-                      (m_Battle->Result() == BattleResult::Ongoing || m_MapFight.Active);
+    const bool busy =
+        m_Battle != nullptr && (m_Battle->Result() == BattleResult::Ongoing || m_MapFight.Active);
     RunState run;
     run.Defeated = m_Defeated;
     run.Cleared = m_MapMemory.Cleared;
@@ -2969,6 +3059,10 @@ void AscensionApp::HandleAction(std::string_view action)
     }
     if (action == kHelp) {
         m_ShowHelp = !m_ShowHelp;
+        return;
+    }
+    if (action == kAscii) {
+        ToggleAscii();
         return;
     }
     // Scripted keys arrive here. A live frame already applied the edge in
@@ -3212,10 +3306,9 @@ void AscensionApp::PlayScriptedKey()
         return;
     // Finish a foe turn left over from the previous frame before this press is spent.
     if (m_Battle != nullptr) {
-        for (i32 pass = 0;
-             pass < kScriptPumpPasses && m_Battle != nullptr &&
-             m_Battle->Result() == BattleResult::Ongoing &&
-             m_Battle->Actor() == CombatantSide::Enemy;
+        for (i32 pass = 0; pass < kScriptPumpPasses && m_Battle != nullptr &&
+                           m_Battle->Result() == BattleResult::Ongoing &&
+                           m_Battle->Actor() == CombatantSide::Enemy;
              ++pass)
             ResolveFoe();
     }
@@ -3251,8 +3344,7 @@ void AscensionApp::OnUpdate(f32 dt)
 {
     m_Gallery.Advance(dt);
     if (m_Data.IsLoaded()) {
-        AdvanceConfirmWindow(m_NewGameConfirm, dt,
-                             m_Data.GetControls().DebugConfirmMilliseconds);
+        AdvanceConfirmWindow(m_NewGameConfirm, dt, m_Data.GetControls().DebugConfirmMilliseconds);
     }
     if (m_Front.Phase != FrontPhase::Playing) {
         TakeTypedName();
@@ -3456,8 +3548,8 @@ void AscensionApp::CaptureSlots()
 bool AscensionApp::TryResume(std::string& error)
 {
     const std::vector<SaveSlot> slots =
-        RunSave(SaveFolder()).List(m_Data.IsLoaded() ? m_Data.GetControls().SaveSlotCount
-                                                     : kMinSaveSlots);
+        RunSave(SaveFolder())
+            .List(m_Data.IsLoaded() ? m_Data.GetControls().SaveSlotCount : kMinSaveSlots);
     const i32 newest = NewestSaveSlot(slots);
     if (newest < 0) {
         error.clear();
@@ -3687,6 +3779,7 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
     AddHint(hints, kSave, "SAVE");
     AddHint(hints, kDebugRespawnFoes, "FOES");
     AddHint(hints, kDebugNewGame, "NEW");
+    AddHint(hints, kAscii, "ASCII");
     RetargetPauseHints(hints);
     const f32 hintX = static_cast<f32>(ui.HintX);
     DrawHints(renderer, hintX, frame.HintTop, width - hintX, hints, true);
@@ -3766,8 +3859,9 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     if (playerTurn || aimSelf)
         DrawHalo(renderer, figAt, figSize, highlight);
-    if (m_Gallery.IsEmpty() ||
-        !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, m_Hero.ClassId(), figAt, figSize, white))
+    if (!DrawAsciiHero(renderer, m_Data, AsciiTexture(), m_Hero.ClassId(), figAt, figSize) &&
+        (m_Gallery.IsEmpty() || !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle,
+                                         m_Hero.ClassId(), figAt, figSize, white)))
         DrawFigure(renderer, figAt, fig, Paint(style.Figure));
 
     const f32 textX = figAt.x + figSize.x + rowGap;
@@ -3826,8 +3920,9 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         if (sheetLine.empty())
             return;
         if (y + sheetH <= frame.Left.y + frame.LeftSize.y - pad)
-            Emerald::DrawDebugText(renderer, {textX, y}, FitLine(sheetLine, style.DetailScale, textW),
-                                   ink, style.DetailScale);
+            Emerald::DrawDebugText(renderer, {textX, y},
+                                   FitLine(sheetLine, style.DetailScale, textW), ink,
+                                   style.DetailScale);
         y += sheetH + 4.0f;
         sheetLine.clear();
         sheetCount = 0;
@@ -3848,9 +3943,10 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         y += lineGap;
         const f32 statusH = Emerald::DebugTextLineHeight(style.DetailScale);
         if (y + statusH <= frame.Left.y + frame.LeftSize.y - pad)
-            Emerald::DrawDebugText(renderer, {frame.Left.x + pad, y},
-                                   FitLine(playerStatus, style.DetailScale, frame.LeftSize.x - pad * 2.0f),
-                                   error, style.DetailScale);
+            Emerald::DrawDebugText(
+                renderer, {frame.Left.x + pad, y},
+                FitLine(playerStatus, style.DetailScale, frame.LeftSize.x - pad * 2.0f), error,
+                style.DetailScale);
         y += statusH;
     }
     const f32 heroBottom = figAt.y + figSize.y > y ? figAt.y + figSize.y : y;
@@ -4013,12 +4109,13 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         if (acting || aimOne)
             DrawHalo(renderer, foeAt, figSize, highlight);
         DrawFoeBody(renderer, m_Data, &m_Gallery, enemy, foeAt, fig, enemy.Alive(),
-                    Paint(style.Foe), dim);
+                    Paint(style.Foe), dim, AsciiTexture());
         const f32 nameX = foeAt.x + figSize.x + rowGap;
         const f32 nameW = foeX + foeW > nameX ? foeX + foeW - nameX : 0.0f;
         std::string foeTitle = enemy.Name;
         if (m_DirectEnemy.empty() && encounterTotal > 0)
-            foeTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
+            foeTitle +=
+                "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
         if (aimOne)
             foeTitle = "> " + foeTitle;
         const std::string foeLine = FitLine(foeTitle, style.TitleScale, nameW);
@@ -4037,13 +4134,15 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             std::string bossLine = "BOSS";
             if (enemy.Phase >= 2)
                 bossLine += "  PHASE " + std::to_string(enemy.Phase);
-            Emerald::DrawDebugText(renderer, {nameX, nameY}, FitLine(bossLine, style.BodyScale, nameW),
-                                   error, style.BodyScale);
+            Emerald::DrawDebugText(renderer, {nameX, nameY},
+                                   FitLine(bossLine, style.BodyScale, nameW), error,
+                                   style.BodyScale);
             nameY += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
         }
-        Emerald::DrawDebugText(renderer, {nameX, nameY},
-                               FitLine(PoolText("HP", enemy.Hp, enemy.MaxHp), style.BodyScale, nameW),
-                               ink, style.BodyScale);
+        Emerald::DrawDebugText(
+            renderer, {nameX, nameY},
+            FitLine(PoolText("HP", enemy.Hp, enemy.MaxHp), style.BodyScale, nameW), ink,
+            style.BodyScale);
         nameY += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
         const f32 enemyHp =
             enemy.MaxHp > 0 ? static_cast<f32>(enemy.Hp) / static_cast<f32>(enemy.MaxHp) : 0.0f;
@@ -4055,15 +4154,16 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         f32 below = foeAt.y + figSize.y + groupGap;
         if (nameY + groupGap > below)
             below = nameY + groupGap;
-        below = DrawFoeAlerts(renderer, m_Data, enemy, {foeX, below}, foeW, style.DetailScale, error,
-                              lineGap, foeFloor);
+        below = DrawFoeAlerts(renderer, m_Data, enemy, {foeX, below}, foeW, style.DetailScale,
+                              error, lineGap, foeFloor);
         foeY = below;
     } else {
         std::string packTitle = m_Battle->EncounterName();
         if (m_DirectEnemy.empty() && encounterTotal > 0)
-            packTitle += "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
-        Emerald::DrawDebugText(renderer, {foeX, foeY}, FitLine(packTitle, style.BodyScale, foeW), ink,
-                               style.BodyScale);
+            packTitle +=
+                "  " + std::to_string(m_EnemyIndex + 1) + "/" + std::to_string(encounterTotal);
+        Emerald::DrawDebugText(renderer, {foeX, foeY}, FitLine(packTitle, style.BodyScale, foeW),
+                               ink, style.BodyScale);
         foeY += Emerald::DebugTextLineHeight(style.BodyScale) + lineGap;
         if (aimAll) {
             const std::string all = FitLine("ALL FOES", style.BodyScale, foeW);
@@ -4100,7 +4200,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             else if (targeted && member.Alive())
                 DrawHalo(renderer, memberAt, columnFigSize, frameColor);
             DrawFoeBody(renderer, m_Data, &m_Gallery, member, memberAt, columnFig, member.Alive(),
-                        Paint(style.Foe), dim);
+                        Paint(style.Foe), dim, AsciiTexture());
             f32 textY = memberAt.y + columnFigSize.y + rowGap;
             const Emerald::Vec4 memberInk = member.Alive() ? ink : dim;
             std::string memberName = member.Name;
@@ -4122,8 +4222,8 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
                 std::string bossLine = "BOSS";
                 if (member.Phase >= 2)
                     bossLine += " " + std::to_string(member.Phase);
-                Emerald::DrawDebugText(renderer, {columnX, textY}, FitLine(bossLine, packScale, columnW),
-                                       error, packScale);
+                Emerald::DrawDebugText(renderer, {columnX, textY},
+                                       FitLine(bossLine, packScale, columnW), error, packScale);
                 textY += nameH + lineGap;
             }
             if (textY + nameH <= foeFloor) {
@@ -4135,8 +4235,9 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             }
             if (textY + barH <= foeFloor) {
                 DrawBar(renderer, {columnX, textY}, columnW, barH,
-                        member.MaxHp > 0 ? static_cast<f32>(member.Hp) / static_cast<f32>(member.MaxHp)
-                                         : 0.0f,
+                        member.MaxHp > 0
+                            ? static_cast<f32>(member.Hp) / static_cast<f32>(member.MaxHp)
+                            : 0.0f,
                         member.Alive() ? hp : dim);
                 textY += barH + lineGap;
             }
@@ -4166,7 +4267,8 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             const f32 stripH = Emerald::DebugTextLineHeight(style.DetailScale);
             if (!strip.empty() && foeY + groupGap + stripH <= foeFloor) {
                 Emerald::DrawDebugText(renderer, {foeX, foeY + groupGap},
-                                       FitLine(strip, style.DetailScale, foeW), dim, style.DetailScale);
+                                       FitLine(strip, style.DetailScale, foeW), dim,
+                                       style.DetailScale);
             }
         }
     }
@@ -4178,8 +4280,8 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const bool showAim = m_Aiming && playerTurn;
     if (showAim) {
         const PromptMetrics metrics = MeasurePrompts(m_Data.GetPrompts());
-        const f32 promptH = metrics.Icon > 0.0f ? metrics.Icon
-                                                : Emerald::DebugTextLineHeight(metrics.TextScale);
+        const f32 promptH =
+            metrics.Icon > 0.0f ? metrics.Icon : Emerald::DebugTextLineHeight(metrics.TextScale);
         promptY = frame.HintTop - static_cast<f32>(style.HintClearance) - promptH;
         const f32 aimFloor = promptY - static_cast<f32>(style.HintClearance);
         if (aimFloor < floor)
@@ -4243,8 +4345,8 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     }
     if (!message.empty() && bottomY + messageH <= floor) {
         Emerald::DrawDebugText(renderer, {bottomX, bottomY},
-                               FitLine(message, style.MessageScale, bottomW), loadError ? error : ink,
-                               style.MessageScale);
+                               FitLine(message, style.MessageScale, bottomW),
+                               loadError ? error : ink, style.MessageScale);
     }
 
     if (loadError)
@@ -4256,7 +4358,8 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         DrawHints(renderer, hintX, promptY, width - hintX, ask, false);
     }
 
-    const std::string_view slots[] = {kSlot1, kSlot2, kSlot3, kSlot4, kSlot5, kSlot6, kSlot7, kSlot8};
+    const std::string_view slots[] = {kSlot1, kSlot2, kSlot3, kSlot4,
+                                      kSlot5, kSlot6, kSlot7, kSlot8};
     std::vector<HintChip> hints;
     if (m_Picking && !choosing) {
         AddHint(hints, kMoveNorth, "");
@@ -4264,6 +4367,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         AddHint(hints, kSlot1, "DRINK");
         AddHint(hints, kConfirm, "DRINK");
         AddHint(hints, kMenu, "CLOSE");
+        AddHint(hints, kAscii, "ASCII");
     } else if (pickingClass || spending || pickingSkill || choosing) {
         std::vector<std::string> names;
         if (pickingClass) {
@@ -4296,6 +4400,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         for (usize i = 0; i < names.size() && i < static_cast<usize>(kMaxHotkeys); ++i)
             AddHint(hints, slots[i], names[i]);
         AddHint(hints, CloseAction(), KeeperWord(m_Data.GetShop()));
+        AddHint(hints, kAscii, "ASCII");
     } else {
         if (shownSkills > 0)
             AddHint(hints, kSlot1, shownSkills == 1 ? "SKILL" : "SKILLS");
@@ -4320,12 +4425,12 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         AddHint(hints, kSave, "SAVE");
         AddHint(hints, kDebugRespawnFoes, "FOES");
         AddHint(hints, kDebugNewGame, "NEW");
+        AddHint(hints, kAscii, "ASCII");
         AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
     }
     RetargetPauseHints(hints);
     DrawHints(renderer, hintX, frame.HintTop, width - hintX, hints, true);
 }
-
 
 void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 {
@@ -4343,10 +4448,12 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         AddHint(hints, kMoveSouth, "MOVE");
         AddHint(hints, kConfirm, "CONFIRM");
         AddHint(hints, kCancel, "CANCEL");
+        AddHint(hints, kAscii, "ASCII");
         const BattleUi& frontUi = m_Data.GetBattleUi();
         const f32 hintX = static_cast<f32>(frontUi.HintX);
         const f32 hintTop = height - static_cast<f32>(frontUi.HintFromBottom);
         DrawHints(renderer, hintX, hintTop, width - hintX, hints, true);
+        DrawAsciiBadge(renderer, width);
         renderer.End();
         return;
     }
@@ -4370,8 +4477,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
                       shown.Focus, caps.MaxFocus, shown.Mana, caps.MaxMana, m_MapMemory.Cleared,
-                      m_Places, &m_Gallery,
-                      &m_Glides);
+                      m_Places, &m_Gallery, &m_Glides, AsciiTexture());
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
         if (m_Pause.Open) {
@@ -4391,6 +4497,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         std::vector<HintChip> debugHints;
         AddHint(debugHints, kDebugRespawnFoes, "FOES");
         AddHint(debugHints, kDebugNewGame, "NEW");
+        AddHint(debugHints, kAscii, "ASCII");
         DrawHints(renderer, 16.0f, promptY, width - 16.0f, debugHints, true);
         FinishFrame(renderer, width, height);
         return;
@@ -4407,8 +4514,8 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         return;
     }
 
-    const bool failed = !m_Data.IsLoaded() || !m_StartError.empty() ||
-                        (m_Battle == nullptr && !BetweenFights());
+    const bool failed =
+        !m_Data.IsLoaded() || !m_StartError.empty() || (m_Battle == nullptr && !BetweenFights());
     if (failed || BetweenFights()) {
         // Defaults match battle_ui.json, so a failed load still draws the same frame.
         const BattleUi& ui = m_Data.GetBattleUi();
@@ -4613,7 +4720,8 @@ void AscensionApp::HandleCamp(std::string_view action)
         ClampCamp();
         return;
     }
-    if (action == kMoveWest || action == kMoveEast || action == kCyclePrev || action == kCycleNext) {
+    if (action == kMoveWest || action == kMoveEast || action == kCyclePrev ||
+        action == kCycleNext) {
         m_CampColumn = m_CampColumn == 0 ? 1 : 0;
         ClampCamp();
         return;
@@ -4713,9 +4821,9 @@ void DrawItemIcon(Emerald::Renderer2D& renderer, const IconArt& art, std::string
 // Facts stay off the row so the name keeps the full line height.
 f32 DrawShopRow(Emerald::Renderer2D& renderer, const IconArt& art, const Emerald::Vec2& origin,
                 f32 width, f32 rowH, f32 iconGap, i32 textScale, bool marked,
-                const Emerald::Vec4& highlight, const Emerald::Vec4& panel, const Emerald::Vec4& ink,
-                const ItemDef* item, const Emerald::Vec4& nameColor, std::string_view lead,
-                std::string_view name)
+                const Emerald::Vec4& highlight, const Emerald::Vec4& panel,
+                const Emerald::Vec4& ink, const ItemDef* item, const Emerald::Vec4& nameColor,
+                std::string_view lead, std::string_view name)
 {
     if (marked)
         renderer.FillRect(origin, {width, rowH}, highlight);
@@ -4794,8 +4902,8 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     const bool asking = m_ShopAsk != ShopAsk::None;
     if (asking) {
         const PromptMetrics metrics = MeasurePrompts(m_Data.GetPrompts());
-        const f32 promptH = metrics.Icon > 0.0f ? metrics.Icon
-                                                : Emerald::DebugTextLineHeight(metrics.TextScale);
+        const f32 promptH =
+            metrics.Icon > 0.0f ? metrics.Icon : Emerald::DebugTextLineHeight(metrics.TextScale);
         promptY = hintTop - static_cast<f32>(style.HintClearance) - promptH;
         textFloor = promptY - static_cast<f32>(style.HintClearance);
     }
@@ -4846,7 +4954,8 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     Emerald::DrawDebugText(renderer, {goldX, goldY}, gold, highlight, style.BodyScale);
     const f32 nameRoom = goldX - groupGap - (margin + pad);
     Emerald::DrawDebugText(renderer, {margin + pad, top + pad},
-                           FitLine(shop.Name, style.TitleScale, nameRoom), frameColor, style.TitleScale);
+                           FitLine(shop.Name, style.TitleScale, nameRoom), frameColor,
+                           style.TitleScale);
 
     const bool bagSide = m_CampColumn == 0;
     const f32 headY = listTop + pad;
@@ -4937,11 +5046,12 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
             fromStock = true;
             bareName = goods != nullptr ? goods->Name : name;
         }
-        const Emerald::Vec4 nameColor = goods != nullptr ? RarityTint(m_Data, *goods, rowInk) : rowInk;
+        const Emerald::Vec4 nameColor =
+            goods != nullptr ? RarityTint(m_Data, *goods, rowInk) : rowInk;
         DrawShopRow(renderer, art,
                     {margin + colW + columnGap + pad, rowTop + static_cast<f32>(index) * stride},
-                    colW - pad * 2.0f, rowH, rowGap, style.BodyScale, marked, highlight, panel, rowInk,
-                    goods, nameColor, {}, name);
+                    colW - pad * 2.0f, rowH, rowGap, style.BodyScale, marked, highlight, panel,
+                    rowInk, goods, nameColor, {}, name);
     }
 
     f32 y = detailTop + pad;
@@ -4994,8 +5104,9 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     if (selected != nullptr && showedPrice) {
         const std::string delta = GearDelta(m_Data, m_Inventory, *selected, wornItself);
         if (!delta.empty() && y + detailH <= contentFloor) {
-            Emerald::DrawDebugText(renderer, {detailX, y}, FitLine(delta, style.DetailScale, detailW),
-                                   dim, style.DetailScale);
+            Emerald::DrawDebugText(renderer, {detailX, y},
+                                   FitLine(delta, style.DetailScale, detailW), dim,
+                                   style.DetailScale);
             y += detailH + lineGap;
         }
         const std::string description = m_Data.Describe(*selected);
@@ -5003,14 +5114,16 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
         if (!description.empty() && remain >= detailH) {
             const std::string shown = WrapClip(description, style.DetailScale, detailW, remain);
             if (!shown.empty())
-                Emerald::DrawDebugText(renderer, {detailX, y}, shown, dim, style.DetailScale, detailW);
+                Emerald::DrawDebugText(renderer, {detailX, y}, shown, dim, style.DetailScale,
+                                       detailW);
         }
     }
     if (!m_Shown.empty()) {
         const f32 messageY = textFloor - messageH;
         if (messageY >= detailTop + pad)
             Emerald::DrawDebugText(renderer, {detailX, messageY},
-                                   FitLine(m_Shown, style.MessageScale, detailW), ink, style.MessageScale);
+                                   FitLine(m_Shown, style.MessageScale, detailW), ink,
+                                   style.MessageScale);
     }
 
     if (asking && !m_Pause.Open) {
@@ -5028,6 +5141,7 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     AddHint(hints, kContext, "SELL");
     AddHint(hints, kUnequip, "UNEQUIP");
     AddHint(hints, CloseAction(), "CLOSE");
+    AddHint(hints, kAscii, "ASCII");
     if (m_Hero.ChoicePending())
         AddHint(hints, "", "CHOOSE A PATH BEFORE THE NEXT FIGHT");
     else if (m_Hero.PickPending())
@@ -5039,7 +5153,6 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     RetargetPauseHints(hints);
     DrawHints(renderer, hintX, hintTop, width - hintX, hints, true);
 }
-
 
 void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
@@ -5082,9 +5195,8 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     const f32 contentX = margin + pad;
     f32 textX = contentX;
-    if (!m_Gallery.IsEmpty() &&
-        DrawArt(renderer, &m_Gallery, ArtSlot::NpcPortrait, m_TalkId, {contentX, top + pad},
-                {kPortrait, kPortrait}, white))
+    if (!m_Gallery.IsEmpty() && DrawArt(renderer, &m_Gallery, ArtSlot::NpcPortrait, m_TalkId,
+                                        {contentX, top + pad}, {kPortrait, kPortrait}, white))
         textX = contentX + kPortrait + static_cast<f32>(style.RowGap);
     const f32 textWrap = width - textX - contentX;
     f32 y = top + pad;
@@ -5119,6 +5231,7 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
         AddHint(hints, kConfirm, "SPEAK");
     }
     AddHint(hints, CloseAction(), "CLOSE");
+    AddHint(hints, kAscii, "ASCII");
     RetargetPauseHints(hints);
     DrawHints(renderer, hintX, hintTop, width - hintX, hints, true);
 }

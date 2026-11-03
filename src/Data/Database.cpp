@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "Ascension/Data/Talk.h"
+#include "Ascension/View/AsciiGlyphs.h"
 
 #include <nlohmann/json.hpp>
 
@@ -24,11 +25,11 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json",    "effects.json", "schools.json", "skills.json",
-    "statuses.json", "classes.json", "enemies.json", "encounters.json",
-    "items.json",    "shop.json",    "combat.json",  "progress.json",
-    "rarities.json", "tiles.json",   "walk.json",    "movers.json",
-    "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json",
+    "stats.json",   "effects.json",  "schools.json",    "skills.json",    "statuses.json",
+    "classes.json", "enemies.json",  "encounters.json", "items.json",     "shop.json",
+    "combat.json",  "progress.json", "rarities.json",   "tiles.json",     "walk.json",
+    "movers.json",  "input.json",    "prompts.json",    "battle_ui.json", "shop_ui.json",
+    "ascii.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -315,8 +316,8 @@ bool ReadStatBlock(const Json& object, bool requireAll, StatBlock& out, std::str
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(object,
-                   {"strength", "intellect", "stamina", "defense", "agility", "will"}, unknown)) {
+    if (!AllowKeys(object, {"strength", "intellect", "stamina", "defense", "agility", "will"},
+                   unknown)) {
         error = "unknown stat " + Quote(unknown);
         return false;
     }
@@ -400,6 +401,7 @@ struct Parsed {
     PromptRules Prompts;
     BattleUi BattleScreen;
     ShopUi ShopScreen;
+    AsciiRules Ascii;
     std::filesystem::path Directory;
     std::vector<std::string> HigherFields;
     std::vector<std::string> LowerFields;
@@ -1778,8 +1780,7 @@ bool ReadAi(const Parsed& parsed, const Json& entry, EnemyDef& enemy, std::strin
             !OptionalRange(*condition, "targetHpAtLeast", 0, 100, rule.If.TargetHpAtLeast, error) ||
             !OptionalRange(*condition, "allyHpAtMost", 0, 100, rule.If.AllyHpAtMost, error) ||
             !OptionalRange(*condition, "allyCountAtMost", 0, 9, rule.If.AllyCountAtMost, error) ||
-            !OptionalRange(*condition, "allyCountAtLeast", 0, 9, rule.If.AllyCountAtLeast,
-                           error) ||
+            !OptionalRange(*condition, "allyCountAtLeast", 0, 9, rule.If.AllyCountAtLeast, error) ||
             !OptionalRange(*condition, "targetGuardAtLeast", 0, 100, rule.If.TargetGuardAtLeast,
                            error) ||
             !OptionalRange(*condition, "selfHardenAtLeast", 0, 9999, rule.If.SelfHardenAtLeast,
@@ -2383,8 +2384,8 @@ bool ParseFlagExpr(std::string_view text, FlagExpr& out, std::string& error)
             dot = index;
             continue;
         }
-        const bool idChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                            (c >= '0' && c <= '9') || c == '_';
+        const bool idChar =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
         if (!idChar) {
             error = "unknown flag syntax " + Quote(text);
             return false;
@@ -2580,11 +2581,11 @@ bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed,
             const bool hasNext = choiceEntry.contains("next");
             const bool hasEnd = choiceEntry.contains("end");
             const bool hasAction = choiceEntry.contains("action");
-            const int destinations = static_cast<int>(hasNext) + static_cast<int>(hasEnd) +
-                                     static_cast<int>(hasAction);
+            const int destinations =
+                static_cast<int>(hasNext) + static_cast<int>(hasEnd) + static_cast<int>(hasAction);
             if (destinations != 1) {
-                error = where + ": choice " + Quote(choice.Text) +
-                        " needs one of next, end, or action";
+                error =
+                    where + ": choice " + Quote(choice.Text) + " needs one of next, end, or action";
                 return false;
             }
             if (hasNext) {
@@ -2788,8 +2789,10 @@ bool LoadWalk(const Json& root, Parsed& parsed, std::string& error)
         error = "spawnColor " + why;
         return false;
     }
-    if (!ReadColorField(*body, "restColor", rules.RestRed, rules.RestGreen, rules.RestBlue, error) ||
-        !ReadColorField(*body, "talkColor", rules.TalkRed, rules.TalkGreen, rules.TalkBlue, error) ||
+    if (!ReadColorField(*body, "restColor", rules.RestRed, rules.RestGreen, rules.RestBlue,
+                        error) ||
+        !ReadColorField(*body, "talkColor", rules.TalkRed, rules.TalkGreen, rules.TalkBlue,
+                        error) ||
         !ReadColorField(*body, "shopColor", rules.ShopRed, rules.ShopGreen, rules.ShopBlue, error))
         return false;
     parsed.Walk = rules;
@@ -2828,14 +2831,37 @@ bool LoadControls(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"navInitialMilliseconds", "navRepeatMilliseconds", "debugConfirmMilliseconds",
-                    "saveSlotCount", "debugRespawned", "debugRespawnBusy", "debugNewGameArmed",
-                    "debugNewGame", "pauseTitle", "pauseContinue", "pauseQuit", "titleWordmark",
-                    "titleTagline", "titleContinue", "titleNewGame", "titleQuit", "titleOverwrite",
-                    "titleOverwriteYes", "titleBack", "titleSlot", "titleSlotEmpty",
-                    "titleSlotDamaged", "titleLegacySlot", "titleChooseSlot", "createName",
-                    "createClass", "createBegin", "createNameEmpty", "createNameLong",
-                    "createNameBad", "actions"},
+                   {"navInitialMilliseconds",
+                    "navRepeatMilliseconds",
+                    "debugConfirmMilliseconds",
+                    "saveSlotCount",
+                    "debugRespawned",
+                    "debugRespawnBusy",
+                    "debugNewGameArmed",
+                    "debugNewGame",
+                    "pauseTitle",
+                    "pauseContinue",
+                    "pauseQuit",
+                    "titleWordmark",
+                    "titleTagline",
+                    "titleContinue",
+                    "titleNewGame",
+                    "titleQuit",
+                    "titleOverwrite",
+                    "titleOverwriteYes",
+                    "titleBack",
+                    "titleSlot",
+                    "titleSlotEmpty",
+                    "titleSlotDamaged",
+                    "titleLegacySlot",
+                    "titleChooseSlot",
+                    "createName",
+                    "createClass",
+                    "createBegin",
+                    "createNameEmpty",
+                    "createNameLong",
+                    "createNameBad",
+                    "actions"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2977,8 +3003,7 @@ bool ReadAtlasTiles(const std::filesystem::path& path, PromptSheet& sheet, std::
             return false;
         }
         if (tile.Width != sheet.TilePixels || tile.Height != sheet.TilePixels) {
-            error = path.filename().string() + ": tile " + Quote(tile.Name) +
-                    " is not tile_size";
+            error = path.filename().string() + ": tile " + Quote(tile.Name) + " is not tile_size";
             return false;
         }
         sheet.Tiles.push_back(std::move(tile));
@@ -3223,8 +3248,7 @@ bool LoadProgress(const Json& root, Parsed& parsed, std::string& error)
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body,
-                   {"xpToReach", "usesPerRank", "maxSkillRank", "powerPerRank", "levelHp"},
+    if (!AllowKeys(*body, {"xpToReach", "usesPerRank", "maxSkillRank", "powerPerRank", "levelHp"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -3847,6 +3871,105 @@ bool CheckUniquePerType(const Parsed& parsed, std::string& error)
             }
         }
     }
+    return true;
+}
+
+bool ParseAtlasGlyph(const std::string& text, char& glyph, std::string& error)
+{
+    if (text.size() != 1) {
+        error = "a glyph must be one character";
+        return false;
+    }
+    const unsigned char code = static_cast<unsigned char>(text[0]);
+    if (code < 32 || code > 126 || !AsciiGlyphKnown(static_cast<char>(code))) {
+        error = "glyph " + Quote(text) + " is not in the atlas";
+        return false;
+    }
+    glyph = static_cast<char>(code);
+    return true;
+}
+
+bool ReadGlyphTable(const Json& body, const char* key, std::vector<AsciiGlyphId>& out,
+                    std::string& error)
+{
+    const auto table = body.find(key);
+    if (table == body.end() || !table->is_object()) {
+        error = std::string("'") + key + "' must be an object";
+        return false;
+    }
+    for (auto it = table->begin(); it != table->end(); ++it) {
+        if (!IsId(it.key())) {
+            error = std::string(key) + " " + Quote(it.key()) + " must be an id";
+            return false;
+        }
+        if (!it->is_string()) {
+            error = std::string(key) + " " + Quote(it.key()) + " must be a glyph";
+            return false;
+        }
+        char glyph = 0;
+        std::string why;
+        if (!ParseAtlasGlyph(it->get<std::string>(), glyph, why)) {
+            error = std::string(key) + " " + Quote(it.key()) + ": " + why;
+            return false;
+        }
+        if (FindId(out, it.key()) != nullptr) {
+            error = std::string(key) + " " + Quote(it.key()) + " is listed twice";
+            return false;
+        }
+        AsciiGlyphId row;
+        row.Id = it.key();
+        row.Glyph = glyph;
+        out.push_back(std::move(row));
+    }
+    return true;
+}
+
+bool ReadMark(const Json& marks, const char* key, char& glyph, std::string& error)
+{
+    std::string text;
+    if (!RequireString(marks, key, text, error))
+        return false;
+    std::string why;
+    if (!ParseAtlasGlyph(text, glyph, why)) {
+        error = std::string(key) + ": " + why;
+        return false;
+    }
+    return true;
+}
+
+bool LoadAscii(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("ascii");
+    if (body == root.end() || !body->is_object()) {
+        error = "'ascii' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"tiles", "props", "marks", "foes", "classes"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    AsciiRules rules;
+    if (!ReadGlyphTable(*body, "tiles", rules.Tiles, error) ||
+        !ReadGlyphTable(*body, "props", rules.Props, error) ||
+        !ReadGlyphTable(*body, "foes", rules.Foes, error) ||
+        !ReadGlyphTable(*body, "classes", rules.Classes, error))
+        return false;
+    const auto marks = body->find("marks");
+    if (marks == body->end() || !marks->is_object()) {
+        error = "'marks' must be an object";
+        return false;
+    }
+    if (!AllowKeys(*marks, {"exit", "rest", "talk", "shop"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!ReadMark(*marks, "exit", rules.Exit, error) ||
+        !ReadMark(*marks, "rest", rules.Rest, error) ||
+        !ReadMark(*marks, "talk", rules.Talk, error) ||
+        !ReadMark(*marks, "shop", rules.Shop, error))
+        return false;
+    parsed.Ascii = std::move(rules);
     return true;
 }
 
@@ -4500,8 +4623,7 @@ bool LoadPoints(const Json& body, const Parsed& parsed, MapDef& map, std::string
         }
         const std::string where = std::string(ToString(point.Kind)) + " at " + Coord(point.Tile);
         const bool rest = point.Kind == MapPointKind::Rest;
-        if (!Walkable(parsed, map, point.Tile, why) ||
-            !MarkerFree(map, point.Tile, rest, why)) {
+        if (!Walkable(parsed, map, point.Tile, why) || !MarkerFree(map, point.Tile, rest, why)) {
             error = where + ": " + why;
             return false;
         }
@@ -4798,13 +4920,42 @@ bool LoadBattleUi(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"titleScale", "bodyScale", "detailScale", "bannerScale", "messageScale",
-                    "lineGap", "groupGap", "rowGap", "panelPad", "barHeight", "barWidth",
-                    "hintClearance", "messageMinMilliseconds", "margin", "panelTop", "partyWidth",
-                    "gutter", "bottomHeight", "bottomInset", "splitGap", "figureSize",
-                    "turnPreview", "packScale", "hintX", "hintFromBottom", "ink", "dim", "frame",
-                    "panel", "error", "hp",
-                    "focus", "mana", "highlight", "figure", "foe"},
+                   {"titleScale",
+                    "bodyScale",
+                    "detailScale",
+                    "bannerScale",
+                    "messageScale",
+                    "lineGap",
+                    "groupGap",
+                    "rowGap",
+                    "panelPad",
+                    "barHeight",
+                    "barWidth",
+                    "hintClearance",
+                    "messageMinMilliseconds",
+                    "margin",
+                    "panelTop",
+                    "partyWidth",
+                    "gutter",
+                    "bottomHeight",
+                    "bottomInset",
+                    "splitGap",
+                    "figureSize",
+                    "turnPreview",
+                    "packScale",
+                    "hintX",
+                    "hintFromBottom",
+                    "ink",
+                    "dim",
+                    "frame",
+                    "panel",
+                    "error",
+                    "hp",
+                    "focus",
+                    "mana",
+                    "highlight",
+                    "figure",
+                    "foe"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -4889,17 +5040,18 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     parsed.Directory = files[0].parent_path();
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
-    const Loader loaders[] = {LoadStats,   LoadEffects, LoadSchools,   LoadSkills,
-                              LoadStatuses, LoadClasses, LoadEnemies,  LoadEncounters,
-                              LoadItems,    LoadShop,    LoadCombat,   LoadProgress,
-                              LoadRarities, LoadTiles,   LoadWalk,     LoadMovers,
-                              LoadControls, LoadPrompts, LoadBattleUi, LoadShopUi};
+    const Loader loaders[] = {LoadStats,   LoadEffects,  LoadSchools,    LoadSkills,   LoadStatuses,
+                              LoadClasses, LoadEnemies,  LoadEncounters, LoadItems,    LoadShop,
+                              LoadCombat,  LoadProgress, LoadRarities,   LoadTiles,    LoadWalk,
+                              LoadMovers,  LoadControls, LoadPrompts,    LoadBattleUi, LoadShopUi,
+                              LoadAscii};
     static_assert(std::size(loaders) == std::size(kFileNames));
-    const char* names[] = {"stats.json",    "effects.json", "schools.json", "skills.json",
-                           "statuses.json", "classes.json", "enemies.json", "encounters.json",
-                           "items.json",    "shop.json",    "combat.json",  "progress.json",
-                           "rarities.json", "tiles.json",   "walk.json",    "movers.json",
-                           "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json"};
+    const char* names[] = {"stats.json",    "effects.json", "schools.json",   "skills.json",
+                           "statuses.json", "classes.json", "enemies.json",   "encounters.json",
+                           "items.json",    "shop.json",    "combat.json",    "progress.json",
+                           "rarities.json", "tiles.json",   "walk.json",      "movers.json",
+                           "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json",
+                           "ascii.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4915,11 +5067,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats",   "effects", "schools",    "skills",
-                                    "statuses", "classes", "enemies",   "encounters",
-                                    "items",    "shop",    "combat",    "progress",
-                                    "rarities", "tiles",   "walk",      "movers",
-                                    "controls", "prompts", "battleUi",  "shopUi"};
+        const char* allowedTop[] = {
+            "stats",      "effects", "schools",  "skills",  "statuses", "classes",  "enemies",
+            "encounters", "items",   "shop",     "combat",  "progress", "rarities", "tiles",
+            "walk",       "movers",  "controls", "prompts", "battleUi", "shopUi",   "ascii"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -5178,6 +5329,7 @@ bool Database::Load(DataError* error)
     m_Prompts = std::move(parsed.Prompts);
     m_BattleUi = parsed.BattleScreen;
     m_ShopUi = parsed.ShopScreen;
+    m_Ascii = std::move(parsed.Ascii);
     m_HigherFields = std::move(parsed.HigherFields);
     m_LowerFields = std::move(parsed.LowerFields);
     ApplyTimes(times);

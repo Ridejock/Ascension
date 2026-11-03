@@ -70,7 +70,7 @@ bool LookupKey(std::string_view name, Emerald::Key& key, std::string& error)
     const std::string lower = Lower(name);
     if (lower.size() == 1 && lower[0] >= '1' && lower[0] <= '8') {
         key = static_cast<Emerald::Key>(static_cast<u16>(Emerald::Key::Num1) +
-                                         static_cast<u16>(lower[0] - '1'));
+                                        static_cast<u16>(lower[0] - '1'));
         return true;
     }
     if (lower == "c")
@@ -111,6 +111,8 @@ bool LookupKey(std::string_view name, Emerald::Key& key, std::string& error)
         key = Emerald::Key::F;
     else if (lower == "f5")
         key = Emerald::Key::F5;
+    else if (lower == "f8")
+        key = Emerald::Key::F8;
     else {
         error = "unknown key '" + std::string(name) + "'";
         return false;

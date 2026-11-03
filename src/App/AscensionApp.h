@@ -6,20 +6,21 @@
 #include <string_view>
 #include <vector>
 
+#include "ArtGallery.h"
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Talk.h"
+#include "Ascension/Input/Controls.h"
 #include "Ascension/Map/Handoff.h"
 #include "Ascension/Map/Movers.h"
 #include "Ascension/Map/Walk.h"
-#include "Ascension/Progress/Hero.h"
-#include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/DebugRun.h"
 #include "Ascension/Progress/FrontDoor.h"
+#include "Ascension/Progress/Hero.h"
+#include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/RunSave.h"
 #include "Ascension/Progress/Vitals.h"
 #include "Emerald/Core/Application.h"
-#include "Ascension/Input/Controls.h"
-#include "ArtGallery.h"
+#include "Emerald/Renderer/Texture.h"
 #include "Playtest.h"
 
 namespace Ascension {
@@ -194,6 +195,12 @@ private:
     [[nodiscard]] std::string ActionLabel(std::string_view action);
     [[nodiscard]] std::string CloseLabel();
     void FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    // F8. Pictures are the default. The choice lasts until the process exits.
+    void ToggleAscii();
+    // Rasterizes the hardcoded glyphs and uploads one grey-and-alpha atlas. Once per run.
+    bool EnsureAsciiSheet();
+    void DrawAsciiBadge(Emerald::Renderer2D& renderer, f32 width);
+    [[nodiscard]] const Emerald::Texture* AsciiTexture() const;
     // The hint row already on this screen. Glyphs use prompts.json; missing art is the label.
     // A key name uses the battle-ui highlight; the caption stays dim. helpLine hides the
     // row when the help action has toggled it off. The map tile prompt passes false: that
@@ -319,6 +326,9 @@ private:
     PauseMenu m_Pause;
     // Back/View and the help key hide the line at the bottom. The map's tile prompt stays.
     bool m_ShowHelp = true;
+    // Green-on-black glyph grid for the map and the battle figures. Not written to the save.
+    bool m_Ascii = false;
+    std::unique_ptr<Emerald::Texture> m_AsciiSheet;
     // The highlighted battle command (skills, then wait, items, flee) and choice row.
     i32 m_CommandRow = 0;
     // True after Confirm on a skill, until Confirm uses it or Cancel steps back.

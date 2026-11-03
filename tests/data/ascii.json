@@ -1,0 +1,31 @@
+{
+  "ascii": {
+    "tiles": {
+      "floor": ".",
+      "wall": "#"
+    },
+    "props": {
+      "fixture_post": "p"
+    },
+    "marks": {
+      "exit": ">",
+      "rest": "+",
+      "talk": "&",
+      "shop": "$"
+    },
+    "foes": {
+      "wolf": "w",
+      "bandit": "b",
+      "tomb_moth": "m",
+      "bone_archer": "a",
+      "barrow_sentry": "s",
+      "oathkeeper_varn": "V",
+      "rubble_shard": "x"
+    },
+    "classes": {
+      "fighter": "F",
+      "berserker": "B",
+      "guardian": "G"
+    }
+  }
+}

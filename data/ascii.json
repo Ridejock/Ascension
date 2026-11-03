@@ -1,0 +1,54 @@
+{
+  "ascii": {
+    "tiles": {
+      "floor": ".",
+      "wall": "#",
+      "grass": "\"",
+      "path": "=",
+      "water": "~",
+      "tree": "*",
+      "stone": "o",
+      "barrow": "^",
+      "rubble": "%"
+    },
+    "props": {
+      "shop_house": "h",
+      "inn": "i",
+      "pell_cabin": "c"
+    },
+    "marks": {
+      "exit": ">",
+      "rest": "+",
+      "talk": "&",
+      "shop": "$"
+    },
+    "foes": {
+      "wolf": "w",
+      "sluice_wolf": "w",
+      "bandit": "b",
+      "tomb_moth": "m",
+      "bone_archer": "a",
+      "dire_wolf": "d",
+      "barrow_sentry": "s",
+      "bear": "K",
+      "oathkeeper_varn": "V",
+      "rubble_shard": "x",
+      "cairn_warden": "N",
+      "barrow_brute": "O"
+    },
+    "classes": {
+      "fighter": "F",
+      "berserker": "B",
+      "guardian": "G",
+      "mage": "M",
+      "elementalist": "E",
+      "warlock": "W",
+      "rogue": "R",
+      "assassin": "A",
+      "scout": "S",
+      "cleric": "C",
+      "priest": "P",
+      "templar": "T"
+    }
+  }
+}
