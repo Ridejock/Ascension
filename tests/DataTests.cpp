@@ -3411,6 +3411,8 @@ bool SameInk(const Emerald::Image& image, char left, char right)
 void TestAscii()
 {
     Check(kAsciiHero == '@', "the map hero is @");
+    Check(kAsciiGlyphPixels == 8 && kAsciiFigureScale == 2,
+          "a map cell is an 8px glyph, and a figure is twice that");
     Check(AsciiGlyphsWellFormed(), "the glyph array is eight by eight and unique");
     Check(AsciiGlyphKnown('#') && AsciiGlyphKnown('~') && AsciiGlyphKnown('@') &&
               AsciiGlyphKnown('?'),

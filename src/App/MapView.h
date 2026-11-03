@@ -23,8 +23,9 @@ class ArtGallery;
 // A prop picture is drawn after the ground, in south-row order with the other
 // overland sprites. A prop the pack does not list is not drawn.
 // `motion` is where spawns are drawn. Null stands each spawn on its tile.
-// `ascii`, when set, replaces the pictures with one glyph per cell on black. The texture is the
-// grey-and-alpha atlas. Null keeps the pictures.
+// `ascii`, when set, replaces the pictures with one 8px glyph per map cell on black. The camera
+// uses that cell, not the 64px picture tile. The texture is the grey-and-alpha atlas. Null keeps
+// the pictures.
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
                    i32 focus, i32 maxFocus, i32 mana, i32 maxMana,

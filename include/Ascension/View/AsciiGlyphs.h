@@ -16,7 +16,12 @@ class Texture;
 namespace Ascension {
 
 // Hardcoded glyph cell. The atlas is this many pixels on a side, nearest-filtered.
+// The map draws one glyph per cell at this same size, 1:1. Picture mode's tile is 64px;
+// stretching an 8px glyph to that tile is what made the grid a handful of chunky letters.
 inline constexpr i32 kAsciiGlyphPixels = 8;
+// Battle and title slots keep one character, at this integer multiple, so it stays crisp
+// instead of filling the figure box.
+inline constexpr i32 kAsciiFigureScale = 2;
 inline constexpr i32 kAsciiAtlasColumns = 16;
 
 // The map hero. Not the class letter.

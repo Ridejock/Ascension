@@ -96,18 +96,19 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     }
 
     const f32 tile = static_cast<f32>(rules.TilePixels);
-    const f32 tilesWide = width / tile;
-    const f32 tilesHigh = height / tile;
     const WalkPoint heroPoint = walker.DrawTile();
-    const WalkFrame frame = FrameMap(*map, heroPoint.X, heroPoint.Y, tilesWide, tilesHigh);
-    const i32 firstX = static_cast<i32>(std::floor(static_cast<double>(frame.OriginX)));
-    const i32 firstY = static_cast<i32>(std::floor(static_cast<double>(frame.OriginY)));
-    const i32 lastX =
-        static_cast<i32>(std::ceil(static_cast<double>(frame.OriginX + frame.TilesWide)));
-    const i32 lastY =
-        static_cast<i32>(std::ceil(static_cast<double>(frame.OriginY + frame.TilesHigh)));
     if (ascii != nullptr && ascii->HasGpuTexture()) {
-        // The window is the grid. Cells outside the map stay black paper.
+        // One 8px glyph per map cell, not one glyph stretched to the 64px picture tile.
+        // The camera is in those cells, so a window holds many more of the map.
+        const f32 cell = static_cast<f32>(kAsciiGlyphPixels);
+        const WalkFrame frame =
+            FrameMap(*map, heroPoint.X, heroPoint.Y, width / cell, height / cell);
+        const i32 firstX = static_cast<i32>(std::floor(static_cast<double>(frame.OriginX)));
+        const i32 firstY = static_cast<i32>(std::floor(static_cast<double>(frame.OriginY)));
+        const i32 lastX =
+            static_cast<i32>(std::ceil(static_cast<double>(frame.OriginX + frame.TilesWide)));
+        const i32 lastY =
+            static_cast<i32>(std::ceil(static_cast<double>(frame.OriginY + frame.TilesHigh)));
         renderer.FillRect({0.0f, 0.0f}, {width, height}, kAsciiPaper);
         const i32 heroX = NearestCell(heroPoint.X);
         const i32 heroY = NearestCell(heroPoint.Y);
@@ -135,9 +136,9 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                 }
                 const char glyph = AsciiCellGlyph(data.GetAscii(), *map, x, y,
                                                   x == heroX && y == heroY, standing, foeId);
-                const f32 left = (static_cast<f32>(x) - frame.OriginX) * tile;
-                const f32 top = (static_cast<f32>(y) - frame.OriginY) * tile;
-                DrawAsciiGlyph(renderer, *ascii, glyph, {left, top}, {tile, tile}, kAsciiInk);
+                const f32 left = (static_cast<f32>(x) - frame.OriginX) * cell;
+                const f32 top = (static_cast<f32>(y) - frame.OriginY) * cell;
+                DrawAsciiGlyph(renderer, *ascii, glyph, {left, top}, {cell, cell}, kAsciiInk);
             }
         }
         Emerald::DrawDebugText(renderer, {16.0f, 16.0f}, Upper(PlaceLabel(walker.Place())), label,
@@ -158,6 +159,15 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         }
         return;
     }
+    const f32 tilesWide = width / tile;
+    const f32 tilesHigh = height / tile;
+    const WalkFrame frame = FrameMap(*map, heroPoint.X, heroPoint.Y, tilesWide, tilesHigh);
+    const i32 firstX = static_cast<i32>(std::floor(static_cast<double>(frame.OriginX)));
+    const i32 firstY = static_cast<i32>(std::floor(static_cast<double>(frame.OriginY)));
+    const i32 lastX =
+        static_cast<i32>(std::ceil(static_cast<double>(frame.OriginX + frame.TilesWide)));
+    const i32 lastY =
+        static_cast<i32>(std::ceil(static_cast<double>(frame.OriginY + frame.TilesHigh)));
     const Emerald::Vec4 link = ByteColor(rules.LinkRed, rules.LinkGreen, rules.LinkBlue);
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     const bool packed = art != nullptr && !art->IsEmpty();

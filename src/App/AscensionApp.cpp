@@ -102,13 +102,13 @@ bool DrawAsciiHero(Emerald::Renderer2D& renderer, const Database& data,
     if (ascii == nullptr)
         return false;
     renderer.FillRect(origin, size, kAsciiPaper);
-    const f32 padX = size.x * 0.18f;
-    const f32 padY = size.y * 0.12f;
     const char glyph = classId.empty()
                            ? kAsciiFallback
                            : FindAsciiGlyph(data.GetAscii().Classes, classId, kAsciiFallback);
-    DrawAsciiGlyph(renderer, *ascii, glyph, origin + Emerald::Vec2{padX, padY},
-                   {size.x - padX * 2.0f, size.y - padY * 2.0f}, kAsciiInk);
+    const f32 cell = static_cast<f32>(kAsciiGlyphPixels * kAsciiFigureScale);
+    const f32 left = origin.x + (size.x - cell) * 0.5f;
+    const f32 top = origin.y + (size.y - cell) * 0.5f;
+    DrawAsciiGlyph(renderer, *ascii, glyph, {left, top}, {cell, cell}, kAsciiInk);
     return true;
 }
 
@@ -123,11 +123,12 @@ void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const ArtG
     const Emerald::Vec2 slot{size * 4.0f, size * 6.5f};
     if (ascii != nullptr) {
         renderer.FillRect(origin, slot, kAsciiPaper);
-        const f32 padX = slot.x * 0.18f;
-        const f32 padY = slot.y * 0.12f;
         const char glyph = FindAsciiGlyph(data.GetAscii().Foes, foe.Id, kAsciiFallback);
-        DrawAsciiGlyph(renderer, *ascii, glyph, origin + Emerald::Vec2{padX, padY},
-                       {slot.x - padX * 2.0f, slot.y - padY * 2.0f}, alive ? kAsciiInk : kAsciiDim);
+        const f32 cell = static_cast<f32>(kAsciiGlyphPixels * kAsciiFigureScale);
+        const f32 left = origin.x + (slot.x - cell) * 0.5f;
+        const f32 top = origin.y + (slot.y - cell) * 0.5f;
+        DrawAsciiGlyph(renderer, *ascii, glyph, {left, top}, {cell, cell},
+                       alive ? kAsciiInk : kAsciiDim);
         return;
     }
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
