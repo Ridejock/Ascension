@@ -1,0 +1,68 @@
+{
+  "dialogue": {
+    "id": "calder",
+    "nodes": [
+      {
+        "id": "calder_after",
+        "line": "The boards will hold. For a while./The east road is still Pell's worry.",
+        "note": "the ditch is quiet and he is back to the work.",
+        "requires": ["sluice_done"],
+        "choices": [
+          { "text": "Mind the pond.", "end": true }
+        ]
+      },
+      {
+        "id": "calder_done",
+        "line": "Quiet, then. I heard it stop./The pond can settle. You have my thanks.",
+        "note": "relief, said like a fact.",
+        "requires": ["defeated.sluice_wolf"],
+        "sets": ["sluice_done"],
+        "choices": [
+          { "text": "Glad it is quiet.", "end": true }
+        ]
+      },
+      {
+        "id": "calder_waiting",
+        "line": "Still down there. West gate, then/the stone room. You will hear it.",
+        "note": "he has already pointed the way.",
+        "requires": ["sluice_asked"],
+        "choices": [
+          { "text": "I'm going.", "end": true }
+        ]
+      },
+      {
+        "id": "calder_greet",
+        "line": "Calder. I keep the sluice./Something is living under the pond.",
+        "note": "a working man, not a rumor.",
+        "choices": [
+          { "text": "I'll see it off.", "next": "calder_take" },
+          { "text": "Where is the sluice?", "next": "calder_where" },
+          { "text": "Not my ditch.", "next": "calder_bye" }
+        ]
+      },
+      {
+        "id": "calder_take",
+        "line": "Good. West, at the end of the street./Come back when the ditch is quiet.",
+        "note": "he treats the promise as a job.",
+        "sets": ["sluice_asked"],
+        "choices": []
+      },
+      {
+        "id": "calder_where",
+        "line": "Not the barrow. West, through the trees./A stone room under the pond. One wolf.",
+        "note": "he separates this job from Pell's hills.",
+        "sets": ["sluice_asked"],
+        "choices": [
+          { "text": "I'll go.", "end": true },
+          { "text": "Not tonight.", "next": "calder_bye" }
+        ]
+      },
+      {
+        "id": "calder_bye",
+        "line": "The east road is Pell's worry./This ditch will still be here.",
+        "note": "no offense taken.",
+        "choices": []
+      }
+    ]
+  }
+}

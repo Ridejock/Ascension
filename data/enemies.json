@@ -19,6 +19,24 @@
       "color": "#C8C8C8"
     },
     {
+      "id": "sluice_wolf",
+      "name": "Sluice Wolf",
+      "description": "A wet wolf denned in the sluice under the pond.",
+      "level": 1,
+      "stats": {
+        "stamina": 10,
+        "strength": 6,
+        "defense": 2,
+        "agility": 7,
+        "intellect": 0,
+        "will": 0
+      },
+      "skills": ["bite"],
+      "experience": 8,
+      "gold": 4,
+      "color": "#7F9AA3"
+    },
+    {
       "id": "bandit",
       "name": "Bandit",
       "description": "A road thief with a nicked blade. Every few cuts, the wound stays open.",
