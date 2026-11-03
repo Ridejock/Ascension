@@ -4003,12 +4003,12 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         } else if (choosingTitle) {
             const std::vector<std::string> offers = m_Hero.TitleOffers();
             for (usize i = 0; i < offers.size() && i < static_cast<usize>(kMaxHotkeys); ++i) {
-                const TitleDef* title = m_Data.FindTitle(offers[i]);
+                const TitleDef* offered = m_Data.FindTitle(offers[i]);
                 MenuLine row;
                 row.Text = std::to_string(static_cast<int>(i) + 1) + "  " +
-                           (title != nullptr ? title->Name : offers[i]);
-                if (title != nullptr)
-                    row.Detail = title->Description;
+                           (offered != nullptr ? offered->Name : offers[i]);
+                if (offered != nullptr)
+                    row.Detail = offered->Description;
                 rows.push_back(std::move(row));
             }
         } else if (choosingSystem) {
@@ -4404,8 +4404,8 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             for (const std::string& id : m_Hero.TitleOffers()) {
                 if (names.size() >= static_cast<usize>(kMaxHotkeys))
                     break;
-                const TitleDef* title = m_Data.FindTitle(id);
-                names.push_back(title != nullptr ? title->Name : id);
+                const TitleDef* offered = m_Data.FindTitle(id);
+                names.push_back(offered != nullptr ? offered->Name : id);
             }
         } else if (choosingSystem) {
             for (const std::string& id : m_Hero.SystemSkillOffers()) {
