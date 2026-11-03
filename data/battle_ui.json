@@ -23,6 +23,8 @@
     "figureSize": 18,
     "turnPreview": 4,
     "packScale": 2,
+    "hintX": 48,
+    "hintFromBottom": 36,
     "ink": "#EDE8D6",
     "dim": "#9EA899",
     "frame": "#B8A361",

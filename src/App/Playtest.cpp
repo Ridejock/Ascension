@@ -65,51 +65,52 @@ bool EngineFlagTakesValue(std::string_view flag)
     return flag != "--profile";
 }
 
-bool LookupKey(std::string_view name, SDL_Scancode& scancode, std::string& error)
+bool LookupKey(std::string_view name, Emerald::Key& key, std::string& error)
 {
-    const std::string key = Lower(name);
-    if (key.size() == 1 && key[0] >= '1' && key[0] <= '8') {
-        scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (key[0] - '1'));
+    const std::string lower = Lower(name);
+    if (lower.size() == 1 && lower[0] >= '1' && lower[0] <= '8') {
+        key = static_cast<Emerald::Key>(static_cast<u16>(Emerald::Key::Num1) +
+                                         static_cast<u16>(lower[0] - '1'));
         return true;
     }
-    if (key == "c")
-        scancode = SDL_SCANCODE_C;
-    else if (key == "e")
-        scancode = SDL_SCANCODE_E;
-    else if (key == "u")
-        scancode = SDL_SCANCODE_U;
-    else if (key == "x")
-        scancode = SDL_SCANCODE_X;
-    else if (key == "i")
-        scancode = SDL_SCANCODE_I;
-    else if (key == "r")
-        scancode = SDL_SCANCODE_R;
-    else if (key == "n")
-        scancode = SDL_SCANCODE_N;
-    else if (key == "space")
-        scancode = SDL_SCANCODE_SPACE;
-    else if (key == "up")
-        scancode = SDL_SCANCODE_UP;
-    else if (key == "down")
-        scancode = SDL_SCANCODE_DOWN;
-    else if (key == "left")
-        scancode = SDL_SCANCODE_LEFT;
-    else if (key == "right")
-        scancode = SDL_SCANCODE_RIGHT;
-    else if (key == "w")
-        scancode = SDL_SCANCODE_W;
-    else if (key == "a")
-        scancode = SDL_SCANCODE_A;
-    else if (key == "s")
-        scancode = SDL_SCANCODE_S;
-    else if (key == "d")
-        scancode = SDL_SCANCODE_D;
-    else if (key == "escape")
-        scancode = SDL_SCANCODE_ESCAPE;
-    else if (key == "f")
-        scancode = SDL_SCANCODE_F;
-    else if (key == "f5")
-        scancode = SDL_SCANCODE_F5;
+    if (lower == "c")
+        key = Emerald::Key::C;
+    else if (lower == "e")
+        key = Emerald::Key::E;
+    else if (lower == "u")
+        key = Emerald::Key::U;
+    else if (lower == "x")
+        key = Emerald::Key::X;
+    else if (lower == "i")
+        key = Emerald::Key::I;
+    else if (lower == "r")
+        key = Emerald::Key::R;
+    else if (lower == "n")
+        key = Emerald::Key::N;
+    else if (lower == "space")
+        key = Emerald::Key::Space;
+    else if (lower == "up")
+        key = Emerald::Key::Up;
+    else if (lower == "down")
+        key = Emerald::Key::Down;
+    else if (lower == "left")
+        key = Emerald::Key::Left;
+    else if (lower == "right")
+        key = Emerald::Key::Right;
+    else if (lower == "w")
+        key = Emerald::Key::W;
+    else if (lower == "a")
+        key = Emerald::Key::A;
+    else if (lower == "s")
+        key = Emerald::Key::S;
+    else if (lower == "d")
+        key = Emerald::Key::D;
+    else if (lower == "escape")
+        key = Emerald::Key::Escape;
+    else if (lower == "f")
+        key = Emerald::Key::F;
+    else if (lower == "f5")
+        key = Emerald::Key::F5;
     else {
         error = "unknown key '" + std::string(name) + "'";
         return false;
@@ -117,7 +118,7 @@ bool LookupKey(std::string_view name, SDL_Scancode& scancode, std::string& error
     return true;
 }
 
-bool ParseKeyList(std::string_view text, std::vector<SDL_Scancode>& keys, std::string& error)
+bool ParseKeyList(std::string_view text, std::vector<Emerald::Key>& keys, std::string& error)
 {
     usize index = 0;
     while (index < text.size()) {
@@ -128,16 +129,16 @@ bool ParseKeyList(std::string_view text, std::vector<SDL_Scancode>& keys, std::s
         usize end = index;
         while (end < text.size() && !IsSpace(text[end]))
             ++end;
-        SDL_Scancode scancode = SDL_SCANCODE_UNKNOWN;
-        if (!LookupKey(text.substr(index, end - index), scancode, error))
+        Emerald::Key key = {};
+        if (!LookupKey(text.substr(index, end - index), key, error))
             return false;
-        keys.push_back(scancode);
+        keys.push_back(key);
         index = end;
     }
     return true;
 }
 
-bool ReadKeysFile(const std::filesystem::path& path, std::vector<SDL_Scancode>& keys,
+bool ReadKeysFile(const std::filesystem::path& path, std::vector<Emerald::Key>& keys,
                   std::string& error)
 {
     std::ifstream in(path);

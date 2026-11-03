@@ -4,8 +4,6 @@
 #include <fstream>
 #include <string>
 
-#include <SDL3/SDL.h>
-
 #include "Ascension/Data/Database.h"
 #include "Ascension/Input/Controls.h"
 #include "Ascension/Input/Prompts.h"
@@ -145,7 +143,7 @@ void TestMapping()
 
     Emerald::Keyboard keyboard;
     Emerald::Gamepads pads;
-    pads.AddPad(1, nullptr, "Test Pad", SDL_GAMEPAD_TYPE_XBOXONE);
+    pads.AddSyntheticPad(1, "Test Pad", Emerald::GamepadType::XboxOne);
     Emerald::Input input(keyboard, pads);
     std::string why;
     Check(ApplyControls(input, data.GetControls(), why), "bindings apply");
@@ -154,18 +152,18 @@ void TestMapping()
 
     keyboard.BeginFrame();
     pads.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_E);
+    keyboard.OnKeyDown(Emerald::Key::E);
     Check(input.WasActionPressed(kConfirm), "E confirms");
     Check(!input.WasActionPressed(kMoveWest), "E is not a step");
 
     keyboard.BeginFrame();
     pads.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_A);
+    keyboard.OnKeyDown(Emerald::Key::A);
     Check(input.WasActionPressed(kMoveWest), "A steps west");
     Check(!input.WasActionPressed(kConfirm), "A does not confirm");
 
-    keyboard.OnKeyUp(SDL_SCANCODE_E);
-    keyboard.OnKeyUp(SDL_SCANCODE_A);
+    keyboard.OnKeyUp(Emerald::Key::E);
+    keyboard.OnKeyUp(Emerald::Key::A);
     keyboard.BeginFrame();
     pads.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::South, true);
@@ -189,10 +187,10 @@ void TestMapping()
     pads.OnButton(1, Emerald::GamepadButton::Start, false);
     pads.BeginFrame();
     keyboard.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_ESCAPE);
+    keyboard.OnKeyDown(Emerald::Key::Escape);
     Check(input.WasActionPressed(kPause) && !input.WasActionPressed(kQuit),
           "escape is pause, not quit");
-    keyboard.OnKeyUp(SDL_SCANCODE_ESCAPE);
+    keyboard.OnKeyUp(Emerald::Key::Escape);
     keyboard.BeginFrame();
     pads.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::Back, true);
@@ -227,35 +225,35 @@ void TestMapping()
     const PromptMark guide = ResolvePrompt(input, prompts, kPause, "xbox");
     Check(guide.Icon && guide.Tile == "menu", "start is the menu glyph");
 
-    Check(BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_2)),
+    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Num2),
           "a skill key needs the player's turn");
-    Check(BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_RIGHT)),
+    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Right),
           "aiming needs the player's turn");
-    Check(BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_SPACE)),
+    Check(BoundKeyNeedsPlayerTurn(input, Emerald::Key::Space),
           "waiting needs the player's turn");
-    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_N)),
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::N),
           "N is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_R)),
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::R),
           "restart is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_E)),
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::E),
           "confirm is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_F6)),
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F6),
           "respawn is not a combat key");
-    Check(!BoundKeyNeedsPlayerTurn(input, static_cast<Emerald::Key>(SDL_SCANCODE_F9)),
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F9),
           "new game is not a combat key");
 
     keyboard.BeginFrame();
     pads.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_F6);
+    keyboard.OnKeyDown(Emerald::Key::F6);
     Check(input.WasActionPressed(kDebugRespawnFoes), "F6 is respawn");
     Check(!input.WasActionPressed(kSave), "F6 is not save");
-    keyboard.OnKeyUp(SDL_SCANCODE_F6);
+    keyboard.OnKeyUp(Emerald::Key::F6);
     keyboard.BeginFrame();
     pads.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_F9);
+    keyboard.OnKeyDown(Emerald::Key::F9);
     Check(input.WasActionPressed(kDebugNewGame) && !input.WasActionPressed(kDebugRespawnFoes),
           "F9 is new game");
-    keyboard.OnKeyUp(SDL_SCANCODE_F9);
+    keyboard.OnKeyUp(Emerald::Key::F9);
     pads.BeginFrame();
     keyboard.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::South, true);
@@ -264,9 +262,9 @@ void TestMapping()
     pads.OnButton(1, Emerald::GamepadButton::South, false);
 
     const std::vector<std::string_view> up =
-        input.FindActionsUsing(static_cast<Emerald::Key>(SDL_SCANCODE_UP));
+        input.FindActionsUsing(Emerald::Key::Up);
     const std::vector<std::string_view> enter =
-        input.FindActionsUsing(static_cast<Emerald::Key>(SDL_SCANCODE_RETURN));
+        input.FindActionsUsing(Emerald::Key::Enter);
     const std::vector<std::string_view> south =
         input.FindActionsUsing(Emerald::GamepadButton::South);
     const std::vector<std::string_view> east =
@@ -290,7 +288,7 @@ void TestMapping()
     std::string failed;
     Check(!ApplyControls(fresh, broken, failed), "an unknown button is refused");
     Check(failed.find("Soth") != std::string::npos, "the error names the button");
-    freshPads.AddPad(1, nullptr, "Test Pad", SDL_GAMEPAD_TYPE_XBOXONE);
+    freshPads.AddSyntheticPad(1, "Test Pad", Emerald::GamepadType::XboxOne);
     freshPads.BeginFrame();
     freshPads.OnButton(1, Emerald::GamepadButton::South, true);
     Check(!fresh.WasActionPressed(kConfirm), "a failed apply leaves the actions unbound");
@@ -306,7 +304,7 @@ void TestPauseResume()
 
     Emerald::Keyboard keyboard;
     Emerald::Gamepads pads;
-    pads.AddPad(1, nullptr, "Test Pad", SDL_GAMEPAD_TYPE_XBOXONE);
+    pads.AddSyntheticPad(1, "Test Pad", Emerald::GamepadType::XboxOne);
     Emerald::Input input(keyboard, pads);
     std::string why;
     Check(ApplyControls(input, data.GetControls(), why), "pause bindings apply");
@@ -318,7 +316,7 @@ void TestPauseResume()
     PauseMenu menu;
     keyboard.BeginFrame();
     pads.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_P);
+    keyboard.OnKeyDown(Emerald::Key::P);
     Check(input.WasActionPressed(kPause), "P is the pause action");
     Check(StepPauseMenu(input, menu, false) == PauseStep::Opened && menu.Open && menu.Row == 0,
           "P opens the menu on Continue");
@@ -329,14 +327,14 @@ void TestPauseResume()
     Check(StepPauseMenu(input, menu, false) == PauseStep::None && menu.Open,
           "holding P stays on the menu");
 
-    keyboard.OnKeyUp(SDL_SCANCODE_P);
+    keyboard.OnKeyUp(Emerald::Key::P);
     keyboard.BeginFrame();
     pads.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_P);
+    keyboard.OnKeyDown(Emerald::Key::P);
     Check(StepPauseMenu(input, menu, false) == PauseStep::Resumed && !menu.Open,
           "P resumes and does not quit");
 
-    keyboard.OnKeyUp(SDL_SCANCODE_P);
+    keyboard.OnKeyUp(Emerald::Key::P);
     keyboard.BeginFrame();
     pads.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::Start, true);
@@ -360,12 +358,12 @@ void TestPauseResume()
     pads.OnButton(1, Emerald::GamepadButton::East, false);
     pads.BeginFrame();
     keyboard.BeginFrame();
-    keyboard.OnKeyDown(SDL_SCANCODE_ESCAPE);
+    keyboard.OnKeyDown(Emerald::Key::Escape);
     Check(input.WasActionPressed(kPause) && !input.WasActionPressed(kQuit),
           "Escape is pause, not quit");
     Check(StepPauseMenu(input, menu, false) == PauseStep::Opened && menu.Row == 0,
           "Escape opens the menu on Continue");
-    keyboard.OnKeyUp(SDL_SCANCODE_ESCAPE);
+    keyboard.OnKeyUp(Emerald::Key::Escape);
 
     pads.BeginFrame();
     keyboard.BeginFrame();
@@ -484,7 +482,6 @@ void TestFrontDoor();
 
 int main()
 {
-    SDL_Init(SDL_INIT_GAMEPAD);
     Database sample(kSample);
     DataError sampleError;
     Check(sample.Load(&sampleError), "tests/data loads input and prompts");
@@ -501,6 +498,5 @@ int main()
     TestRejectedData();
     TestFrontDoor();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
-    SDL_Quit();
     return g_Failures == 0 ? 0 : 1;
 }
