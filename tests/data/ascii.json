@@ -1,0 +1,37 @@
+{
+  "ascii": {
+    "scale": 6,
+    "battleScale": 8,
+    "paper": "#12100E",
+    "ink": "#E8E0CC",
+    "tiles": [
+      { "id": "floor", "glyph": "+" },
+      { "id": "wall", "glyph": "[" }
+    ],
+    "marks": [
+      { "id": "hero", "glyph": "A" },
+      { "id": "exit", "glyph": ">" },
+      { "id": "spawn", "glyph": "E" },
+      { "id": "rest", "glyph": "R" },
+      { "id": "talk", "glyph": "P" },
+      { "id": "shop", "glyph": "S" }
+    ],
+    "props": [
+      { "id": "fixture_post", "glyph": "!" }
+    ],
+    "foes": [
+      { "id": "wolf", "glyph": "W" },
+      { "id": "bandit", "glyph": "N" },
+      { "id": "tomb_moth", "glyph": "M" },
+      { "id": "bone_archer", "glyph": "K" },
+      { "id": "barrow_sentry", "glyph": "Y" },
+      { "id": "oathkeeper_varn", "glyph": "V" },
+      { "id": "rubble_shard", "glyph": "X" }
+    ],
+    "classes": [
+      { "id": "fighter", "glyph": "F" },
+      { "id": "berserker", "glyph": "Z" },
+      { "id": "guardian", "glyph": "G" }
+    ]
+  }
+}

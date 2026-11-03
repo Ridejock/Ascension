@@ -15,6 +15,7 @@
 
 #include "Emerald/Core/Log.h"
 #include "Emerald/Input/InputBindings.h"
+#include "Emerald/Renderer/DebugText.h"
 
 namespace Ascension {
 
@@ -29,6 +30,7 @@ constexpr const char* kFileNames[] = {
     "items.json",    "shop.json",    "combat.json",  "progress.json",
     "rarities.json", "tiles.json",   "walk.json",    "movers.json",
     "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json",
+    "ascii.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -400,6 +402,7 @@ struct Parsed {
     PromptRules Prompts;
     BattleUi BattleScreen;
     ShopUi ShopScreen;
+    AsciiRules Ascii;
     std::filesystem::path Directory;
     std::vector<std::string> HigherFields;
     std::vector<std::string> LowerFields;
@@ -4851,6 +4854,118 @@ bool LoadShopUi(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+constexpr std::string_view kAsciiMarks[] = {
+    "hero", "exit", "spawn", "rest", "talk", "shop",
+};
+
+bool KnownAsciiMark(std::string_view id)
+{
+    for (const std::string_view mark : kAsciiMarks) {
+        if (mark == id)
+            return true;
+    }
+    return false;
+}
+
+bool ReadGlyphRows(const Json& body, const char* key, std::vector<AsciiGlyph>& out, bool allowEmpty,
+                   std::string& error)
+{
+    const auto list = body.find(key);
+    if (list == body.end() || !list->is_array()) {
+        error = std::string("'") + key + "' must be a list";
+        return false;
+    }
+    if (list->empty() && !allowEmpty) {
+        error = std::string("'") + key + "' is empty";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = std::string(key) + " entries must be objects";
+            return false;
+        }
+        std::string extra;
+        if (!AllowKeys(entry, {"id", "glyph"}, extra)) {
+            error = std::string(key) + ": unknown field " + Quote(extra);
+            return false;
+        }
+        AsciiGlyph row;
+        if (!RequireString(entry, "id", row.Id, error))
+            return false;
+        const std::string where = std::string(key) + " " + Quote(row.Id);
+        if (!IsId(row.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (std::string_view(key) == "marks" && !KnownAsciiMark(row.Id)) {
+            error = where + " is not a mark";
+            return false;
+        }
+        if (FindId(out, row.Id) != nullptr) {
+            error = where + " is listed twice";
+            return false;
+        }
+        std::string glyph;
+        if (!RequireString(entry, "glyph", glyph, error))
+            return false;
+        if (glyph.size() != 1 || !Emerald::DebugTextHasGlyph(glyph[0])) {
+            error = where + ": glyph must be one character the debug font draws";
+            return false;
+        }
+        row.Glyph = glyph[0];
+        out.push_back(std::move(row));
+    }
+    return true;
+}
+
+bool LoadAscii(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("ascii");
+    if (body == root.end() || !body->is_object()) {
+        error = "'ascii' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body,
+                   {"scale", "battleScale", "paper", "ink", "tiles", "marks", "props", "foes",
+                    "classes"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    AsciiRules rules;
+    if (!RequireInt(*body, "scale", 1, 16, rules.Scale, error) ||
+        !RequireInt(*body, "battleScale", 1, 16, rules.BattleScale, error))
+        return false;
+    std::string paper;
+    std::string ink;
+    if (!RequireString(*body, "paper", paper, error) || !RequireString(*body, "ink", ink, error))
+        return false;
+    std::string why;
+    if (!ParseColor(paper, rules.PaperRed, rules.PaperGreen, rules.PaperBlue, why)) {
+        error = "paper " + why;
+        return false;
+    }
+    if (!ParseColor(ink, rules.InkRed, rules.InkGreen, rules.InkBlue, why)) {
+        error = "ink " + why;
+        return false;
+    }
+    if (!ReadGlyphRows(*body, "tiles", rules.Tiles, false, error) ||
+        !ReadGlyphRows(*body, "marks", rules.Marks, false, error) ||
+        !ReadGlyphRows(*body, "props", rules.Props, true, error) ||
+        !ReadGlyphRows(*body, "foes", rules.Foes, false, error) ||
+        !ReadGlyphRows(*body, "classes", rules.Classes, false, error))
+        return false;
+    for (const std::string_view mark : kAsciiMarks) {
+        if (FindId(rules.Marks, mark) == nullptr) {
+            error = "missing mark " + Quote(mark);
+            return false;
+        }
+    }
+    parsed.Ascii = std::move(rules);
+    return true;
+}
+
 // Link targets are resolved here so a map may name another file that sorts later.
 bool CheckMapLinks(const Parsed& parsed, std::string& error)
 {
@@ -4893,13 +5008,15 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
                               LoadStatuses, LoadClasses, LoadEnemies,  LoadEncounters,
                               LoadItems,    LoadShop,    LoadCombat,   LoadProgress,
                               LoadRarities, LoadTiles,   LoadWalk,     LoadMovers,
-                              LoadControls, LoadPrompts, LoadBattleUi, LoadShopUi};
+                              LoadControls, LoadPrompts, LoadBattleUi, LoadShopUi,
+                              LoadAscii};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",    "effects.json", "schools.json", "skills.json",
                            "statuses.json", "classes.json", "enemies.json", "encounters.json",
                            "items.json",    "shop.json",    "combat.json",  "progress.json",
                            "rarities.json", "tiles.json",   "walk.json",    "movers.json",
-                           "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json"};
+                           "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json",
+                           "ascii.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4919,7 +5036,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
                                     "statuses", "classes", "enemies",   "encounters",
                                     "items",    "shop",    "combat",    "progress",
                                     "rarities", "tiles",   "walk",      "movers",
-                                    "controls", "prompts", "battleUi",  "shopUi"};
+                                    "controls", "prompts", "battleUi",  "shopUi",
+                                    "ascii"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -5178,6 +5296,7 @@ bool Database::Load(DataError* error)
     m_Prompts = std::move(parsed.Prompts);
     m_BattleUi = parsed.BattleScreen;
     m_ShopUi = parsed.ShopScreen;
+    m_Ascii = std::move(parsed.Ascii);
     m_HigherFields = std::move(parsed.HigherFields);
     m_LowerFields = std::move(parsed.LowerFields);
     ApplyTimes(times);

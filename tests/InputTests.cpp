@@ -100,6 +100,10 @@ void TestShippedControls(const Database& data)
     Check(restart != nullptr && restart->Keys.size() == 1 && restart->Keys[0] == "F9" &&
               restart->Buttons.empty(),
           "new game is F9 and has no pad button");
+    const ControlBind* ascii = FindControl(rules, kAscii);
+    Check(ascii != nullptr && ascii->Keys.size() == 1 && ascii->Keys[0] == "F8" &&
+              ascii->Buttons.empty(),
+          "ascii is F8 and has no pad button");
     const ControlBind* pause = FindControl(rules, kPause);
     const ControlBind* quit = FindControl(rules, kQuit);
     Check(pause != nullptr && pause->Keys.size() == 2 && pause->Keys[0] == "P" &&
@@ -241,6 +245,8 @@ void TestMapping()
           "respawn is not a combat key");
     Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F9),
           "new game is not a combat key");
+    Check(!BoundKeyNeedsPlayerTurn(input, Emerald::Key::F8),
+          "ascii is not a combat key");
 
     keyboard.BeginFrame();
     pads.BeginFrame();
@@ -254,6 +260,12 @@ void TestMapping()
     Check(input.WasActionPressed(kDebugNewGame) && !input.WasActionPressed(kDebugRespawnFoes),
           "F9 is new game");
     keyboard.OnKeyUp(Emerald::Key::F9);
+    keyboard.BeginFrame();
+    pads.BeginFrame();
+    keyboard.OnKeyDown(Emerald::Key::F8);
+    Check(input.WasActionPressed(kAscii) && !input.WasActionPressed(kDebugNewGame),
+          "F8 is the ascii toggle");
+    keyboard.OnKeyUp(Emerald::Key::F8);
     pads.BeginFrame();
     keyboard.BeginFrame();
     pads.OnButton(1, Emerald::GamepadButton::South, true);

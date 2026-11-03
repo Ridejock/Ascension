@@ -9,7 +9,9 @@
 #include <vector>
 
 #include "Ascension/Combat/Battle.h"
+#include "Ascension/Data/Ascii.h"
 #include "Ascension/Data/Database.h"
+#include "AsciiDraw.h"
 #include "Check.h"
 #include "FoeAlert.h"
 #include "GearLine.h"
@@ -2622,6 +2624,9 @@ const char* kUiLabels[] = {
     "Rested.",
     "Blocked.",
     "Back to the start.",
+    "ASCII",
+    "ASCII.",
+    "Pictures.",
 };
 
 void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
@@ -3328,6 +3333,97 @@ void TestPropFrame()
           "a placement with no footprint uses the picture size");
 }
 
+void CheckGlyphTable(std::span<const AsciiGlyph> rows, std::span<const std::string> ids,
+                    const char* kind)
+{
+    for (const std::string& id : ids) {
+        const AsciiGlyph* row = FindAsciiGlyph(rows, id);
+        const std::string what = std::string(kind) + " " + id + " has a drawable glyph";
+        Check(row != nullptr && Emerald::DebugTextHasGlyph(row->Glyph), what.c_str());
+    }
+    for (const AsciiGlyph& row : rows) {
+        bool known = false;
+        for (const std::string& id : ids) {
+            if (id == row.Id)
+                known = true;
+        }
+        const std::string what = std::string(kind) + " " + row.Id + " names a real id";
+        Check(known, what.c_str());
+    }
+}
+
+void TestAscii()
+{
+    const char* marks[] = {"hero", "exit", "spawn", "rest", "talk", "shop"};
+    const char* dirs[] = {ASCENSION_DATA_DIR, ASCENSION_SHIPPED_DATA_DIR};
+    const char* names[] = {"sample ascii loads", "shipped ascii loads"};
+    for (i32 index = 0; index < 2; ++index) {
+        Database data(dirs[index]);
+        DataError error;
+        Check(data.Load(&error), names[index]);
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        if (!data.IsLoaded())
+            continue;
+        const AsciiRules& ascii = data.GetAscii();
+        Check(ascii.Scale == 6 && ascii.BattleScale == 8, "ascii scales come from ascii.json");
+        std::vector<std::string> tileIds;
+        for (const TileDef& tile : data.GetTiles())
+            tileIds.push_back(tile.Id);
+        std::vector<std::string> foeIds;
+        for (const EnemyDef& enemy : data.GetEnemies())
+            foeIds.push_back(enemy.Id);
+        std::vector<std::string> classIds;
+        for (const ClassDef& klass : data.GetClasses())
+            classIds.push_back(klass.Id);
+        std::vector<std::string> propIds;
+        for (const MapDef& map : data.GetMaps()) {
+            for (const MapProp& prop : map.Props) {
+                bool seen = false;
+                for (const std::string& id : propIds) {
+                    if (id == prop.Id)
+                        seen = true;
+                }
+                if (!seen)
+                    propIds.push_back(prop.Id);
+            }
+        }
+        std::vector<std::string> markIds(std::begin(marks), std::end(marks));
+        CheckGlyphTable(ascii.Tiles, tileIds, "tile");
+        CheckGlyphTable(ascii.Foes, foeIds, "foe");
+        CheckGlyphTable(ascii.Classes, classIds, "class");
+        CheckGlyphTable(ascii.Props, propIds, "prop");
+        CheckGlyphTable(ascii.Marks, markIds, "mark");
+    }
+    {
+        Database data(ASCENSION_SHIPPED_DATA_DIR);
+        DataError error;
+        Check(data.Load(&error), "shipped ascii is ready for the wolf");
+        const AsciiGlyph* wolf = FindAsciiGlyph(data.GetAscii().Foes, "wolf");
+        const AsciiGlyph* hero = FindAsciiGlyph(data.GetAscii().Marks, "hero");
+        Check(wolf != nullptr && wolf->Glyph == 'W' && hero != nullptr && hero->Glyph == 'A',
+              "the wolf is W and the hero is A");
+    }
+    Check(FitAsciiScale(6, 64.0f, 64.0f) == 6, "a map cell keeps the requested scale");
+    Check(FitAsciiScale(8, 20.0f, 20.0f) == 2, "a small battle column shrinks the glyph");
+    Check(FitAsciiScale(0, 64.0f, 64.0f) == 1, "a non-positive scale is one");
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "ascii.json", "\"glyph\": \"+\"", "\"glyph\": \"#\"");
+        TestRejected(copy.Path, "ascii.json", "debug font",
+                     "a glyph the font cannot draw is named");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "ascii.json", "{ \"id\": \"floor\", \"glyph\": \"+\" },\n", "");
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a tile with no glyph still loads");
+        Check(FindAsciiGlyph(data.GetAscii().Tiles, "floor") == nullptr,
+              "the missing floor glyph is absent and the draw uses the fallback");
+    }
+}
+
 void TestMaps()
 {
     CheckFixtureMaps(ASCENSION_DATA_DIR, "sample maps load");
@@ -3342,6 +3438,7 @@ int main()
 {
     TestSample();
     TestMaps();
+    TestAscii();
     TestEveryRequiredFoe();
     TestHotReload();
     TestValidation();

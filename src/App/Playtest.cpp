@@ -111,6 +111,8 @@ bool LookupKey(std::string_view name, Emerald::Key& key, std::string& error)
         key = Emerald::Key::F;
     else if (lower == "f5")
         key = Emerald::Key::F5;
+    else if (lower == "f8")
+        key = Emerald::Key::F8;
     else {
         error = "unknown key '" + std::string(name) + "'";
         return false;

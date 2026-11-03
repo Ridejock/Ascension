@@ -155,6 +155,11 @@ void TestParseExampleAndEngineFlags()
     PlaytestOptions keys;
     Check(Parse({"--keys", "8 c e u x i r n space up down left right escape"}, keys, why),
           "the README key names parse");
+    PlaytestOptions asciiKey;
+    Check(Parse({"--keys", "f8"}, asciiKey, why), "f8 parses");
+    Check(asciiKey.Keys.size() == 1 && asciiKey.Keys[0] == Emerald::Key::F8,
+          "f8 is the ascii toggle");
+
     Check(keys.Keys.size() == 14 && keys.Keys[0] == Emerald::Key::Num8 &&
               keys.Keys[1] == Emerald::Key::C && keys.Keys[8] == Emerald::Key::Space &&
               keys.Keys[9] == Emerald::Key::Up && keys.Keys[12] == Emerald::Key::Right &&

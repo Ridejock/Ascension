@@ -33,4 +33,4 @@ The save file is not deleted and not rewritten. The next Save, or Quit game on t
 
 ## Help
 
-While the help line is showing, the map, the fight screen, and the between-fights screen draw F6 as FOES and F9 as NEW. Hiding the help line hides those chips. The keys still work.
+While the help line is showing, the map, the fight screen, and the between-fights screen draw F6 as FOES, F9 as NEW, and F8 as ASCII. Hiding the help line hides those chips. The keys still work. F8 switches the character presentation and does not touch the save. The characters are `ascii.json`.

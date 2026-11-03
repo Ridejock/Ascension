@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <string>
 
+#include "AsciiDraw.h"
 #include "FoeAlert.h"
 #include "GearLine.h"
 #include "MapView.h"
@@ -90,12 +91,25 @@ void DrawFigure(Emerald::Renderer2D& renderer, const Emerald::Vec2& origin, f32 
     renderer.FillRect(origin + Emerald::Vec2{s * 2.3f, s * 4.4f}, {s * 0.8f, s * 2.1f}, color);
 }
 
-// A pack battle image is drawn when the manifest lists this foe. Otherwise a foe
-// with a data color is a square of that color, and anyone else keeps the figure.
+// ASCII mode draws the foe's character in that foe's color, or the panel color
+// when the foe has none. Otherwise a pack image is drawn when the manifest lists
+// this foe. A foe with a data color is a square of that color, and anyone else
+// keeps the figure.
 void DrawFoeBody(Emerald::Renderer2D& renderer, const Database& data, const ArtGallery* art,
                  const CombatantState& foe, const Emerald::Vec2& origin, f32 size, bool alive,
-                 const Emerald::Vec4& fallback, const Emerald::Vec4& dead)
+                 const Emerald::Vec4& fallback, const Emerald::Vec4& dead, const AsciiRules* ascii)
 {
+    if (ascii != nullptr) {
+        Emerald::Vec4 tint = fallback;
+        const EnemyDef* def = data.FindEnemy(foe.Id);
+        if (def != nullptr && def->HasColor && alive) {
+            tint = {def->Red / 255.0f, def->Green / 255.0f, def->Blue / 255.0f, 1.0f};
+        }
+        DrawAsciiGlyph(renderer, origin, {size * 4.0f, size * 6.5f},
+                       AsciiChar(ascii->Foes, foe.Id, '?'), alive ? tint : dead,
+                       ascii->BattleScale);
+        return;
+    }
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     if (art != nullptr && !art->IsEmpty() &&
         DrawArt(renderer, art, ArtSlot::FoeBattle, foe.Id, origin, {size * 4.0f, size * 6.5f},
@@ -1748,6 +1762,8 @@ void AscensionApp::PollFront(f32 dt)
     TypeNameFromKeys();
     if (Pressed(kHelp))
         m_ShowHelp = !m_ShowHelp;
+    if (Pressed(kAscii))
+        ToggleAscii();
     if (Pressed(kDebugNewGame)) {
         const FrontPhase before = m_Front.Phase;
         DebugNewGame();
@@ -2240,8 +2256,14 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             if (klass != nullptr)
                 classId = klass->Id;
         }
-        if (classId.empty() || m_Gallery.IsEmpty() ||
-            !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, classId, figAt, figSize, white))
+        if (m_Ascii) {
+            const char hero = AsciiChar(m_Data.GetAscii().Marks, "hero", 'A');
+            DrawAsciiGlyph(renderer, figAt, figSize,
+                           AsciiChar(m_Data.GetAscii().Classes, classId, hero), Paint(style.Figure),
+                           m_Data.GetAscii().BattleScale);
+        } else if (classId.empty() || m_Gallery.IsEmpty() ||
+                   !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, classId, figAt, figSize,
+                            white))
             DrawFigure(renderer, figAt, fig, Paint(style.Figure));
         menuX = textX + figSize.x + rowGap;
         menuW = textW - figSize.x - rowGap;
@@ -2318,6 +2340,7 @@ void AscensionApp::DrawFront(Emerald::Renderer2D& renderer, f32 width, f32 heigh
 
 void AscensionApp::FinishFrame(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
+    DrawAsciiTag(renderer, width);
     if (m_Pause.Open)
         DrawPauseMenu(renderer, width, height);
     renderer.End();
@@ -2384,6 +2407,8 @@ void AscensionApp::PollActions(f32 dt)
     // handled once: WasActionPressed stays true for the whole frame, and a
     // second call would tap the new-game window twice. Quit is not a key.
     // The pause menu's Quit game row is the exit.
+    if (Pressed(kAscii))
+        ToggleAscii();
     if (Pressed(kDebugRespawnFoes))
         HandleAction(kDebugRespawnFoes);
     if (Pressed(kDebugNewGame)) {
@@ -2908,6 +2933,24 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
         Note("no hub map");
 }
 
+void AscensionApp::ToggleAscii()
+{
+    m_Ascii = !m_Ascii;
+    Note(m_Ascii ? "ASCII." : "Pictures.");
+}
+
+void AscensionApp::DrawAsciiTag(Emerald::Renderer2D& renderer, f32 width)
+{
+    if (!m_Ascii || !m_Data.IsLoaded())
+        return;
+    const std::string word = "ASCII";
+    const f32 band = Emerald::MeasureDebugText(word, 2).x;
+    f32 x = width - band - 16.0f;
+    if (x < 16.0f)
+        x = 16.0f;
+    Emerald::DrawDebugText(renderer, {x, 16.0f}, word, Paint(m_Data.GetBattleUi().Style.Dim), 2);
+}
+
 void AscensionApp::DebugNewGame()
 {
     const ControlRules& rules = m_Data.GetControls();
@@ -2969,6 +3012,10 @@ void AscensionApp::HandleAction(std::string_view action)
     }
     if (action == kHelp) {
         m_ShowHelp = !m_ShowHelp;
+        return;
+    }
+    if (action == kAscii) {
+        ToggleAscii();
         return;
     }
     // Scripted keys arrive here. A live frame already applied the edge in
@@ -3687,6 +3734,7 @@ void AscensionApp::DrawBetween(Emerald::Renderer2D& renderer, f32 width, f32 hei
     AddHint(hints, kSave, "SAVE");
     AddHint(hints, kDebugRespawnFoes, "FOES");
     AddHint(hints, kDebugNewGame, "NEW");
+    AddHint(hints, kAscii, "ASCII");
     RetargetPauseHints(hints);
     const f32 hintX = static_cast<f32>(ui.HintX);
     DrawHints(renderer, hintX, frame.HintTop, width - hintX, hints, true);
@@ -3766,8 +3814,14 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     if (playerTurn || aimSelf)
         DrawHalo(renderer, figAt, figSize, highlight);
-    if (m_Gallery.IsEmpty() ||
-        !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, m_Hero.ClassId(), figAt, figSize, white))
+    if (m_Ascii) {
+        DrawAsciiGlyph(renderer, figAt, figSize,
+                       AsciiChar(m_Data.GetAscii().Classes, m_Hero.ClassId(),
+                                 AsciiChar(m_Data.GetAscii().Marks, "hero", 'A')),
+                       Paint(style.Figure), m_Data.GetAscii().BattleScale);
+    } else if (m_Gallery.IsEmpty() ||
+               !DrawArt(renderer, &m_Gallery, ArtSlot::HeroBattle, m_Hero.ClassId(), figAt, figSize,
+                        white))
         DrawFigure(renderer, figAt, fig, Paint(style.Figure));
 
     const f32 textX = figAt.x + figSize.x + rowGap;
@@ -4013,7 +4067,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         if (acting || aimOne)
             DrawHalo(renderer, foeAt, figSize, highlight);
         DrawFoeBody(renderer, m_Data, &m_Gallery, enemy, foeAt, fig, enemy.Alive(),
-                    Paint(style.Foe), dim);
+                    Paint(style.Foe), dim, m_Ascii ? &m_Data.GetAscii() : nullptr);
         const f32 nameX = foeAt.x + figSize.x + rowGap;
         const f32 nameW = foeX + foeW > nameX ? foeX + foeW - nameX : 0.0f;
         std::string foeTitle = enemy.Name;
@@ -4100,7 +4154,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
             else if (targeted && member.Alive())
                 DrawHalo(renderer, memberAt, columnFigSize, frameColor);
             DrawFoeBody(renderer, m_Data, &m_Gallery, member, memberAt, columnFig, member.Alive(),
-                        Paint(style.Foe), dim);
+                        Paint(style.Foe), dim, m_Ascii ? &m_Data.GetAscii() : nullptr);
             f32 textY = memberAt.y + columnFigSize.y + rowGap;
             const Emerald::Vec4 memberInk = member.Alive() ? ink : dim;
             std::string memberName = member.Name;
@@ -4320,6 +4374,7 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
         AddHint(hints, kSave, "SAVE");
         AddHint(hints, kDebugRespawnFoes, "FOES");
         AddHint(hints, kDebugNewGame, "NEW");
+        AddHint(hints, kAscii, "ASCII");
         AddHint(hints, "", "REV " + std::to_string(m_Data.GetRevision()));
     }
     RetargetPauseHints(hints);
@@ -4347,6 +4402,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         const f32 hintX = static_cast<f32>(frontUi.HintX);
         const f32 hintTop = height - static_cast<f32>(frontUi.HintFromBottom);
         DrawHints(renderer, hintX, hintTop, width - hintX, hints, true);
+        DrawAsciiTag(renderer, width);
         renderer.End();
         return;
     }
@@ -4370,8 +4426,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
                       shown.Focus, caps.MaxFocus, shown.Mana, caps.MaxMana, m_MapMemory.Cleared,
-                      m_Places, &m_Gallery,
-                      &m_Glides);
+                      m_Places, &m_Gallery, &m_Glides, m_Ascii);
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
         if (m_Pause.Open) {
@@ -4391,6 +4446,7 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
         std::vector<HintChip> debugHints;
         AddHint(debugHints, kDebugRespawnFoes, "FOES");
         AddHint(debugHints, kDebugNewGame, "NEW");
+        AddHint(debugHints, kAscii, "ASCII");
         DrawHints(renderer, 16.0f, promptY, width - 16.0f, debugHints, true);
         FinishFrame(renderer, width, height);
         return;

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ArtGallery.h"
+#include "AsciiDraw.h"
 #include "Emerald/Renderer/DebugText.h"
 
 namespace Ascension {
@@ -77,7 +78,7 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                    i32 focus, i32 maxFocus, i32 mana, i32 maxMana,
                    std::span<const std::string> cleared,
                    std::span<const SpawnPlace> places, const ArtGallery* art,
-                   const SpawnGlides* motion)
+                   const SpawnGlides* motion, bool ascii)
 {
     const UiStyle& style = data.GetBattleUi().Style;
     const Emerald::Vec4 label = ByteColor(style.Ink.Red, style.Ink.Green, style.Ink.Blue);
@@ -103,6 +104,7 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     const Emerald::Vec4 link = ByteColor(rules.LinkRed, rules.LinkGreen, rules.LinkBlue);
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
     const bool packed = art != nullptr && !art->IsEmpty();
+    const AsciiRules* asciiRules = ascii ? &data.GetAscii() : nullptr;
     const f32 inset = tile * static_cast<f32>(rules.HeroInsetPercent) / 100.0f;
     const f32 inner = tile - inset * 2.0f;
 
@@ -120,6 +122,36 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                 continue;
             const f32 left = (static_cast<f32>(x) - frame.OriginX) * tile;
             const f32 top = (static_cast<f32>(y) - frame.OriginY) * tile;
+            bool linked = false;
+            for (const MapLink& door : map->Links) {
+                if (door.Tile.X == x && door.Tile.Y == y)
+                    linked = true;
+            }
+            if (asciiRules != nullptr) {
+                // The cell stays the tile color as ink on the paper. A prop's blocked
+                // cells, then an exit, replace that character. Open cells of a prop
+                // stay the floor, so a building can still be walked.
+                DrawCell(renderer, left, top, tile,
+                         ByteColor(asciiRules->PaperRed, asciiRules->PaperGreen,
+                                   asciiRules->PaperBlue));
+                char glyph = AsciiChar(asciiRules->Tiles, def->Id, '?');
+                Emerald::Vec4 ink = ByteColor(def->Red, def->Green, def->Blue);
+                for (const MapProp& prop : map->Props) {
+                    const bool anchorOnly = prop.Width < 1 || prop.Height < 1;
+                    const bool covers = anchorOnly ? prop.Tile.X == x && prop.Tile.Y == y
+                                                   : MapPropBlocks(prop, x, y);
+                    if (!covers)
+                        continue;
+                    glyph = AsciiChar(asciiRules->Props, prop.Id, '?');
+                    ink = ByteColor(asciiRules->InkRed, asciiRules->InkGreen, asciiRules->InkBlue);
+                }
+                if (linked) {
+                    glyph = AsciiChar(asciiRules->Marks, "exit", '>');
+                    ink = link;
+                }
+                DrawAsciiGlyph(renderer, {left, top}, {tile, tile}, glyph, ink, asciiRules->Scale);
+                continue;
+            }
             // The cell is this tile id. Neighbouring walls are not consulted, so a pack
             // cannot pick a wall piece from what the cell touches.
             ArtPlace place;
@@ -129,11 +161,6 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             if (!packed || !DrawArt(renderer, art, ArtSlot::Tile, def->Id, {left, top}, {tile, tile},
                                     white, place))
                 DrawCell(renderer, left, top, tile, ByteColor(def->Red, def->Green, def->Blue));
-            bool linked = false;
-            for (const MapLink& door : map->Links) {
-                if (door.Tile.X == x && door.Tile.Y == y)
-                    linked = true;
-            }
             if (linked && inner > 0.0f) {
                 if (!packed || !DrawArt(renderer, art, ArtSlot::ExitMarker, "",
                                         {left + inset, top + inset}, {inner, inner}, white))
@@ -152,7 +179,7 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
         usize Index = 0;
     };
     std::vector<OverlandPiece> pieces;
-    if (packed) {
+    if (packed && asciiRules == nullptr) {
         for (usize index = 0; index < map->Props.size(); ++index) {
             const MapProp& prop = map->Props[index];
             const ResolvedArt resolved = art->GetPack().Find(ArtSlot::Prop, prop.Id);
@@ -171,7 +198,7 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             pieces.push_back(piece);
         }
     }
-    if (inner > 0.0f) {
+    if (inner > 0.0f || asciiRules != nullptr) {
         for (usize index = 0; index < map->Points.size(); ++index) {
             const MapPoint& point = map->Points[index];
             if (point.Tile.X < firstX || point.Tile.X >= lastX || point.Tile.Y < firstY ||
@@ -220,6 +247,49 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
     const Emerald::Vec4 spawnColor = ByteColor(rules.SpawnRed, rules.SpawnGreen, rules.SpawnBlue);
     const Emerald::Vec4 heroColor = ByteColor(rules.HeroRed, rules.HeroGreen, rules.HeroBlue);
     for (const OverlandPiece& piece : pieces) {
+        if (asciiRules != nullptr && piece.Layer == 1) {
+            const MapPoint& point = map->Points[piece.Index];
+            const f32 left = (static_cast<f32>(point.Tile.X) - frame.OriginX) * tile;
+            const f32 top = (static_cast<f32>(point.Tile.Y) - frame.OriginY) * tile;
+            const char* mark = "rest";
+            const Emerald::Vec4* color = &restColor;
+            if (point.Kind == MapPointKind::Talk) {
+                mark = "talk";
+                color = &talkColor;
+            } else if (point.Kind == MapPointKind::Shop) {
+                mark = "shop";
+                color = &shopColor;
+            }
+            DrawAsciiGlyph(renderer, {left, top}, {tile, tile},
+                           AsciiChar(asciiRules->Marks, mark, '?'), *color, asciiRules->Scale);
+            continue;
+        }
+        if (asciiRules != nullptr && piece.Layer == 2) {
+            const MapSpawn& spawn = map->Spawns[piece.Index];
+            const MapTile at = SpawnDrawTile(spawn, places);
+            const WalkPoint drawn =
+                motion != nullptr ? motion->Sample(spawn.Id, at)
+                                  : WalkPoint{static_cast<f32>(at.X), static_cast<f32>(at.Y)};
+            const f32 left = (drawn.X - frame.OriginX) * tile;
+            const f32 top = (drawn.Y - frame.OriginY) * tile;
+            char glyph = AsciiChar(asciiRules->Marks, "spawn", 'E');
+            Emerald::Vec4 color = spawnColor;
+            if (const std::string* foeId = SpawnFoeId(data, spawn)) {
+                glyph = AsciiChar(asciiRules->Foes, *foeId, glyph);
+                if (const EnemyDef* foe = data.FindEnemy(*foeId);
+                    foe != nullptr && foe->HasColor)
+                    color = ByteColor(foe->Red, foe->Green, foe->Blue);
+            }
+            DrawAsciiGlyph(renderer, {left, top}, {tile, tile}, glyph, color, asciiRules->Scale);
+            continue;
+        }
+        if (asciiRules != nullptr && piece.Layer == 3) {
+            const f32 left = (heroPoint.X - frame.OriginX) * tile;
+            const f32 top = (heroPoint.Y - frame.OriginY) * tile;
+            DrawAsciiGlyph(renderer, {left, top}, {tile, tile},
+                           AsciiChar(asciiRules->Marks, "hero", 'A'), heroColor, asciiRules->Scale);
+            continue;
+        }
         if (piece.Layer == 0) {
             const MapProp& prop = map->Props[piece.Index];
             const ResolvedArt resolved = art->GetPack().Find(ArtSlot::Prop, prop.Id);

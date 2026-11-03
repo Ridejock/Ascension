@@ -60,7 +60,8 @@
       { "name": "Slot7", "keys": ["7"], "buttons": [] },
       { "name": "Slot8", "keys": ["8"], "buttons": [] },
       { "name": "DebugRespawnFoes", "keys": ["F6"], "buttons": [] },
-      { "name": "DebugNewGame", "keys": ["F9"], "buttons": [] }
+      { "name": "DebugNewGame", "keys": ["F9"], "buttons": [] },
+      { "name": "Ascii", "keys": ["F8"], "buttons": [] }
     ]
   }
 }

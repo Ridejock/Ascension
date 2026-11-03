@@ -100,12 +100,14 @@ inline constexpr std::string_view kSlot7 = "Slot7";
 inline constexpr std::string_view kSlot8 = "Slot8";
 inline constexpr std::string_view kDebugRespawnFoes = "DebugRespawnFoes";
 inline constexpr std::string_view kDebugNewGame = "DebugNewGame";
+// Switches the character presentation. It does not spend a turn and it is not saved.
+inline constexpr std::string_view kAscii = "Ascii";
 
-inline constexpr std::array<std::string_view, 30> kControlActions = {
+inline constexpr std::array<std::string_view, 31> kControlActions = {
     kMoveNorth, kMoveSouth, kMoveEast, kMoveWest, kConfirm, kCancel, kMenu,     kContext,
     kPause,     kHelp,      kCyclePrev, kCycleNext, kWait,   kFlee,   kInteract, kUnequip,
     kSave,      kQuit,      kRetry,     kNext,      kSlot1,  kSlot2,  kSlot3,    kSlot4,
-    kSlot5,     kSlot6,     kSlot7,     kSlot8,     kDebugRespawnFoes, kDebugNewGame,
+    kSlot5,     kSlot6,     kSlot7,     kSlot8,     kDebugRespawnFoes, kDebugNewGame, kAscii,
 };
 
 [[nodiscard]] inline bool IsControlAction(std::string_view name)

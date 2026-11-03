@@ -150,6 +150,9 @@ private:
     // From the title it is New game: an empty numbered slot, or the slot list when
     // every numbered slot is full.
     void DebugNewGame();
+    // F8 switches the character presentation. It is not written into the save.
+    void ToggleAscii();
+    void DrawAsciiTag(Emerald::Renderer2D& renderer, f32 width);
     // No save, or a save the player has not continued. Create is the other way in.
     void ShowTitle();
     // --class, --keys, and the other setup flags. The title is not shown.
@@ -319,6 +322,8 @@ private:
     PauseMenu m_Pause;
     // Back/View and the help key hide the line at the bottom. The map's tile prompt stays.
     bool m_ShowHelp = true;
+    // Character presentation. False keeps the pictures and palette squares.
+    bool m_Ascii = false;
     // The highlighted battle command (skills, then wait, items, flee) and choice row.
     i32 m_CommandRow = 0;
     // True after Confirm on a skill, until Confirm uses it or Cancel steps back.

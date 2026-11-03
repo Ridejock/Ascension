@@ -91,6 +91,7 @@ ctest --preset debug
 | `prompts.json` | Button glyphs per device family, and the icon and text scales for hint rows |
 | `battle_ui.json` | Type size, color, spacing, panels, and message hold for the fight screen. The shop uses the same type and color |
 | `shop_ui.json` | How many shop rows are on screen, the icon scale, and the gap between the bag and the stock |
+| `ascii.json` | Characters for the opt-in ASCII presentation: map tiles, props, foes, classes, and the hero, exit, rest, talk, and shop marks |
 
 Pad buttons are positional, so the same `input.json` row is A on Xbox, Cross on PlayStation, and B on a Switch. Keyboard `I` stays Interact and `E` stays Confirm. `A` on the keyboard is MoveWest.
 
@@ -111,7 +112,10 @@ Pad buttons are positional, so the same `input.json` row is A on Xbox, Cross on 
 | Save / Retry / Next | F5, R, N |  | Save the run, retry the fight, next foe. Leaving the process is Quit game on the pause menu |
 | DebugRespawnFoes | F6 |  | Bring every defeated foe back on every map. Level, gear, gold, and the tile stay. Ignored during a fight |
 | DebugNewGame | F9, twice |  | Opens character create. From a running game the save file stays until the next save. From the title it is New game |
+| Ascii | F8 |  | Switch to the character presentation, or back to pictures. The map, fight figures, and the title portrait use `ascii.json`. Panels and menus stay. The help row also shows this key. It is not saved |
 | Slot1–Slot8 | 1–8 |  | The numbered skill, drink, or choice. Confirm uses the marked row when there is no number |
+
+`F8` is off until it is pressed, including on the title. The map draws each cell as the character in `ascii.json`, in that tile's color, on the paper color. A prop's blocked cells use the prop character. An exit, a rest, a talk, a shop, a foe, and the hero replace the cell they stand on. The hero on the map is the `hero` mark. A fight figure and the title portrait use the class character, and each foe uses its own. The debug font has no `#`, `~`, or `@`, so the table uses characters that font can draw (`[` for a wall, `:` for water, `A` for the hero). A content id with no row draws `?`. Shop item pictures stay. Pressing `F8` again returns to the pictures. The choice is not written into the save.
 
 Menu repeat is `navInitialMilliseconds` (280) then `navRepeatMilliseconds` (120). On the map a held direction glides; `walk.json` sets `moveMilliseconds` and `settleMilliseconds`. Hints use the glyph for the action's current binding on the last-used pad. Keyboard, and a button with no tile, draws a short label. `iconScale` and `textScale` in `prompts.json` set the sizes; the text cap is centered on the icon.
 
@@ -239,7 +243,7 @@ A scripted run sets the hero and the fight from the command line, so a playtest 
 | `--gold N` | Start with N gold |
 | `--give id[:count],...` | Put items in the bag. A missing count is 1 |
 | `--equip id,...` | Wear those pieces. An id that was also given comes out of the bag; anything else is added and then worn. A two-handed weapon still fills the offhand |
-| `--keys "1 1 c e r"` | Press those keys in order, one per frame after the window is up, then quit. The names are the combat table: `1`–`8`, `c`, `e`, `u`, `x`, `i`, `r`, `n`, `f`, `space`, `up`, `down`, `left`, `right`, `escape`, `f5`, and on a map also `w`, `a`, `s`, `d`. `escape` opens the pause menu. It does not save and it does not exit on its own. The window does not need focus |
+| `--keys "1 1 c e r"` | Press those keys in order, one per frame after the window is up, then quit. The names are the combat table: `1`–`8`, `c`, `e`, `u`, `x`, `i`, `r`, `n`, `f`, `space`, `up`, `down`, `left`, `right`, `escape`, `f5`, `f8`, and on a map also `w`, `a`, `s`, `d`. `escape` opens the pause menu. `f8` switches the ASCII presentation. It does not save and it does not exit on its own. The window does not need focus |
 | `--keys-file path` | The same list, read from a file. Pass this or `--keys`, not both. `f5` saves |
 | `--save-dir path` | Read and write the run save in that folder. Empty uses the per-user Ascension saves directory. A command that builds a hero (`--level`, `--class`, `--enemy`, `--gold`, `--give`, `--equip`, `--choose`, `--pick`) does not load a save. `--map` loads one only when this flag names the folder |
 | `--choose id` | When the evolution choice opens, pick that class |

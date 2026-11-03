@@ -19,12 +19,14 @@ class ArtGallery;
 // A prop picture is drawn after the ground, in south-row order with the other
 // overland sprites. A prop the pack does not list is not drawn.
 // `motion` is where spawns are drawn. Null stands each spawn on its tile.
+// `ascii` draws the glyph table instead of pictures and palette squares. The
+// camera, the grid, and the corner text stay.
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
                    std::span<const std::string> log, f32 width, f32 height, i32 hp, i32 maxHp,
                    i32 focus, i32 maxFocus, i32 mana, i32 maxMana,
                    std::span<const std::string> cleared,
                    std::span<const SpawnPlace> places = {}, const ArtGallery* art = nullptr,
-                   const SpawnGlides* motion = nullptr);
+                   const SpawnGlides* motion = nullptr, bool ascii = false);
 
 // "TALK" or "SHOP" when the hero stands on that point. Null on a rest or an empty tile.
 [[nodiscard]] const char* MapInteractWord(const Database& data, const Walker& walker);

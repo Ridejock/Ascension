@@ -1,0 +1,60 @@
+{
+  "ascii": {
+    "scale": 6,
+    "battleScale": 8,
+    "paper": "#12100E",
+    "ink": "#E8E0CC",
+    "tiles": [
+      { "id": "floor", "glyph": "+" },
+      { "id": "wall", "glyph": "[" },
+      { "id": "grass", "glyph": "." },
+      { "id": "path", "glyph": "," },
+      { "id": "water", "glyph": ":" },
+      { "id": "tree", "glyph": "T" },
+      { "id": "stone", "glyph": "O" },
+      { "id": "barrow", "glyph": "B" },
+      { "id": "rubble", "glyph": "%" }
+    ],
+    "marks": [
+      { "id": "hero", "glyph": "A" },
+      { "id": "exit", "glyph": ">" },
+      { "id": "spawn", "glyph": "E" },
+      { "id": "rest", "glyph": "R" },
+      { "id": "talk", "glyph": "P" },
+      { "id": "shop", "glyph": "S" }
+    ],
+    "props": [
+      { "id": "shop_house", "glyph": "H" },
+      { "id": "inn", "glyph": "I" },
+      { "id": "pell_cabin", "glyph": "C" }
+    ],
+    "foes": [
+      { "id": "wolf", "glyph": "W" },
+      { "id": "sluice_wolf", "glyph": "L" },
+      { "id": "bandit", "glyph": "N" },
+      { "id": "tomb_moth", "glyph": "M" },
+      { "id": "bone_archer", "glyph": "K" },
+      { "id": "dire_wolf", "glyph": "D" },
+      { "id": "barrow_sentry", "glyph": "Y" },
+      { "id": "bear", "glyph": "U" },
+      { "id": "oathkeeper_varn", "glyph": "V" },
+      { "id": "rubble_shard", "glyph": "X" },
+      { "id": "cairn_warden", "glyph": "Q" },
+      { "id": "barrow_brute", "glyph": "G" }
+    ],
+    "classes": [
+      { "id": "fighter", "glyph": "F" },
+      { "id": "berserker", "glyph": "Z" },
+      { "id": "guardian", "glyph": "G" },
+      { "id": "mage", "glyph": "M" },
+      { "id": "elementalist", "glyph": "E" },
+      { "id": "warlock", "glyph": "W" },
+      { "id": "rogue", "glyph": "R" },
+      { "id": "assassin", "glyph": "A" },
+      { "id": "scout", "glyph": "K" },
+      { "id": "cleric", "glyph": "C" },
+      { "id": "priest", "glyph": "P" },
+      { "id": "templar", "glyph": "T" }
+    ]
+  }
+}
