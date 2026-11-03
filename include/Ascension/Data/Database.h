@@ -22,7 +22,7 @@ struct DataError {
 };
 
 // Where one of the hero's skills comes from. Id is the class id or the item id.
-enum class GrantSource : u8 { Class, Item };
+enum class GrantSource : u8 { Class, Item, System };
 
 struct GrantOrigin {
     GrantSource Source = GrantSource::Class;
@@ -40,9 +40,9 @@ struct HeroGrant {
     std::vector<GrantOrigin> Origins;
 };
 
-// The JSON files in a data directory (stats, effects, schools, skills, statuses, classes, enemies,
-// encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input, prompts,
-// battle_ui, shop_ui), every
+// The JSON files in a data directory (stats, effects, schools, skills, statuses, classes, titles,
+// enemies, encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input,
+// prompts, battle_ui, shop_ui), every
 // data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
 // assets/icons, checked
 // against each other. Load once, then call CheckForChanges from the frame loop: a file
@@ -79,6 +79,7 @@ public:
     [[nodiscard]] std::span<const SkillDef> GetSkills() const { return m_Skills; }
     [[nodiscard]] std::span<const StatusDef> GetStatuses() const { return m_Statuses; }
     [[nodiscard]] std::span<const ClassDef> GetClasses() const { return m_Classes; }
+    [[nodiscard]] std::span<const TitleDef> GetTitles() const { return m_Titles; }
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
     [[nodiscard]] std::span<const EncounterDef> GetEncounters() const { return m_Encounters; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
@@ -111,6 +112,7 @@ public:
     [[nodiscard]] const SkillDef* FindSkill(std::string_view id) const;
     [[nodiscard]] const StatusDef* FindStatus(std::string_view id) const;
     [[nodiscard]] const ClassDef* FindClass(std::string_view id) const;
+    [[nodiscard]] const TitleDef* FindTitle(std::string_view id) const;
     [[nodiscard]] const EnemyDef* FindEnemy(std::string_view id) const;
     [[nodiscard]] const EncounterDef* FindEncounter(std::string_view id) const;
     [[nodiscard]] const ItemDef* FindItem(std::string_view id) const;
@@ -185,6 +187,7 @@ private:
     std::vector<SkillDef> m_Skills;
     std::vector<StatusDef> m_Statuses;
     std::vector<ClassDef> m_Classes;
+    std::vector<TitleDef> m_Titles;
     std::vector<EnemyDef> m_Enemies;
     std::vector<EncounterDef> m_Encounters;
     std::vector<ItemDef> m_Items;

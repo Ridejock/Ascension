@@ -43,7 +43,8 @@
       "focusCost": 2,
       "effects": [
         { "id": "mend", "trigger": "onUse", "op": "heal", "power": 8 }
-      ]
+      ],
+      "tags": ["heal"]
     },
     {
       "id": "rage",

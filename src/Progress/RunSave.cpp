@@ -179,6 +179,14 @@ void MigrateRunV5(Emerald::SaveData& data)
         MigrateStatBlock(data, Key("source", index, {}));
 }
 
+// Version 6 has no System ledger. Mark the file so the hero settles free points at the
+// level already reached. The lists themselves stay absent and read as empty.
+void MigrateRunV6(Emerald::SaveData& data)
+{
+    if (!data.Has("free.floor"))
+        data.SetBool("free.legacy", true);
+}
+
 // Version 3's position is an encounter-list index. Version 4 stores a map, a tile, and
 // spawn ids. The index waits under legacy.index until the maps are loaded. A finished
 // fight did not carry HP in version 3; drop a leftover health field so it still does not.
@@ -204,6 +212,7 @@ Emerald::SaveSystem Open(const std::filesystem::path& folder)
     system.AddMigration(3, MigrateRunV3);
     system.AddMigration(4, MigrateRunV4);
     system.AddMigration(5, MigrateRunV5);
+    system.AddMigration(6, MigrateRunV6);
     return system;
 }
 
@@ -435,6 +444,28 @@ void Store(const RunState& run, Emerald::SaveData& data)
         WriteStats(data, Key("source", index, {}), source.Points);
     }
 
+    const SystemState& system = run.Career.System;
+    data.SetInt("counter.count", static_cast<i32>(system.Counters.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.Counters.size()); ++index) {
+        const SystemCounter& counter = system.Counters[static_cast<usize>(index)];
+        data.SetString(Key("counter", index, "key"), counter.Key);
+        data.SetInt(Key("counter", index, "count"), counter.Count);
+    }
+    data.SetInt("title.count", static_cast<i32>(system.Titles.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.Titles.size()); ++index)
+        data.SetString(Key("title", index, {}), system.Titles[static_cast<usize>(index)]);
+    data.SetInt("titleOffer.count", static_cast<i32>(system.TitleOffers.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.TitleOffers.size()); ++index)
+        data.SetString(Key("titleOffer", index, {}), system.TitleOffers[static_cast<usize>(index)]);
+    data.SetInt("skillOffer.count", static_cast<i32>(system.SkillOffers.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.SkillOffers.size()); ++index)
+        data.SetString(Key("skillOffer", index, {}), system.SkillOffers[static_cast<usize>(index)]);
+    data.SetInt("granted.count", static_cast<i32>(system.GrantedSkills.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.GrantedSkills.size()); ++index)
+        data.SetString(Key("granted", index, {}), system.GrantedSkills[static_cast<usize>(index)]);
+    data.SetInt("free.floor", system.FreeFloor < 1 ? 1 : system.FreeFloor);
+    WriteStats(data, "free", system.FreeSpent);
+
     data.SetInt("gold", run.Bag.Gold);
     data.SetString("worn.weapon", run.Bag.Weapon);
     data.SetString("worn.offhand", run.Bag.Offhand);
@@ -523,10 +554,16 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     const i32 flags = data.GetInt("flag.count", 0);
     const i32 cleared = data.GetInt("cleared.count", 0);
     const i32 wounds = data.GetInt("wound.count", 0);
+    const i32 counters = data.GetInt("counter.count", 0);
+    const i32 titles = data.GetInt("title.count", 0);
+    const i32 titleOffers = data.GetInt("titleOffer.count", 0);
+    const i32 skillOffers = data.GetInt("skillOffer.count", 0);
+    const i32 granted = data.GetInt("granted.count", 0);
     if (!CountOk(skills, error) || !CountOk(picks, error) || !CountOk(steps, error) ||
         !CountOk(sources, error) || !CountOk(bags, error) || !CountOk(foes, error) ||
         !CountOk(found, error) || !CountOk(flags, error) || !CountOk(cleared, error) ||
-        !CountOk(wounds, error))
+        !CountOk(wounds, error) || !CountOk(counters, error) || !CountOk(titles, error) ||
+        !CountOk(titleOffers, error) || !CountOk(skillOffers, error) || !CountOk(granted, error))
         return false;
 
     run.Career.Practiced.resize(static_cast<usize>(skills));
@@ -568,6 +605,60 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
             source.Points = ReadStats(data, Key("source", index, {}));
         }
     }
+
+    SystemState& system = run.Career.System;
+    system.Counters.resize(static_cast<usize>(counters));
+    for (i32 index = 0; index < counters; ++index) {
+        SystemCounter& counter = system.Counters[static_cast<usize>(index)];
+        counter.Key = data.GetString(Key("counter", index, "key"));
+        if (counter.Key.empty()) {
+            error = "the save's system counters are damaged";
+            return false;
+        }
+        const i32 count = data.GetInt(Key("counter", index, "count"), 0);
+        counter.Count = count < 0 ? 0 : count;
+    }
+    system.Titles.resize(static_cast<usize>(titles));
+    for (i32 index = 0; index < titles; ++index) {
+        const std::string id = data.GetString(Key("title", index, {}));
+        if (id.empty()) {
+            error = "the save's titles are damaged";
+            return false;
+        }
+        system.Titles[static_cast<usize>(index)] = id;
+    }
+    system.TitleOffers.resize(static_cast<usize>(titleOffers));
+    for (i32 index = 0; index < titleOffers; ++index) {
+        const std::string id = data.GetString(Key("titleOffer", index, {}));
+        if (id.empty()) {
+            error = "the save's title offers are damaged";
+            return false;
+        }
+        system.TitleOffers[static_cast<usize>(index)] = id;
+    }
+    system.SkillOffers.resize(static_cast<usize>(skillOffers));
+    for (i32 index = 0; index < skillOffers; ++index) {
+        const std::string id = data.GetString(Key("skillOffer", index, {}));
+        if (id.empty()) {
+            error = "the save's skill offers are damaged";
+            return false;
+        }
+        system.SkillOffers[static_cast<usize>(index)] = id;
+    }
+    system.GrantedSkills.resize(static_cast<usize>(granted));
+    for (i32 index = 0; index < granted; ++index) {
+        const std::string id = data.GetString(Key("granted", index, {}));
+        if (id.empty()) {
+            error = "the save's granted skills are damaged";
+            return false;
+        }
+        system.GrantedSkills[static_cast<usize>(index)] = id;
+    }
+    system.FreeSpent = ReadStats(data, "free");
+    system.FreeFloor = data.GetInt("free.floor", 1);
+    if (system.FreeFloor < 1)
+        system.FreeFloor = 1;
+    run.Career.FreeLegacy = data.GetBool("free.legacy", false);
 
     run.Bag.Gold = data.GetInt("gold", 0);
     run.Bag.Weapon = data.GetString("worn.weapon");

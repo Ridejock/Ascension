@@ -1666,10 +1666,12 @@ void TestLoggedHeal()
     TempCopy copy;
     ReplaceInFile(copy.Path / "skills.json",
                   "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }\n"
-                  "      ]\n"
+                  "      ],\n"
+                  "      \"tags\": [\"heal\"]\n"
                   "    },",
                   "{ \"id\": \"mend\", \"trigger\": \"onUse\", \"op\": \"heal\", \"power\": 8 }\n"
-                  "      ]\n"
+                  "      ],\n"
+                  "      \"tags\": [\"heal\"]\n"
                   "    },\n"
                   "    {\n"
                   "      \"id\": \"rally\",\n"

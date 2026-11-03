@@ -5,6 +5,7 @@
       "name": "Fighter",
       "description": "A front-line combatant. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
+      "rarity": "common",
       "stats": {
         "strength": 8,
         "intellect": 4,
@@ -22,7 +23,14 @@
         "will": 0
       },
       "skills": ["strike", "brace", "heavy_blow", "second_wind"],
-      "passives": []
+      "passives": [],
+      "systemSkills": [
+        {
+          "id": "field_mend",
+          "skill": "prayer",
+          "deed": { "on": "tag", "tag": "heal", "atLeast": 4 }
+        }
+      ]
     },
     {
       "id": "berserker",
@@ -30,6 +38,8 @@
       "description": "Trades caution for blood. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "fighter",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "strength": 4,
         "stamina": 2
@@ -53,6 +63,8 @@
       "description": "Plants their feet and keeps everyone else standing. Offered at level {evolveLevel}.",
       "evolvesFrom": "fighter",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "defense": 5,
         "stamina": 3
@@ -72,10 +84,30 @@
       ]
     },
     {
+      "id": "oathbound",
+      "name": "Oathbound",
+      "description": "A {from} who kept mending. The System offers this at level {evolveLevel}.",
+      "evolvesFrom": "fighter",
+      "evolveLevel": 5,
+      "offer": "meld",
+      "rarity": "rare",
+      "meld": { "on": "tag", "tag": "heal", "atLeast": 8 },
+      "bonus": { "will": 3, "defense": 3, "stamina": 2 },
+      "growth": {
+        "stamina": 3,
+        "defense": 2,
+        "will": 2,
+        "strength": 1
+      },
+      "skills": ["prayer"],
+      "passives": ["bulwark"]
+    },
+    {
       "id": "mage",
       "name": "Mage",
       "description": "A student of the arcane. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
+      "rarity": "common",
       "stats": {
         "strength": 1,
         "intellect": 13,
@@ -101,6 +133,8 @@
       "description": "Feeds a flame until it answers. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "mage",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "intellect": 2,
         "will": 2,
@@ -126,6 +160,8 @@
       "description": "Pays for power with a pact. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "mage",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "will": 2,
         "intellect": 1,
@@ -151,6 +187,7 @@
       "name": "Rogue",
       "description": "An assassin and a scout. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
+      "rarity": "common",
       "stats": {
         "strength": 6,
         "intellect": 2,
@@ -176,6 +213,8 @@
       "description": "Opens a wound and stays on it. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "rogue",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "agility": 3,
         "strength": 2
@@ -199,6 +238,8 @@
       "description": "Marks one foe and takes the shot. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "rogue",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "agility": 2,
         "intellect": 1,
@@ -225,6 +266,7 @@
       "name": "Cleric",
       "description": "Keeps the line standing, and can strike when it must. At level {pathLevel}, a {name} becomes a {paths}.",
       "starter": true,
+      "rarity": "common",
       "stats": {
         "strength": 1,
         "intellect": 2,
@@ -250,6 +292,8 @@
       "description": "Mends between blows. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "cleric",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "will": 2,
         "intellect": 2,
@@ -275,6 +319,8 @@
       "description": "Sets a guard and answers through it. Offered when a {from} reaches level {evolveLevel}.",
       "evolvesFrom": "cleric",
       "evolveLevel": 5,
+      "offer": "guaranteed",
+      "rarity": "uncommon",
       "bonus": {
         "defense": 4,
         "stamina": 3

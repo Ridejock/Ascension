@@ -550,6 +550,7 @@ void Battle::MakeFoe(const EnemyDef& def, CombatantState& foe) const
     foe = {};
     foe.Id = def.Id;
     foe.Name = def.Name;
+    foe.Tags = def.Tags;
     foe.Stats = def.Stats;
     ApplyAlways(foe, false);
     i32 stamina = foe.Stats.Stamina;
@@ -620,6 +621,26 @@ bool Battle::Build(std::string& error, bool keepWounds)
     for (const HeroGrant& held : m_HeroGrants) {
         if (held.Skill.Kind == SkillKind::Active)
             playerSkills.push_back(held.Skill.Id);
+    }
+    for (const std::string& extraId : m_GrantedSkills) {
+        bool have = false;
+        for (const std::string& id : playerSkills) {
+            if (id == extraId)
+                have = true;
+        }
+        if (have)
+            continue;
+        const SkillDef* skill = m_Data->FindSkill(extraId);
+        if (skill == nullptr || skill->Kind != SkillKind::Active)
+            continue;
+        HeroGrant grant;
+        grant.Skill = *skill;
+        GrantOrigin origin;
+        origin.Source = GrantSource::System;
+        origin.Id = "system";
+        grant.Origins.push_back(std::move(origin));
+        m_HeroGrants.push_back(std::move(grant));
+        playerSkills.push_back(extraId);
     }
 
     const std::vector<CombatantState> previous = m_Enemies;
@@ -1425,6 +1446,30 @@ void Battle::SetPickedSkills(std::vector<std::string> skillIds)
     m_PickedSkills = std::move(skillIds);
 }
 
+void Battle::SetGrantedSkills(std::vector<std::string> skillIds)
+{
+    m_GrantedSkills = std::move(skillIds);
+}
+
+void Battle::SetTagDamage(std::vector<TagDamage> rows)
+{
+    m_TagDamage = std::move(rows);
+}
+
+i32 TagDamagePercent(const std::vector<TagDamage>& rows, const CombatantState& foe)
+{
+    i32 extra = 0;
+    for (const TagDamage& row : rows) {
+        if (row.Percent == 0)
+            continue;
+        for (const std::string& tag : foe.Tags) {
+            if (tag == row.Tag)
+                extra += row.Percent;
+        }
+    }
+    return extra;
+}
+
 void Battle::SetBaseStats(StatBlock stats)
 {
     m_BaseStats = stats;
@@ -1860,7 +1905,7 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     scalingStat = user.Stats.Get(*effect.Scaling);
                 scalingStat += MissingFor(user, *effect.Scaling);
             }
-            const i32 dealt = StatusDealtPercent(user, catalog);
+            i32 dealt = StatusDealtPercent(user, catalog);
             for (const AimRef& aim : aims) {
                 CombatantState& foe = Aimed(aim);
                 if (!EffectLands(effect, foe))
@@ -1884,8 +1929,9 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 hit.Defense = DefenseOf(foe);
                 hit.EmpowerPercent = empower;
                 i32 raw = StrikeDamage(hit, m_Rules);
-                if (dealt != 0)
-                    raw = ScalePercent(raw, 100 + dealt);
+                const i32 percent = dealt + (hero ? TagDamagePercent(m_TagDamage, foe) : 0);
+                if (percent != 0)
+                    raw = ScalePercent(raw, 100 + percent);
                 const HitLanded landed = LandHit(user, foe, raw);
                 taken += landed.Taken;
                 reflected += landed.Reflected;

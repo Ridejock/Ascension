@@ -24,11 +24,12 @@ using Json = nlohmann::json;
 using FileTime = std::optional<std::filesystem::file_time_type>;
 
 constexpr const char* kFileNames[] = {
-    "stats.json",    "effects.json", "schools.json", "skills.json",
-    "statuses.json", "classes.json", "enemies.json", "encounters.json",
-    "items.json",    "shop.json",    "combat.json",  "progress.json",
-    "rarities.json", "tiles.json",   "walk.json",    "movers.json",
-    "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json",
+    "stats.json",    "effects.json", "schools.json",   "skills.json",
+    "statuses.json", "classes.json", "titles.json",    "enemies.json",
+    "encounters.json", "items.json",  "shop.json",      "combat.json",
+    "progress.json", "rarities.json", "tiles.json",     "walk.json",
+    "movers.json",   "input.json",    "prompts.json",   "battle_ui.json",
+    "shop_ui.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -383,6 +384,7 @@ struct Parsed {
     std::vector<SkillDef> Skills;
     std::vector<StatusDef> Statuses;
     std::vector<ClassDef> Classes;
+    std::vector<TitleDef> Titles;
     std::vector<EnemyDef> Enemies;
     std::vector<EncounterDef> Encounters;
     std::vector<ItemDef> Items;
@@ -1375,6 +1377,8 @@ bool LoadSchools(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool ReadTags(const Json& entry, std::vector<std::string>& tags, std::string& error);
+
 bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("skills");
@@ -1414,7 +1418,7 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
         if (skill.Kind == SkillKind::Active) {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "kind", "target", "school", "focusCost",
-                            "windup", "effects", "tune"},
+                            "windup", "effects", "tune", "tags"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string target;
@@ -1436,7 +1440,8 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
                 return fail("school " + Quote(skill.School) + " does not exist");
             if (!OptionalInt(entry, "windup", 1, 9, skill.Windup, error))
                 return fail(error);
-        } else if (!AllowKeys(entry, {"id", "name", "description", "kind", "effects", "tune"},
+        } else if (!AllowKeys(entry,
+                              {"id", "name", "description", "kind", "effects", "tune", "tags"},
                               unknown)) {
             return fail("unknown field " + Quote(unknown));
         }
@@ -1464,6 +1469,8 @@ bool LoadSkills(const Json& root, Parsed& parsed, std::string& error)
 
         std::string shape;
         if (!CheckSkillShape(skill, shape))
+            return fail(shape);
+        if (!ReadTags(entry, skill.Tags, shape))
             return fail(shape);
 
         if (!RequireString(entry, "name", skill.Name, error) ||
@@ -1567,6 +1574,171 @@ bool ReadPicks(const Parsed& parsed, const Json& entry, ClassDef& klass, std::st
     return true;
 }
 
+bool ReadDeed(const Json& object, DeedDef& deed, std::string& error)
+{
+    if (!object.is_object()) {
+        error = "a deed must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(object, {"on", "id", "tag", "atLeast"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    std::string on;
+    if (!RequireString(object, "on", on, error))
+        return false;
+    if (on == "kill")
+        deed.On = DeedOn::Kill;
+    else if (on == "skill")
+        deed.On = DeedOn::Skill;
+    else if (on == "item")
+        deed.On = DeedOn::Item;
+    else if (on == "tag")
+        deed.On = DeedOn::Tag;
+    else if (on == "level")
+        deed.On = DeedOn::Level;
+    else {
+        error = "'on' must be kill, skill, item, tag, or level";
+        return false;
+    }
+    if (!OptionalId(object, "id", deed.Id, error) || !OptionalId(object, "tag", deed.Tag, error))
+        return false;
+    if (!deed.Id.empty() && !IsId(deed.Id)) {
+        error = "'id' must be an id";
+        return false;
+    }
+    if (!deed.Tag.empty() && !IsId(deed.Tag)) {
+        error = "'tag' must be an id";
+        return false;
+    }
+    deed.AtLeast = 1;
+    if (!OptionalInt(object, "atLeast", 1, 999999, deed.AtLeast, error))
+        return false;
+    if (deed.On == DeedOn::Level) {
+        if (!deed.Id.empty() || !deed.Tag.empty()) {
+            error = "a level deed has no id or tag";
+            return false;
+        }
+        return true;
+    }
+    if (deed.On == DeedOn::Tag) {
+        if (deed.Tag.empty() || !deed.Id.empty()) {
+            error = "a tag deed needs a tag and no id";
+            return false;
+        }
+        return true;
+    }
+    if (deed.Id.empty() && deed.Tag.empty()) {
+        error = "the deed needs an id or a tag";
+        return false;
+    }
+    return true;
+}
+
+bool ReadTags(const Json& entry, std::vector<std::string>& tags, std::string& error)
+{
+    if (!entry.contains("tags"))
+        return true;
+    return ReadIdList(entry, "tags", tags, error);
+}
+
+bool ReadTitleBonus(const Json& object, TitleBonus& bonus, std::string& error)
+{
+    if (!object.is_object()) {
+        error = "'bonus' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(object, {"stat", "amount", "damagePercent", "against"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!OptionalId(object, "stat", bonus.Stat, error))
+        return false;
+    if (!bonus.Stat.empty() && FindStatValue(StatBlock{}, bonus.Stat) == nullptr) {
+        error = "'stat' must be one of the six primaries";
+        return false;
+    }
+    if (!OptionalInt(object, "amount", 0, 99, bonus.Amount, error) ||
+        !OptionalInt(object, "damagePercent", 0, 500, bonus.DamagePercent, error) ||
+        !OptionalId(object, "against", bonus.Against, error))
+        return false;
+    if (!bonus.Against.empty() && !IsId(bonus.Against)) {
+        error = "'against' must be an id";
+        return false;
+    }
+    const bool stat = !bonus.Stat.empty();
+    const bool versus = bonus.DamagePercent > 0;
+    if (stat && bonus.Amount <= 0) {
+        error = "a stat bonus needs an amount";
+        return false;
+    }
+    if (!stat && bonus.Amount > 0) {
+        error = "'amount' needs a stat";
+        return false;
+    }
+    if (versus && bonus.Against.empty()) {
+        error = "damagePercent needs against";
+        return false;
+    }
+    if (!versus && !bonus.Against.empty()) {
+        error = "'against' needs damagePercent";
+        return false;
+    }
+    if (!stat && !versus) {
+        error = "a bonus needs a stat or damagePercent";
+        return false;
+    }
+    return true;
+}
+
+bool LoadTitles(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto list = root.find("titles");
+    if (list == root.end() || !list->is_array()) {
+        error = "'titles' must be a list";
+        return false;
+    }
+    for (const Json& entry : *list) {
+        if (!entry.is_object()) {
+            error = "title entries must be objects";
+            return false;
+        }
+        TitleDef title;
+        if (!RequireString(entry, "id", title.Id, error))
+            return false;
+        const std::string where = "title " + Quote(title.Id);
+        auto fail = [&](std::string message) {
+            error = where + ": " + std::move(message);
+            return false;
+        };
+        if (!IsId(title.Id))
+            return fail("id must be letters, digits and _, starting with a letter");
+        if (FindId(parsed.Titles, title.Id) != nullptr)
+            return fail("there is another title with this id");
+        std::string unknown;
+        if (!AllowKeys(entry, {"id", "name", "description", "deed", "bonus"}, unknown))
+            return fail("unknown field " + Quote(unknown));
+        if (!RequireString(entry, "name", title.Name, error) ||
+            !RequireString(entry, "description", title.Description, error))
+            return fail(error);
+        const auto deed = entry.find("deed");
+        if (deed == entry.end())
+            return fail("'deed' is required");
+        std::string why;
+        if (!ReadDeed(*deed, title.Deed, why))
+            return fail(why);
+        const auto bonus = entry.find("bonus");
+        if (bonus == entry.end())
+            return fail("'bonus' is required");
+        if (!ReadTitleBonus(*bonus, title.Bonus, why))
+            return fail(why);
+        parsed.Titles.push_back(std::move(title));
+    }
+    return true;
+}
+
 bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto list = root.find("classes");
@@ -1603,7 +1775,8 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
         if (evolution) {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "evolvesFrom", "evolveLevel", "bonus",
-                            "growth", "skills", "passives", "picks", "starter"},
+                            "growth", "skills", "passives", "picks", "starter", "rarity", "offer",
+                            "meld", "systemSkills"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             if (!RequireString(entry, "evolvesFrom", klass.EvolvesFrom, error))
@@ -1621,7 +1794,7 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
         } else {
             if (!AllowKeys(entry,
                            {"id", "name", "description", "stats", "growth", "skills", "passives",
-                            "picks", "starter"},
+                            "picks", "starter", "rarity", "systemSkills"},
                            unknown))
                 return fail("unknown field " + Quote(unknown));
             std::string why;
@@ -1666,6 +1839,66 @@ bool LoadClasses(const Json& root, Parsed& parsed, std::string& error)
             return fail("an evolution must add at least one passive");
         if (!ReadPicks(parsed, entry, klass, why))
             return fail(why);
+
+        if (!OptionalId(entry, "rarity", klass.Rarity, error))
+            return fail(error);
+        if (!klass.Rarity.empty() && !IsId(klass.Rarity))
+            return fail("'rarity' must be an id");
+        if (entry.contains("offer") || entry.contains("meld")) {
+            if (!evolution)
+                return fail("a base class has no offer");
+            std::string offer;
+            if (!RequireString(entry, "offer", offer, error))
+                return fail(error);
+            if (offer == "guaranteed")
+                klass.Offer = EvolutionOffer::Guaranteed;
+            else if (offer == "meld")
+                klass.Offer = EvolutionOffer::Meld;
+            else
+                return fail("'offer' must be guaranteed or meld");
+            if (klass.Offer == EvolutionOffer::Meld) {
+                const auto meld = entry.find("meld");
+                if (meld == entry.end())
+                    return fail("a meld needs meld");
+                if (!ReadDeed(*meld, klass.Meld, why))
+                    return fail(why);
+            } else if (entry.contains("meld")) {
+                return fail("meld is only set when offer is meld");
+            }
+        }
+        const auto systemSkills = entry.find("systemSkills");
+        if (systemSkills != entry.end()) {
+            if (!systemSkills->is_array())
+                return fail("'systemSkills' must be a list");
+            for (const Json& ruleEntry : *systemSkills) {
+                if (!ruleEntry.is_object())
+                    return fail("system skill entries must be objects");
+                std::string ruleUnknown;
+                if (!AllowKeys(ruleEntry, {"id", "skill", "deed"}, ruleUnknown))
+                    return fail("unknown field " + Quote(ruleUnknown));
+                SystemSkillRule rule;
+                if (!RequireString(ruleEntry, "id", rule.Id, error) ||
+                    !RequireString(ruleEntry, "skill", rule.Skill, error))
+                    return fail(error);
+                if (!IsId(rule.Id) || !IsId(rule.Skill))
+                    return fail("a system skill id must be an id");
+                for (const SystemSkillRule& prior : klass.SystemSkills) {
+                    if (prior.Id == rule.Id)
+                        return fail("system skill " + Quote(rule.Id) + " is listed twice");
+                }
+                const SkillDef* skill = FindId(parsed.Skills, rule.Skill);
+                if (skill == nullptr)
+                    return fail("skill " + Quote(rule.Skill) + " does not exist");
+                if (skill->Kind != SkillKind::Active)
+                    return fail("skill " + Quote(rule.Skill) + " is not active");
+                const auto ruleDeed = ruleEntry.find("deed");
+                if (ruleDeed == ruleEntry.end())
+                    return fail("system skill " + Quote(rule.Id) + " needs a deed");
+                if (!ReadDeed(*ruleDeed, rule.Deed, why))
+                    return fail(why);
+                klass.SystemSkills.push_back(std::move(rule));
+            }
+        }
 
         if (!RequireString(entry, "name", klass.Name, error) ||
             !RequireString(entry, "description", klass.Description, error))
@@ -1925,7 +2158,7 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
         if (!AllowKeys(entry,
                        {"id", "name", "description", "level", "stats", "skills", "experience",
                         "gold", "boss", "unique", "color", "pattern", "phaseAtPercent",
-                        "phaseStatus", "summon", "ai", "drops"},
+                        "phaseStatus", "summon", "ai", "drops", "tags"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireInt(entry, "level", kMinLevel, kMaxLevel, enemy.Level, error))
@@ -2015,6 +2248,9 @@ bool LoadEnemies(const Json& root, Parsed& parsed, std::string& error)
                     return fail("'ifBlocked' must be \"act\" or \"fizzle\"");
             }
         }
+        std::string tagError;
+        if (!ReadTags(entry, enemy.Tags, tagError))
+            return fail(tagError);
         if (!RequireString(entry, "name", enemy.Name, error) ||
             !RequireString(entry, "description", enemy.Description, error))
             return fail(error);
@@ -2147,7 +2383,7 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
         std::string unknown;
         if (!AllowKeys(entry,
                        {"id", "name", "description", "icon", "rarity", "slot", "bonus", "value",
-                        "twoHanded", "heal", "focus", "grants", "requires"},
+                        "twoHanded", "heal", "focus", "grants", "requires", "tags"},
                        unknown))
             return fail("unknown field " + Quote(unknown));
         if (!RequireString(entry, "icon", item.Icon, error) ||
@@ -2222,6 +2458,9 @@ bool LoadItems(const Json& root, Parsed& parsed, std::string& error)
             if (activeGrants > 1)
                 return fail("an item grants at most one active skill");
         }
+        std::string tagError;
+        if (!ReadTags(entry, item.Tags, tagError))
+            return fail(tagError);
         if (!RequireString(entry, "name", item.Name, error) ||
             !RequireString(entry, "description", item.Description, error))
             return fail(error);
@@ -2288,7 +2527,7 @@ bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
             return false;
         }
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "name", "color", "uniquePerType"}, unknown)) {
+        if (!AllowKeys(entry, {"id", "name", "color", "uniquePerType", "freePoints"}, unknown)) {
             error = where + ": unknown field " + Quote(unknown);
             return false;
         }
@@ -2310,6 +2549,10 @@ bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
                 return false;
             }
             rarity.UniquePerType = unique->get<bool>();
+        }
+        if (!OptionalInt(entry, "freePoints", 0, 99, rarity.FreePoints, why)) {
+            error = where + ": " + why;
+            return false;
         }
         parsed.Rarities.push_back(std::move(rarity));
     }
@@ -3612,6 +3855,9 @@ std::optional<std::string> ClassField(const TextScope& scope, std::string_view k
     for (const ClassDef& child : scope.Classes) {
         if (child.EvolvesFrom != klass.Id)
             continue;
+        // A meld is a System offer, not one of the guaranteed tracks the blurb names.
+        if (child.Offer == EvolutionOffer::Meld)
+            continue;
         if (!paths.empty()) {
             paths += " or ";
             paths += ArticleFor(child.Name);
@@ -3850,6 +4096,20 @@ bool CheckUniquePerType(const Parsed& parsed, std::string& error)
     return true;
 }
 
+bool DeedKnown(const Parsed& parsed, const DeedDef& deed, const std::string& where,
+               std::string& error)
+{
+    if (deed.Id.empty())
+        return true;
+    const bool missing = (deed.On == DeedOn::Kill && FindId(parsed.Enemies, deed.Id) == nullptr) ||
+                         (deed.On == DeedOn::Skill && FindId(parsed.Skills, deed.Id) == nullptr) ||
+                         (deed.On == DeedOn::Item && FindId(parsed.Items, deed.Id) == nullptr);
+    if (!missing)
+        return true;
+    error = where + ": deed id " + Quote(deed.Id) + " does not exist";
+    return false;
+}
+
 bool CrossCheck(const Parsed& parsed, std::string& error)
 {
     for (const EffectDef& recipe : parsed.Effects) {
@@ -3876,6 +4136,28 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
         if (!GrantsKnown(parsed, klass.Skills, classWhere, error) ||
             !GrantsKnown(parsed, klass.Passives, classWhere, error))
             return false;
+        if (!klass.Rarity.empty() && FindId(parsed.Rarities, klass.Rarity) == nullptr) {
+            error = classWhere + ": rarity " + Quote(klass.Rarity) + " does not exist";
+            return false;
+        }
+        if (klass.Offer == EvolutionOffer::Meld &&
+            !DeedKnown(parsed, klass.Meld, classWhere, error))
+            return false;
+        for (const SystemSkillRule& rule : klass.SystemSkills) {
+            if (!DeedKnown(parsed, rule.Deed, classWhere, error))
+                return false;
+            for (const ClassDef& other : parsed.Classes) {
+                if (other.Id == klass.Id)
+                    continue;
+                for (const SystemSkillRule& prior : other.SystemSkills) {
+                    if (prior.Id == rule.Id) {
+                        error = classWhere + ": system skill " + Quote(rule.Id) +
+                                " is also on " + Quote(other.Id);
+                        return false;
+                    }
+                }
+            }
+        }
         for (const SkillPick& pick : klass.Picks) {
             if (!GrantsKnown(parsed, pick.Options, classWhere, error))
                 return false;
@@ -3970,6 +4252,11 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
     }
     if (!CheckUniquePerType(parsed, error))
         return false;
+    for (const TitleDef& title : parsed.Titles) {
+        const std::string titleWhere = "title " + Quote(title.Id);
+        if (!DeedKnown(parsed, title.Deed, titleWhere, error))
+            return false;
+    }
     for (const std::string& stocked : parsed.Shop.Stock) {
         if (FindId(parsed.Items, stocked) == nullptr) {
             error = "shop stock " + Quote(stocked) + " does not exist";
@@ -4890,16 +5177,18 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
 
     using Loader = bool (*)(const Json&, Parsed&, std::string&);
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSchools,   LoadSkills,
-                              LoadStatuses, LoadClasses, LoadEnemies,  LoadEncounters,
-                              LoadItems,    LoadShop,    LoadCombat,   LoadProgress,
-                              LoadRarities, LoadTiles,   LoadWalk,     LoadMovers,
-                              LoadControls, LoadPrompts, LoadBattleUi, LoadShopUi};
+                              LoadStatuses, LoadClasses, LoadTitles,   LoadEnemies,
+                              LoadEncounters, LoadItems, LoadShop,     LoadCombat,
+                              LoadProgress, LoadRarities, LoadTiles,   LoadWalk,
+                              LoadMovers,   LoadControls, LoadPrompts, LoadBattleUi,
+                              LoadShopUi};
     static_assert(std::size(loaders) == std::size(kFileNames));
-    const char* names[] = {"stats.json",    "effects.json", "schools.json", "skills.json",
-                           "statuses.json", "classes.json", "enemies.json", "encounters.json",
-                           "items.json",    "shop.json",    "combat.json",  "progress.json",
-                           "rarities.json", "tiles.json",   "walk.json",    "movers.json",
-                           "input.json",    "prompts.json", "battle_ui.json", "shop_ui.json"};
+    const char* names[] = {"stats.json",     "effects.json", "schools.json",   "skills.json",
+                           "statuses.json",  "classes.json", "titles.json",    "enemies.json",
+                           "encounters.json", "items.json",  "shop.json",      "combat.json",
+                           "progress.json",  "rarities.json", "tiles.json",    "walk.json",
+                           "movers.json",    "input.json",   "prompts.json",   "battle_ui.json",
+                           "shop_ui.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -4915,11 +5204,12 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             return false;
         }
         std::string unknown;
-        const char* allowedTop[] = {"stats",   "effects", "schools",    "skills",
-                                    "statuses", "classes", "enemies",   "encounters",
-                                    "items",    "shop",    "combat",    "progress",
-                                    "rarities", "tiles",   "walk",      "movers",
-                                    "controls", "prompts", "battleUi",  "shopUi"};
+        const char* allowedTop[] = {"stats",    "effects", "schools",   "skills",
+                                    "statuses", "classes", "titles",    "enemies",
+                                    "encounters", "items", "shop",      "combat",
+                                    "progress", "rarities", "tiles",    "walk",
+                                    "movers",   "controls", "prompts",  "battleUi",
+                                    "shopUi"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -5002,6 +5292,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
             file = "effects.json";
         else if (why.compare(0, 5, "item ") == 0)
             file = "items.json";
+        else if (why.compare(0, 6, "title ") == 0)
+            file = "titles.json";
         else if (why.compare(0, 5, "shop ") == 0)
             file = "shop.json";
         error = Err(file, {}, why);
@@ -5161,6 +5453,7 @@ bool Database::Load(DataError* error)
     m_Skills = std::move(parsed.Skills);
     m_Statuses = std::move(parsed.Statuses);
     m_Classes = std::move(parsed.Classes);
+    m_Titles = std::move(parsed.Titles);
     m_Enemies = std::move(parsed.Enemies);
     m_Encounters = std::move(parsed.Encounters);
     m_Items = std::move(parsed.Items);
@@ -5246,6 +5539,11 @@ const StatusDef* Database::FindStatus(std::string_view id) const
 const ClassDef* Database::FindClass(std::string_view id) const
 {
     return FindId(m_Classes, id);
+}
+
+const TitleDef* Database::FindTitle(std::string_view id) const
+{
+    return FindId(m_Titles, id);
 }
 
 const EnemyDef* Database::FindEnemy(std::string_view id) const

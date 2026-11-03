@@ -272,7 +272,7 @@ void TestRoundTrip()
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     Check(text.find("EMERALD-SAVE 1") == 0, "the file is an Emerald save, not JSON");
-    Check(text.find("version = 6") != std::string::npos, "the header carries the data version");
+    Check(text.find("version = 7") != std::string::npos, "the header carries the data version");
     Check(text.find("position =") == std::string::npos, "the encounter index is not stored");
     Check(text.find('{') == std::string::npos, "the save text has no JSON object");
 
@@ -955,7 +955,7 @@ void TestVersion3Hub()
     Check(saves.Write(loaded.Run, why), "the migrated run is written as the current version");
     std::ifstream in(dir.Path / "run.sav");
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    Check(text.find("version = 6") != std::string::npos && text.find("position =") == std::string::npos &&
+    Check(text.find("version = 7") != std::string::npos && text.find("position =") == std::string::npos &&
               text.find("legacy.index") == std::string::npos &&
               text.find("alphas_fang") != std::string::npos,
           "the new file is version 5, with spawn ids and the fang, and no list index");

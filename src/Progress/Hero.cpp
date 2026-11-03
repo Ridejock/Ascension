@@ -42,6 +42,7 @@ bool Hero::Start(const Database& data, std::string& error)
     m_SpendId.clear();
     m_LevelSteps.clear();
     m_ClassSources.clear();
+    m_System = {};
     error.clear();
     return true;
 }
@@ -53,6 +54,7 @@ bool Hero::ApplyData(std::string& error)
         return false;
     }
     NoteLevelSteps();
+    EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
     error.clear();
     return true;
 }
@@ -103,20 +105,121 @@ i32 Hero::RankAfterUse(std::string_view skillId) const
     return RankForUses(m_Data->GetProgress(), next);
 }
 
+void Hero::TellSystem(const SystemEvent& event)
+{
+    if (m_Data == nullptr)
+        return;
+    DispatchSystem(m_System, *m_Data, m_ClassId, Level(), event);
+}
+
 i32 Hero::NoteUse(std::string_view skillId)
 {
     if (m_Data == nullptr || m_Data->FindSkill(skillId) == nullptr)
         return RankOf(skillId);
+    bool counted = false;
     for (usize i = 0; i < m_Practiced.size(); ++i) {
         if (m_Practiced[i] == skillId) {
             if (m_Uses[i] < kXpCap)
                 ++m_Uses[i];
-            return RankOf(skillId);
+            counted = true;
+            break;
         }
     }
-    m_Practiced.emplace_back(skillId);
-    m_Uses.push_back(1);
+    if (!counted) {
+        m_Practiced.emplace_back(skillId);
+        m_Uses.push_back(1);
+    }
+    SystemEvent event;
+    event.Kind = SystemEventKind::SkillUse;
+    event.Id = std::string(skillId);
+    if (const SkillDef* skill = m_Data->FindSkill(skillId))
+        event.Tags = skill->Tags;
+    TellSystem(event);
     return RankOf(skillId);
+}
+
+void Hero::NoteKill(std::string_view enemyId)
+{
+    if (m_Data == nullptr || enemyId.empty())
+        return;
+    SystemEvent event;
+    event.Kind = SystemEventKind::Kill;
+    event.Id = std::string(enemyId);
+    if (const EnemyDef* enemy = m_Data->FindEnemy(enemyId))
+        event.Tags = enemy->Tags;
+    TellSystem(event);
+}
+
+void Hero::NoteItem(std::string_view itemId)
+{
+    if (m_Data == nullptr || itemId.empty())
+        return;
+    SystemEvent event;
+    event.Kind = SystemEventKind::ItemUse;
+    event.Id = std::string(itemId);
+    if (const ItemDef* item = m_Data->FindItem(itemId))
+        event.Tags = item->Tags;
+    TellSystem(event);
+}
+
+bool Hero::AcceptTitle(std::string_view id, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the hero is not ready";
+        return false;
+    }
+    return Ascension::AcceptTitle(m_System, *m_Data, id, error);
+}
+
+bool Hero::AcceptSystemSkill(std::string_view offerId, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the hero is not ready";
+        return false;
+    }
+    return Ascension::AcceptSystemSkill(m_System, *m_Data, m_ClassId, Level(), offerId, error);
+}
+
+i32 Hero::FreePool() const
+{
+    if (m_Data == nullptr)
+        return 0;
+    const ClassDef* klass = m_Data->FindClass(m_ClassId);
+    if (klass == nullptr)
+        return 0;
+    return FreePointsUnspent(*m_Data, *klass, Level(), m_System.FreeFloor, m_System.FreeSpent);
+}
+
+bool Hero::SpendFreePoint(std::string_view statId, std::string& error)
+{
+    if (m_ChoosingStarter) {
+        error = "pick a class before spending free points";
+        return false;
+    }
+    if (FreePool() <= 0) {
+        error = "no free points left";
+        return false;
+    }
+    StatBlock probe;
+    if (FindStatValue(probe, statId) == nullptr) {
+        error = "stat '" + std::string(statId) + "' does not exist";
+        return false;
+    }
+    i32* value = FindStatValue(m_System.FreeSpent, statId);
+    if (value == nullptr || *value >= 9999) {
+        error = "stat '" + std::string(statId) + "' is full";
+        return false;
+    }
+    *value += 1;
+    error.clear();
+    return true;
+}
+
+std::vector<TagDamage> Hero::TitleDamage() const
+{
+    if (m_Data == nullptr)
+        return {};
+    return TitleTagDamage(*m_Data, m_System);
 }
 
 std::vector<std::string> Hero::SkillIds() const
@@ -132,6 +235,10 @@ std::vector<std::string> Hero::SkillIds() const
     for (const std::string& kept : PickedIds()) {
         if (!Lists(ids, kept))
             ids.push_back(kept);
+    }
+    for (const std::string& extra : m_System.GrantedSkills) {
+        if (!Lists(ids, extra))
+            ids.push_back(extra);
     }
     return ids;
 }
@@ -204,27 +311,20 @@ bool Hero::Pick(std::string_view skillId, std::string& error)
 
 bool Hero::ChoicePending() const
 {
-    if (m_Data == nullptr)
-        return false;
-    const ClassDef* klass = m_Data->FindClass(m_ClassId);
-    if (klass == nullptr || klass->IsEvolution())
-        return false;
-    const i32 level = Level();
-    for (const ClassDef* evolution : m_Data->EvolutionsOf(m_ClassId)) {
-        if (level >= evolution->EvolveLevel)
-            return true;
-    }
-    return false;
+    return !ChoiceIds().empty();
 }
 
 std::vector<std::string> Hero::ChoiceIds() const
 {
     std::vector<std::string> ids;
-    if (!ChoicePending())
+    if (m_Data == nullptr)
+        return ids;
+    const ClassDef* klass = m_Data->FindClass(m_ClassId);
+    if (klass == nullptr || klass->IsEvolution())
         return ids;
     const i32 level = Level();
     for (const ClassDef* evolution : m_Data->EvolutionsOf(m_ClassId)) {
-        if (level >= evolution->EvolveLevel)
+        if (evolution != nullptr && EvolutionOffered(m_System, *evolution, level))
             ids.push_back(evolution->Id);
     }
     return ids;
@@ -250,6 +350,8 @@ bool Hero::Choose(std::string_view evolutionId, std::string& error)
         return false;
     }
     m_ClassId = std::string(evolutionId);
+    if (m_Data != nullptr)
+        EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
     if (m_Custom && m_Data != nullptr) {
         const ClassDef* evolved = m_Data->FindClass(m_ClassId);
         if (evolved != nullptr) {
@@ -284,6 +386,10 @@ bool Hero::ResetBuild(std::string& error)
     m_Practiced.clear();
     m_Uses.clear();
     m_Picked.clear();
+    m_System.GrantedSkills.clear();
+    m_System.SkillOffers.clear();
+    if (m_Data != nullptr)
+        EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
     error.clear();
     return true;
 }
@@ -319,6 +425,8 @@ bool Hero::ChooseStarter(std::string_view classId, std::string& error)
     m_ClassId = picked;
     m_SpendId = picked;
     m_ChoosingStarter = false;
+    if (m_Data != nullptr)
+        EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
     bool listed = false;
     for (const AttributeSource& source : m_ClassSources) {
         if (source.Id == picked)
@@ -353,6 +461,7 @@ bool Hero::AdoptStarter(std::string_view classId, std::string& error)
         m_ClassId = picked;
         m_Picked.clear();
     }
+    EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
     error.clear();
     return true;
 }
@@ -433,6 +542,9 @@ StatBlock Hero::Attributes() const
         stats += step;
     for (const AttributeSource& source : ClassSources())
         stats += source.Points;
+    stats += m_System.FreeSpent;
+    if (m_Data != nullptr)
+        stats += TitleStatBonus(*m_Data, m_System);
     return stats;
 }
 
@@ -442,10 +554,16 @@ const char* Hero::NextFightBlock() const
         return "Choose a class before the next fight.";
     if (m_ClassPool > 0)
         return "Spend class points before the next fight.";
+    if (FreePool() > 0)
+        return "Spend free points before the next fight.";
     if (ChoicePending())
         return "Choose a path before the next fight.";
     if (PickPending())
         return "Pick a skill before the next fight.";
+    if (TitlePending())
+        return "The System offers a title.";
+    if (SystemSkillPending())
+        return "The System offers a skill.";
     return nullptr;
 }
 
@@ -470,6 +588,12 @@ XpGrant Hero::GrantXp(i32 amount)
     m_Xp = sum > kXpCap ? kXpCap : static_cast<i32>(sum);
     grant.Amount = amount;
     grant.LevelAfter = Level();
+    if (grant.LevelAfter > grant.LevelBefore) {
+        SystemEvent event;
+        event.Kind = SystemEventKind::LevelUp;
+        event.Amount = grant.LevelAfter;
+        TellSystem(event);
+    }
     grant.ChoiceOpened = !pending && ChoicePending();
     grant.PickOpened = !picking && PickPending();
     NoteLevelSteps();
@@ -562,6 +686,8 @@ void Hero::ExportCareer(CareerRecord& out) const
         out.LevelSteps.clear();
         out.Sources.clear();
     }
+    out.System = m_System;
+    out.FreeLegacy = false;
 }
 
 bool Hero::ImportCareer(const CareerRecord& in, std::string& error)
@@ -609,6 +735,11 @@ bool Hero::ImportCareer(const CareerRecord& in, std::string& error)
         m_SpendId.clear();
         m_ChoosingStarter = false;
     }
+    m_System = in.System;
+    if (m_System.FreeFloor < 1)
+        m_System.FreeFloor = 1;
+    if (in.FreeLegacy)
+        m_System.FreeFloor = Level();
     return ApplyData(error);
 }
 

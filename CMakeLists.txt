@@ -122,11 +122,13 @@ target_link_libraries(AscensionMap PRIVATE AscensionCombat)
 # ---------------------------------------------------------------------------
 add_library(AscensionProgress STATIC
     src/Progress/Hero.cpp
+    src/Progress/System.cpp
     src/Progress/Inventory.cpp
     src/Progress/RunSave.cpp
     src/Progress/Vitals.cpp
     src/Progress/DebugRun.cpp
     include/Ascension/Progress/Hero.h
+    include/Ascension/Progress/System.h
     include/Ascension/Progress/Inventory.h
     include/Ascension/Progress/RunSave.h
     include/Ascension/Progress/Vitals.h
@@ -227,6 +229,13 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionCombatTests)
     add_test(NAME Combat COMMAND AscensionCombatTests)
+
+    add_executable(AscensionSystemTests tests/SystemTests.cpp tests/Check.h)
+    target_link_libraries(AscensionSystemTests PRIVATE AscensionProgress AscensionCombat)
+    target_compile_definitions(AscensionSystemTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+    emerald_set_warnings(AscensionSystemTests)
+    add_test(NAME System COMMAND AscensionSystemTests)
 
     add_executable(AscensionProgressTests tests/ProgressTests.cpp tests/Check.h)
     target_link_libraries(AscensionProgressTests PRIVATE AscensionProgress AscensionCombat)

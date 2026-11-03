@@ -138,6 +138,8 @@ struct SkillDef {
     i32 FocusCost = 0;
     i32 Windup = 0; // active damage: telegraph turns before the hit. 0 hits now
     std::vector<EffectDef> Effects;
+    // Labels a System deed can count, such as heal. Empty feeds no tag.
+    std::vector<std::string> Tags;
 
     [[nodiscard]] const EffectDef* FindEffect(std::string_view id) const;
 };
@@ -285,6 +287,57 @@ struct ProgressRules {
     return rank;
 }
 
+// What a System deed counts. Kill, skill, and item deeds name an id or a tag (or both,
+// and then both have to be on the event). Tag counts skill and item events that carried
+// the tag, so a heal skill and a heal potion can feed one meld. Level stores the highest
+// level the bus has seen, not a sum.
+enum class DeedOn : u8 { Kill, Skill, Item, Tag, Level };
+
+struct DeedDef {
+    DeedOn On = DeedOn::Kill;
+    std::string Id;
+    std::string Tag;
+    i32 AtLeast = 1;
+};
+
+// One System-gated skill. It belongs to the class that lists it, and to that class's
+// parent chain, so a Fighter rule can still be offered after a path is taken. Id is the
+// offer id. Skill is the catalog skill the System grants when the deed is met.
+struct SystemSkillRule {
+    std::string Id;
+    std::string Skill;
+    DeedDef Deed;
+};
+
+// A flat title bonus. Stat, when set, is one of the six primaries. DamagePercent is added
+// to damage dealt against a foe that carries Against. Titles have no rarity and do not evolve.
+struct TitleBonus {
+    std::string Stat;
+    i32 Amount = 0;
+    i32 DamagePercent = 0;
+    std::string Against;
+};
+
+struct TitleDef {
+    std::string Id;
+    std::string Name;
+    std::string Description;
+    DeedDef Deed;
+    TitleBonus Bonus;
+};
+
+// Extra damage the attacker deals when the defender carries Tag. The fight adds these
+// percents the same way a status adds damage dealt.
+struct TagDamage {
+    std::string Tag;
+    i32 Percent = 0;
+};
+
+// How an evolution is offered. Guaranteed is the direct track: it opens at EvolveLevel
+// with no other deed, so a meld that goes poorly still leaves the normal path. Meld opens
+// at that level only once its deed is met. A missing offer in the file is guaranteed.
+enum class EvolutionOffer : u8 { Guaranteed, Meld };
+
 // A class. A base class (EvolvesFrom empty) has level-1 Stats and per-level Growth. Stats is
 // that class's attribute grant. An evolution names the base it comes from and the level it is
 // offered at; Bonus is the attribute grant it adds, and Growth applies to levels after that.
@@ -314,6 +367,12 @@ struct ClassDef {
     std::string EvolvesFrom;
     i32 EvolveLevel = 0;
     bool Starter = false;
+    // Rarity id from rarities.json. Empty earns no free points. An evolution that leaves
+    // this empty uses its parent's rarity for the steps it owns.
+    std::string Rarity;
+    EvolutionOffer Offer = EvolutionOffer::Guaranteed;
+    DeedDef Meld;
+    std::vector<SystemSkillRule> SystemSkills;
 
     [[nodiscard]] bool IsEvolution() const { return !EvolvesFrom.empty(); }
 };
@@ -399,6 +458,8 @@ struct EnemyDef {
     // A rarity with UniquePerType is claimed once; other drops can land again.
     // Message on a drop, when set, replaces the generic "Found <item name>." line.
     std::vector<DropDef> Drops;
+    // Labels a kill deed can count, such as goblin or humanoid. Empty matches no tag.
+    std::vector<std::string> Tags;
 };
 
 // A fight. Enemies lists enemy ids, and the same id may appear more than once (a pack),
@@ -440,6 +501,9 @@ struct RarityDef {
     u8 Green = 0;
     u8 Blue = 0;
     bool UniquePerType = false;
+    // Free stat points a class of this rarity earns on each level step, on top of the
+    // class growth. Items ignore it. 0 is the default, so a row that omits it changes nothing.
+    i32 FreePoints = 0;
 };
 
 struct ItemDef {
@@ -461,6 +525,8 @@ struct ItemDef {
     // Foe ids from enemies.json. The shop withholds the item until every one of them has
     // been defeated. Empty means the item is always offered. The ids live in the item file.
     std::vector<std::string> RequiresDefeated;
+    // Labels an item-use deed can count. A heal potion can share a tag with a heal skill.
+    std::vector<std::string> Tags;
 };
 
 // The shop, and the bag it sells into. BagSlots is how many stacks the hero can
