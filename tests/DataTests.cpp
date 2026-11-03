@@ -3144,7 +3144,7 @@ void CheckCampaignMaps(const char* dir)
 
     Check(data.FindMap("fixture_a") == nullptr && data.FindMap("fixture_b") == nullptr,
           "the shipped maps are not the fixtures");
-    Check(data.GetMaps().size() == 10, "a hub, the road, and eight barrow rooms");
+    Check(data.GetMaps().size() == 11, "a hub, the road, the sluice, and eight barrow rooms");
     const MapDef* hub = data.FindMap("hub");
     i32 hubs = 0;
     for (const MapDef& map : data.GetMaps()) {
@@ -3154,18 +3154,27 @@ void CheckCampaignMaps(const char* dir)
     Check(hubs == 1 && hub != nullptr && hub->Hub, "one hub, and its id is hub");
     if (hub == nullptr)
         return;
-    Check(hub->Start.X == 8 && hub->Start.Y == 14 && hub->Spawns.empty() && hub->Links.size() == 1 &&
-              hub->Links[0].Map == "overland",
-          "the hub starts on its rest and leaves through the east gate");
+    Check(hub->Start.X == 8 && hub->Start.Y == 14 && hub->Spawns.empty() && hub->Links.size() == 2 &&
+              hub->Links[0].Map == "overland" && hub->Links[1].Map == "sluice" &&
+              hub->Links[1].Tile.X == 0 && hub->Links[1].Tile.Y == 9,
+          "the hub starts on its rest, leaves east to the road, and west to the sluice");
     const MapPoint* rest = FindPoint(*hub, MapPointKind::Rest);
     const MapPoint* talk = FindPoint(*hub, MapPointKind::Talk);
     const MapPoint* shop = FindPoint(*hub, MapPointKind::Shop);
-    Check(hub->Points.size() == 3 && rest != nullptr && rest->Tile.X == hub->Start.X &&
+    const MapPoint* calder = nullptr;
+    for (const MapPoint& point : hub->Points) {
+        if (point.Kind == MapPointKind::Talk && point.Dialogue == "calder")
+            calder = &point;
+    }
+    Check(hub->Points.size() == 4 && rest != nullptr && rest->Tile.X == hub->Start.X &&
               rest->Tile.Y == hub->Start.Y,
           "the hub rest shares the start tile");
     Check(talk != nullptr && talk->Dialogue == "pell" && talk->Tile.X == 13 && talk->Tile.Y == 9 &&
               data.FindDialogue("pell") != nullptr,
           "the hub talk point is Pell's existing dialogue");
+    Check(calder != nullptr && calder->Tile.X == 4 && calder->Tile.Y == 9 &&
+              data.FindDialogue("calder") != nullptr,
+          "Calder stands on the west end of the street");
     Check(shop != nullptr && shop->Dialogue.empty() && shop->Tile.X == 15 && shop->Tile.Y == 5,
           "the hub shop point opens the shop");
     const MapProp* shopHouse = nullptr;
@@ -3196,9 +3205,12 @@ void CheckCampaignMaps(const char* dir)
     i32 keepers = 0;
     for (const MapPoint& point : hub->Points) {
         const PointPicture picture = PictureForPoint(*hub, point, keeper);
-        if (point.Kind == MapPointKind::Talk)
+        if (point.Kind == MapPointKind::Talk && point.Dialogue == keeper)
             Check(picture.Art == PointArt::Npc && picture.Dialogue == keeper,
                   "the hub talk point draws the shop's keeper");
+        if (point.Kind == MapPointKind::Talk && point.Dialogue == "calder")
+            Check(picture.Art == PointArt::Npc && picture.Dialogue == "calder",
+                  "Calder is drawn as his own talk");
         if (point.Kind == MapPointKind::Shop)
             Check(picture.Art == PointArt::Shop && picture.Dialogue.empty(),
                   "the hub shop draws the shop marker, not a second keeper");
@@ -3211,6 +3223,11 @@ void CheckCampaignMaps(const char* dir)
     Check(road != nullptr && !road->Hub && road->Links.size() == 2 && road->Spawns.size() == 1 &&
               road->Spawns[0].Encounter == "wolf",
           "the road links the village to the barrow and has the wolf");
+    const MapDef* sluice = data.FindMap("sluice");
+    Check(sluice != nullptr && !sluice->Hub && sluice->Spawns.size() == 1 &&
+              sluice->Spawns[0].Id == "sluice_wolf" && sluice->Spawns[0].Encounter == "sluice_wolf" &&
+              sluice->Links.size() == 1 && sluice->Links[0].Map == "hub",
+          "the sluice is one wolf and a door back to the hub");
     const char* rooms[] = {"barrow_1", "barrow_2", "barrow_3", "barrow_4",
                            "barrow_5", "barrow_6", "barrow_7", "barrow_side"};
     for (const char* id : rooms) {
@@ -3235,7 +3252,7 @@ void CheckCampaignMaps(const char* dir)
             bruteRoom = &map;
         }
     }
-    Check(spawns == static_cast<i32>(data.GetEncounters().size()) && spawns == 10,
+    Check(spawns == static_cast<i32>(data.GetEncounters().size()) && spawns == 11,
           "one spawn for each encounter");
     Check(noFlee == 1 && brute != nullptr && bruteRoom != nullptr && brute->Id == "barrow_brute" &&
               brute->Encounter == "barrow_brute" && bruteRoom->Id == "barrow_7",

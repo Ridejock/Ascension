@@ -1142,6 +1142,7 @@ void TestRoute()
         std::printf("    %s\n", walked.Error.c_str());
     const RouteExpect expect[] = {
         {RouteStepKind::Rest, "", false, "hub"},
+        {RouteStepKind::Fight, "sluice_wolf", true, "sluice"},
         {RouteStepKind::Fight, "wolf", false, "overland"},
         {RouteStepKind::Fight, "bandit", false, "barrow_1"},
         {RouteStepKind::Fight, "tomb_moth", false, "barrow_2"},
@@ -1180,9 +1181,9 @@ void TestRoute()
     Check(error.empty() && !rows.empty(), "the fighter route builds");
     const char* mainOrder[] = {"Wolf", "Bandit", "Tomb Moth", "Bone Archer", "Barrow Sentry",
                                "Bear", "Oathkeeper Varn", "Cairn Warden", "Barrow Brute"};
-    const char* fangOrder[] = {"Wolf", "Bandit", "Tomb Moth", "Bone Archer", "Barrow Sentry",
-                               "Bear", "Wolf Pack", "Oathkeeper Varn", "Cairn Warden",
-                               "Barrow Brute"};
+    const char* fangOrder[] = {"Sluice Wolf", "Wolf", "Bandit", "Tomb Moth", "Bone Archer",
+                               "Barrow Sentry", "Bear", "Wolf Pack", "Oathkeeper Varn",
+                               "Cairn Warden", "Barrow Brute"};
     i32 mainCount = 0;
     i32 fangCount = 0;
     for (const RouteRow& row : rows) {
@@ -1264,6 +1265,32 @@ void WritePng(const fs::path& path)
     out.write(reinterpret_cast<const char*>(kPng), static_cast<std::streamsize>(sizeof(kPng)));
 }
 
+void TestSluiceKeys()
+{
+    const fs::path root = ASCENSION_SOURCE_DIR;
+    const fs::path keysPath = root / "playtest/sluice/walk.keys";
+    const fs::path commandsPath = root / "playtest/sluice/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn &&
+              commands.find("--keys-file playtest/sluice/walk.keys") != std::string::npos,
+          "the sluice command names the walk");
+    Check(commands.find("--save-dir /tmp/ascension-sluice") != std::string::npos,
+          "the sluice command uses a throwaway save folder");
+    Check(commands.find("AppData") == std::string::npos && commands.find("Ridejock") == std::string::npos,
+          "the sluice command leaves the per-user save alone");
+
+    std::string why;
+    PlaytestOptions options;
+    Check(Parse({"--keys-file", keysPath.string(), "--save-dir", "/tmp/ascension-sluice"}, options,
+                why),
+          "the sluice key file parses");
+    Check(options.SaveDir == "/tmp/ascension-sluice" && !options.Keys.empty() && options.SkipsFront() &&
+              options.OpensOverland(),
+          "the sluice walk skips the title and stays on the map");
+}
+
 void TestArtPackFlag()
 {
     std::string why;
@@ -1329,6 +1356,7 @@ int main()
     TestOuterBarrowReplayKeys();
     TestSaveQuitLoadKeys();
     TestPellRumorKeys();
+    TestSluiceKeys();
     TestSimRates();
     TestChainCarry();
     TestRoute();

@@ -1,0 +1,5 @@
+# Calder's sluice errand, from the inn rest through the wolf and back to his thanks.
+# Throwaway save folder. The per-user save is not read or written.
+# On Windows, pass --save-dir %TEMP%\ascension-sluice.
+
+./build/debug/bin/Ascension --save-dir /tmp/ascension-sluice --keys-file playtest/sluice/walk.keys --transcript /tmp/ascension-sluice.txt

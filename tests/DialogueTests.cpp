@@ -71,16 +71,19 @@ void Reject(const fs::path& dir, const char* file, const char* part, const char*
 struct World {
     std::vector<std::string> Flags;
     std::vector<std::string> Found;
+    std::vector<std::string> Defeated;
     std::string Node;
-    TalkList Lists[1];
+    TalkList Lists[2];
 
     [[nodiscard]] TalkFacts Facts()
     {
         Lists[0].Name = "found";
         Lists[0].Ids = Found;
+        Lists[1].Name = "defeated";
+        Lists[1].Ids = Defeated;
         TalkFacts facts;
         facts.Flags = Flags;
-        facts.Lists = std::span<const TalkList>(Lists, 1);
+        facts.Lists = std::span<const TalkList>(Lists, 2);
         return facts;
     }
 };
@@ -358,6 +361,63 @@ void TestValidation()
     }
 }
 
+bool HasFlag(const World& world, const char* id)
+{
+    for (const std::string& flag : world.Flags) {
+        if (flag == id)
+            return true;
+    }
+    return false;
+}
+
+void TestCalder()
+{
+    Database data(kShipped);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads Calder");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    const DialogueDef* calder = data.FindDialogue("calder");
+    Check(calder != nullptr, "shipped data has Calder");
+    if (calder == nullptr)
+        return;
+
+    World world;
+    TalkMove move;
+    Check(Enter(*calder, world) && world.Node == "calder_greet", "Calder starts with the sluice");
+    const DialogueNode* greet = calder->FindNode("calder_greet");
+    Check(greet != nullptr && greet->Line.find("under the pond") != std::string::npos,
+          "the greeting names the pond");
+    Check(Pick(*calder, world, 0, move) && world.Node == "calder_take" && HasFlag(world, "sluice_asked"),
+          "taking the errand sets sluice_asked");
+    const DialogueNode* take = calder->FindNode("calder_take");
+    Check(take != nullptr && take->Line.find("West") != std::string::npos, "the errand points west");
+    Check(Pick(*calder, world, -1, move) && move.Step == TalkStep::Ended, "the errand line ends");
+
+    World waiting = world;
+    Check(Enter(*calder, waiting) && waiting.Node == "calder_waiting",
+          "an open errand waits on the wolf");
+
+    World where;
+    Check(Enter(*calder, where) && Pick(*calder, where, 1, move) && where.Node == "calder_where",
+          "asking where opens the other branch");
+    const DialogueNode* place = calder->FindNode("calder_where");
+    Check(place != nullptr && place->Line.find("Not the barrow") != std::string::npos &&
+              HasFlag(where, "sluice_asked"),
+          "Calder separates the sluice from the barrow");
+
+    World done;
+    done.Defeated.push_back("sluice_wolf");
+    Check(Enter(*calder, done) && done.Node == "calder_done" && HasFlag(done, "sluice_done"),
+          "a felled sluice wolf opens the thanks and closes the errand");
+    const DialogueNode* thanks = calder->FindNode("calder_done");
+    Check(thanks != nullptr && thanks->Line.find("my thanks") != std::string::npos,
+          "the thanks is the closing line");
+
+    World after = done;
+    Check(Enter(*calder, after) && after.Node == "calder_after", "the next talk is the quiet ditch");
+}
+
 void TestShipped()
 {
     Database data(kShipped);
@@ -387,6 +447,7 @@ int main()
     TestSets();
     TestValidation();
     TestShipped();
+    TestCalder();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

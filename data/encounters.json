@@ -51,6 +51,12 @@
       "name": "Barrow Brute",
       "zone": "Outer Barrow",
       "enemies": ["barrow_brute"]
+    },
+    {
+      "id": "sluice_wolf",
+      "name": "Sluice Wolf",
+      "zone": "Sluice",
+      "enemies": ["sluice_wolf"]
     }
   ]
 }
