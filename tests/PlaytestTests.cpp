@@ -1143,6 +1143,7 @@ void TestRoute()
     const RouteExpect expect[] = {
         {RouteStepKind::Rest, "", false, "hub"},
         {RouteStepKind::Fight, "sluice_wolf", true, "sluice"},
+        {RouteStepKind::Fight, "pit_boar", true, "charcoal"},
         {RouteStepKind::Fight, "wolf", false, "overland"},
         {RouteStepKind::Fight, "bandit", false, "barrow_1"},
         {RouteStepKind::Fight, "tomb_moth", false, "barrow_2"},
@@ -1181,7 +1182,7 @@ void TestRoute()
     Check(error.empty() && !rows.empty(), "the fighter route builds");
     const char* mainOrder[] = {"Wolf", "Bandit", "Tomb Moth", "Bone Archer", "Barrow Sentry",
                                "Bear", "Oathkeeper Varn", "Cairn Warden", "Barrow Brute"};
-    const char* fangOrder[] = {"Sluice Wolf", "Wolf", "Bandit", "Tomb Moth", "Bone Archer",
+    const char* fangOrder[] = {"Sluice Wolf", "Pit Boar", "Wolf", "Bandit", "Tomb Moth", "Bone Archer",
                                "Barrow Sentry", "Bear", "Wolf Pack", "Oathkeeper Varn",
                                "Cairn Warden", "Barrow Brute"};
     i32 mainCount = 0;
@@ -1291,6 +1292,32 @@ void TestSluiceKeys()
           "the sluice walk skips the title and stays on the map");
 }
 
+void TestCharcoalKeys()
+{
+    const fs::path root = ASCENSION_SOURCE_DIR;
+    const fs::path keysPath = root / "playtest/charcoal/walk.keys";
+    const fs::path commandsPath = root / "playtest/charcoal/commands.txt";
+    std::ifstream commandsIn(commandsPath);
+    const std::string commands((std::istreambuf_iterator<char>(commandsIn)),
+                               std::istreambuf_iterator<char>());
+    Check(commandsIn &&
+              commands.find("--keys-file playtest/charcoal/walk.keys") != std::string::npos,
+          "the charcoal command names the walk");
+    Check(commands.find("--save-dir /tmp/ascension-charcoal") != std::string::npos,
+          "the charcoal command uses a throwaway save folder");
+    Check(commands.find("AppData") == std::string::npos && commands.find("Ridejock") == std::string::npos,
+          "the charcoal command leaves the per-user save alone");
+
+    std::string why;
+    PlaytestOptions options;
+    Check(Parse({"--keys-file", keysPath.string(), "--save-dir", "/tmp/ascension-charcoal"}, options,
+                why),
+          "the charcoal key file parses");
+    Check(options.SaveDir == "/tmp/ascension-charcoal" && !options.Keys.empty() &&
+              options.SkipsFront() && options.OpensOverland(),
+          "the charcoal walk skips the title and stays on the map");
+}
+
 void TestArtPackFlag()
 {
     std::string why;
@@ -1357,6 +1384,7 @@ int main()
     TestSaveQuitLoadKeys();
     TestPellRumorKeys();
     TestSluiceKeys();
+    TestCharcoalKeys();
     TestSimRates();
     TestChainCarry();
     TestRoute();

@@ -39,6 +39,32 @@
       "color": "#7F9AA3"
     },
     {
+      "id": "pit_boar",
+      "name": "Pit Boar",
+      "tags": ["beast"],
+      "description": "A soot-caked boar denned in the charcoal pit.",
+      "level": 1,
+      "stats": {
+        "stamina": 12,
+        "strength": 6,
+        "defense": 2,
+        "agility": 4,
+        "intellect": 0,
+        "will": 0
+      },
+      "skills": ["bite"],
+      "experience": 8,
+      "gold": 5,
+      "unique": true,
+      "color": "#4A3B32",
+      "drops": [
+        {
+          "item": "char_band",
+          "message": "The boar falls. A charred band slides free."
+        }
+      ]
+    },
+    {
       "id": "bandit",
       "name": "Bandit",
       "tags": ["humanoid"],
