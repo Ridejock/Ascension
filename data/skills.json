@@ -25,6 +25,7 @@
     {
       "id": "heavy_blow",
       "name": "Heavy Blow",
+      "tags": ["crush"],
       "description": "A committed swing. It stuns a foe who is winding up. A {crush.ifTargetHas} foe takes another blow that scales with {crush.scaling}.",
       "kind": "active",
       "target": "enemy",
@@ -62,6 +63,7 @@
     {
       "id": "cleave",
       "name": "Cleave",
+      "tags": ["crush"],
       "description": "A wide swing.",
       "kind": "active",
       "target": "allEnemies",
@@ -85,6 +87,15 @@
           "per": 10,
           "max": 6
         }
+      ]
+    },
+    {
+      "id": "heft",
+      "name": "Heft",
+      "description": "{weight.stat} +{weight.amount}.",
+      "kind": "passive",
+      "effects": [
+        { "id": "weight", "trigger": "always", "op": "stat", "stat": "strength", "amount": 2 }
       ]
     },
     {

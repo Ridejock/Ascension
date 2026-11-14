@@ -28,6 +28,11 @@
           "id": "field_mend",
           "skill": "shield_wall",
           "deed": { "on": "tag", "tag": "heal", "atLeast": 4 }
+        },
+        {
+          "id": "wide_swing",
+          "skill": "cleave",
+          "deed": { "on": "skill", "tag": "crush", "atLeast": 4 }
         }
       ]
     },
