@@ -66,4 +66,4 @@ A spawn names an encounter that already exists. A talk names a dialogue file tha
 
 ## Glyphs
 
-A tile id that is already on the map keeps its glyph. A new tile id takes its preferred glyph when that character is free: floor `+`, wall `#`, grass `.`, path `,`, water `~`, tree `T`, stone `=`, barrow `B`, rubble `%`. Anything else takes the next free printable character, skipping space. After a write, a glyph that no longer appears in the rows is dropped. A map with no free character is rejected by name.
+A tile id that is already on the map keeps its glyph. A new tile id takes its preferred glyph when that character is free: floor `+`, wall `#`, grass `.`, path `,`, water `~`, tree `T`, stone `=`, barrow `B`, rubble `%`, forest `F`, barrow ground `G`. Anything else takes the next free printable character, skipping space. After a write, a glyph that no longer appears in the rows is dropped. A map with no free character is rejected by name.

@@ -9,6 +9,7 @@
 
 #include "Ascension/Data/Map.h"
 #include "Ascension/Data/Types.h"
+#include "Ascension/Map/Danger.h"
 #include "Ascension/Data/Ui.h"
 #include "Ascension/Input/Controls.h"
 #include "Ascension/Input/Prompts.h"
@@ -41,7 +42,7 @@ struct HeroGrant {
 };
 
 // The JSON files in a data directory (stats, effects, schools, skills, statuses, classes, titles,
-// enemies, encounters, items, rarities, shop, combat, progress, tiles, walk, movers, input,
+// enemies, encounters, items, rarities, shop, combat, progress, tiles, danger, walk, movers, input,
 // prompts, battle_ui, shop_ui), every
 // data/dialogue/*.json file, every data/maps/*.json file, plus the icon sheet under
 // assets/icons, checked
@@ -98,6 +99,9 @@ public:
     [[nodiscard]] const CombatRules& GetRules() const { return m_Rules; }
     [[nodiscard]] const ProgressRules& GetProgress() const { return m_Progress; }
     [[nodiscard]] const WalkRules& GetWalk() const { return m_Walk; }
+    // Off-road meter, terrain ratings, and the encounter tables. A tile with
+    // no row rates 0, so it never rolls. The shipped file lists every tile.
+    [[nodiscard]] const DangerRules& GetDanger() const { return m_Danger; }
     // Keyboard and gamepad bindings. The game applies these onto Emerald's actions.
     [[nodiscard]] const ControlRules& GetControls() const { return m_Controls; }
     // Glyph sheets and the scales hint text uses beside them.
@@ -202,6 +206,7 @@ private:
     CombatRules m_Rules;
     ProgressRules m_Progress;
     WalkRules m_Walk;
+    DangerRules m_Danger;
     ControlRules m_Controls;
     PromptRules m_Prompts;
     BattleUi m_BattleUi;

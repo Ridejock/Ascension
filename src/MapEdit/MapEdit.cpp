@@ -607,6 +607,10 @@ char PreferredGlyph(const std::string& tile)
         return 'B';
     if (tile == "rubble")
         return '%';
+    if (tile == "forest")
+        return 'F';
+    if (tile == "barrow_ground")
+        return 'G';
     return 0;
 }
 

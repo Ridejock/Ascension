@@ -18,6 +18,12 @@
       "sheet": "placeholder"
     },
     {
+      "id": "forest",
+      "solid": false,
+      "color": "#3D6E3A",
+      "sheet": "placeholder"
+    },
+    {
       "id": "path",
       "solid": false,
       "color": "#996838",
@@ -37,6 +43,12 @@
       "id": "stone",
       "solid": false,
       "color": "#717B6C",
+      "sheet": "placeholder"
+    },
+    {
+      "id": "barrow_ground",
+      "solid": false,
+      "color": "#6A6258",
       "sheet": "placeholder"
     },
     {

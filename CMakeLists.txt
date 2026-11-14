@@ -82,9 +82,11 @@ add_library(AscensionMap STATIC
     src/Map/Walk.cpp
     src/Map/Handoff.cpp
     src/Map/Movers.cpp
+    src/Map/Danger.cpp
     include/Ascension/Map/Walk.h
     include/Ascension/Map/Handoff.h
     include/Ascension/Map/Movers.h
+    include/Ascension/Map/Danger.h
 )
 target_link_libraries(AscensionMap PUBLIC AscensionData)
 emerald_set_warnings(AscensionMap)
@@ -213,6 +215,14 @@ if(ASCENSION_BUILD_TESTS)
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionHandoffTests)
     add_test(NAME Handoff COMMAND AscensionHandoffTests)
+
+    add_executable(AscensionDangerTests tests/DangerTests.cpp tests/Check.h)
+    target_link_libraries(AscensionDangerTests PRIVATE AscensionMap AscensionProgress AscensionCombat)
+    target_compile_definitions(AscensionDangerTests PRIVATE
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+    emerald_set_warnings(AscensionDangerTests)
+    add_test(NAME Danger COMMAND AscensionDangerTests)
 
     add_executable(AscensionWalkTests tests/WalkTests.cpp tests/Check.h)
     target_link_libraries(AscensionWalkTests PRIVATE AscensionMap)

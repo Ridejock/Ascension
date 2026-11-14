@@ -8,6 +8,7 @@
 
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Data/Talk.h"
+#include "Ascension/Map/Danger.h"
 #include "Ascension/Map/Handoff.h"
 #include "Ascension/Map/Movers.h"
 #include "Ascension/Map/Walk.h"
@@ -55,13 +56,24 @@ private:
     // True while a spawn's fight is on screen, including a win that is still choosing
     // a path. The map does not walk during that.
     [[nodiscard]] bool SpawnFightOpen() const;
-    void TouchSpawn(const ContactQuery& query);
+    // True when a spawn on this tile offered a fight, including when a choice
+    // kept that fight from opening. The step is spent either way, so a wild
+    // roll does not also fire on the spawn.
+    bool TouchSpawn(const ContactQuery& query);
+    // A committed step that did not open a spawn fight. Rating 0 never rolls.
+    void TouchDanger(const WalkPlace& before, WalkStepKind kind);
     void BeginSpawnFight();
     // Puts a finished spawn fight back on the map. A list fight never has one open.
     void MaybeSettle();
     // An ongoing save named a spawn. Opens that fight and puts the snapshot back.
     // A spawn id the data no longer has leaves the hero where they were standing.
     void OpenResumedSpawn();
+    // An ongoing wild fight, or a wild win that is still choosing. The spawn
+    // list does not have this fight.
+    void OpenResumedWild();
+    // The HUD word for the meter, already uppercased. Empty on the road, at
+    // 0, and when the data has no hint for this value.
+    [[nodiscard]] std::string DangerWord() const;
     // A loss fills both pools and marks a hub return. Gold is not touched.
     void RememberDefeat();
     // Standing on a rest point fills both pools, once per arrival.
@@ -295,6 +307,8 @@ private:
         MapTile ReturnTile;
         bool Once = true;
         bool AllowFlee = false;
+        // A random encounter. There is no spawn to clear and no wound to keep.
+        bool Wild = false;
         // Empty on a resumed fight and on a list fight. A contact copies the request.
         // When Foes matches the encounter, the fight starts the ordinary way.
         std::vector<std::string> Foes;
@@ -302,6 +316,13 @@ private:
     };
     MapEngagement m_MapFight;
     MapMemory m_MapMemory;
+    // Builds while the hero walks off a 0-rated tile. A fight sets it back.
+    DangerMeter m_Danger;
+    DangerRng m_DangerRng;
+    // Set from a save until EnterOverland opens the wild fight or drops it.
+    bool m_WildResume = false;
+    std::string m_WildEncounter;
+    MapTile m_WildReturn;
     // Where this map's spawns are standing. Rebuilt from the file on entry, on an
     // exit, and after a reload. Idle leaves every tile on its home.
     std::vector<SpawnPlace> m_Places;
