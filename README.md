@@ -2,7 +2,7 @@
 
 A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox. A Fighter earns XP, ranks skills by using them, and at level 5 chooses Berserker or Guardian. The window draws that fight with rectangles and Emerald's built-in debug font.
 
-Emerald is fetched by CMake and pinned to commit `6f4069eb912d53bba54e725bbec47ebbee7c64f8` (see `CMakeLists.txt`). That commit's debug font draws `>`, `[`, `]`, `;`, and `%`, and publishes `DebugTextHasGlyph`. Public headers name Emerald types only; SDL stays inside the engine. To use a local checkout instead:
+Emerald is fetched by CMake and pinned to commit `e4f692d6f4859bf8f3dfe2910670fab98bbd2eef` (see `CMakeLists.txt`). That commit reads an APAK v1 file and can play Ogg bytes from it. Public headers name Emerald types only; SDL stays inside the engine. To use a local checkout instead:
 
 ```sh
 cmake --preset debug -DASCENSION_EMERALD_SOURCE_DIR=C:/dev/Emerald
@@ -274,7 +274,13 @@ South of the inn, on the grass at the gap in the trees, is Bram. `i` talks. "I'l
 
 ## Art pack
 
-A private build can point `--art-pack` at a folder, or place `artpack/` next to the executable. `manifest.json` maps tile, foe, hero, NPC, and overland marker pictures onto PNG files in that folder. A tile row can name one map or one theme, and a list of variants for that tile. A picture can be a horizontal strip with a frame count. An id the manifest leaves out keeps the built-in CC0 art. The folder is gitignored and is not in the public zip. [design/art-pack.md](design/art-pack.md) is the format.
+Place `artpack/ascension.pak` next to the executable, or pass `--art-pack` with that file (or with a folder that contains it). The pak is one APAK v1 file. Emerald reads it. The game asks for `manifest.json` and for each picture, font, and sound. Nothing is unpacked onto disk.
+
+Without the file, the game stays on the built-in CC0 art, the debug font, and silence. A missing default file is not an error. An id the manifest does not list stays on that built-in art. A bad header, table, CRC, or manifest stops startup and names the file and the field.
+
+The manifest can list UI 9-slices, font roles, icons, item pictures, VFX sheets, battle backdrops, and audio roles (`title`, `hub`, `overland`, `barrow`, `battle`, `victory`, and the ambience roles). Confirm buttons and the emerald bar use the green slices when the pack has them. Panels stay the steel slice. The title and the pause menu say "Art and audio: Willosuna" (or the pack's `credit`).
+
+The folder is gitignored and is not in the public zip. CI and the itch zip still ship without it. [design/art-pack.md](design/art-pack.md) is the format. A loose `artpack/` directory with `manifest.json` still works when no pak is present.
 
 ## Package
 

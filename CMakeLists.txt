@@ -44,7 +44,7 @@ endif()
 include(FetchContent)
 FetchContent_Declare(Emerald
     GIT_REPOSITORY https://github.com/Ridejock/Emerald.git
-    GIT_TAG        6f4069eb912d53bba54e725bbec47ebbee7c64f8
+    GIT_TAG        e4f692d6f4859bf8f3dfe2910670fab98bbd2eef
     GIT_PROGRESS   TRUE
 )
 FetchContent_MakeAvailable(Emerald) # also brings SDL3, spdlog, stb, nlohmann/json (and ImGui if enabled)
@@ -154,6 +154,8 @@ add_executable(Ascension
     src/App/GearLine.h
     src/App/Playtest.cpp
     src/App/Playtest.h
+    src/App/PackPlay.cpp
+    src/App/PackPlay.h
 )
 target_link_libraries(Ascension PRIVATE AscensionCombat AscensionProgress AscensionMap)
 # A dev build watches the source data/ so saving a JSON file updates the running

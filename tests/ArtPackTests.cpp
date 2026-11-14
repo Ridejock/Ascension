@@ -553,6 +553,185 @@ void TestProps(const Database& data, const PackDir& dir)
                "a prop needs a file");
 }
 
+void AppendU16(std::vector<unsigned char>& out, u16 value)
+{
+    out.push_back(static_cast<unsigned char>(value));
+    out.push_back(static_cast<unsigned char>(value >> 8));
+}
+
+void AppendU32(std::vector<unsigned char>& out, u32 value)
+{
+    for (int shift = 0; shift < 32; shift += 8)
+        out.push_back(static_cast<unsigned char>(value >> shift));
+}
+
+void AppendU64(std::vector<unsigned char>& out, u64 value)
+{
+    AppendU32(out, static_cast<u32>(value));
+    AppendU32(out, static_cast<u32>(value >> 32));
+}
+
+u32 BlobCrc(const std::vector<unsigned char>& bytes)
+{
+    u32 crc = 0xFFFFFFFFu;
+    for (unsigned char byte : bytes) {
+        crc ^= byte;
+        for (int bit = 0; bit < 8; ++bit) {
+            const u32 mask = 0u - (crc & 1u);
+            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+        }
+    }
+    return ~crc;
+}
+
+struct PakItem {
+    std::string Path;
+    std::vector<unsigned char> Bytes;
+};
+
+std::vector<unsigned char> BuildPak(const std::vector<PakItem>& items)
+{
+    u64 tocSize = 0;
+    for (const PakItem& item : items)
+        tocSize += 2 + item.Path.size() + 24;
+    u64 blobAt = (32 + tocSize + 7ull) & ~7ull;
+    std::vector<unsigned char> toc;
+    std::vector<unsigned char> blobs;
+    u64 cursor = blobAt;
+    for (const PakItem& item : items) {
+        while (blobs.size() + blobAt < cursor)
+            blobs.push_back(0);
+        AppendU16(toc, static_cast<u16>(item.Path.size()));
+        toc.insert(toc.end(), item.Path.begin(), item.Path.end());
+        AppendU64(toc, cursor);
+        AppendU64(toc, item.Bytes.size());
+        AppendU32(toc, BlobCrc(item.Bytes));
+        AppendU32(toc, 0);
+        blobs.insert(blobs.end(), item.Bytes.begin(), item.Bytes.end());
+        cursor = (cursor + item.Bytes.size() + 7ull) & ~7ull;
+    }
+    std::vector<unsigned char> file = {'A', 'P', 'A', 'K'};
+    AppendU16(file, 1);
+    AppendU16(file, 0);
+    AppendU32(file, static_cast<u32>(items.size()));
+    AppendU64(file, 32);
+    AppendU64(file, toc.size());
+    AppendU32(file, 0);
+    file.insert(file.end(), toc.begin(), toc.end());
+    while (file.size() < blobAt)
+        file.push_back(0);
+    file.insert(file.end(), blobs.begin(), blobs.end());
+    return file;
+}
+
+std::vector<unsigned char> BytesOf(std::string_view text)
+{
+    return {text.begin(), text.end()};
+}
+
+void TestPak(const Database& data, const PackDir& dir)
+{
+    const std::vector<unsigned char> png(kPng, kPng + sizeof(kPng));
+    const std::string manifest =
+        "{\n"
+        "  \"credit\": \"Willosuna\",\n"
+        "  \"tiles\": [ { \"id\": \"floor\", \"file\": \"tiles/floor.png\" } ],\n"
+        "  \"ui\": { \"nineslice\": { \"panel\": { \"file\": \"ui/panel.png\", \"border_px\": 6 } },\n"
+        "            \"files\": [ \"ui/panel.png\" ] },\n"
+        "  \"fonts\": { \"roles\": { \"ui\": { \"file\": \"fonts/ui.ttf\", \"size\": 8 } } },\n"
+        "  \"audio\": { \"roles\": { \"title\": \"audio/title.ogg\" },\n"
+        "              \"files\": [ \"audio/title.ogg\" ] },\n"
+        "  \"icons\": [ { \"id\": \"armor/boots\", \"file\": \"icons/boots.png\" } ],\n"
+        "  \"vfx\": [ { \"id\": \"combat/hits/spark\", \"file\": \"vfx/spark.png\" } ]\n"
+        "}\n";
+    std::vector<unsigned char> font = {'t', 't', 'f'};
+    std::vector<unsigned char> ogg = {'O', 'g', 'g', 'S'};
+    const fs::path pak = dir.Path / "ascension.pak";
+    {
+        const std::vector<unsigned char> bytes = BuildPak({
+            {"audio/title.ogg", ogg},
+            {"fonts/ui.ttf", font},
+            {"icons/boots.png", png},
+            {"manifest.json", BytesOf(manifest)},
+            {"tiles/floor.png", png},
+            {"ui/panel.png", png},
+            {"vfx/spark.png", png},
+        });
+        std::ofstream out(pak, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+    }
+
+    fs::path flagged = pak;
+    std::string error;
+    Check(DiscoverArtPack(flagged, dir.Path, error), "a pak file is an art pack");
+    Check(flagged == pak, "a pak path is kept");
+
+    fs::path folder = dir.Path;
+    Check(DiscoverArtPack(folder, dir.Path / "bin", error), "a directory containing the pak is accepted");
+    Check(folder == pak, "a directory resolves to ascension.pak");
+
+    fs::path beside;
+    const fs::path exe = dir.Path / "exe";
+    std::error_code code;
+    fs::create_directories(exe / "artpack", code);
+    fs::copy_file(pak, exe / "artpack" / "ascension.pak", fs::copy_options::overwrite_existing, code);
+    Check(DiscoverArtPack(beside, exe, error), "the default pak beside the executable is accepted");
+    Check(beside == exe / "artpack" / "ascension.pak", "the default file is artpack/ascension.pak");
+
+    ArtPack pack;
+    Check(LoadPack(pak, data, pack, error), "a pak manifest loads");
+    if (!error.empty())
+        std::printf("    message was: %s\n", error.c_str());
+    Check(pack.HasArchive(), "a pak load keeps the archive");
+    Check(pack.Credit() == "Willosuna", "the credit is the manifest string");
+    Check(ArtCreditLine(&pack) == "Art and audio: Willosuna", "the credit line names Willosuna");
+    const ResolvedArt tile = pack.Find(ArtSlot::Tile, "floor");
+    Check(tile.Origin == ArtOrigin::Pack && tile.Picture.File == "tiles/floor.png",
+          "a pak tile keeps the relative path");
+    CheckBuiltin(pack, ArtSlot::Tile, "wall", "a pak id that is not listed stays built-in");
+    const ArtNineSlice* slice = pack.FindSlice("panel");
+    Check(slice != nullptr && slice->Border == 6, "a 9-slice margin is read");
+    const ArtFontRole* fontRole = pack.FindFont("ui");
+    Check(fontRole != nullptr && fontRole->Size == 8 && fontRole->File == "fonts/ui.ttf",
+          "a font role resolves its path and size");
+    const ArtAudioRole* title = pack.FindAudio("title");
+    Check(title != nullptr && title->File == "audio/title.ogg", "a cue role resolves its path");
+    Check(pack.FindIcon("armor/boots") != nullptr, "an icon id with a slash loads");
+    Check(pack.FindIcon("missing") == nullptr, "an icon the pak does not list is absent");
+    const ArtNamedFile* spark = pack.FindVfx("combat/hits/spark");
+    Check(spark != nullptr, "a vfx sheet id loads");
+
+    std::vector<unsigned char> broken = BuildPak({{"manifest.json", BytesOf("{}\n")}});
+    if (!broken.empty())
+        broken.back() ^= 0xFF;
+    const fs::path bad = dir.Path / "bad.pak";
+    {
+        std::ofstream out(bad, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(broken.data()),
+                  static_cast<std::streamsize>(broken.size()));
+    }
+    ArtPack failed;
+    Check(!LoadPack(bad, data, failed, error), "a bad crc fails the load");
+    CheckHas(error, "crc", "a crc failure names the field");
+    CheckHas(error, "bad.pak", "a crc failure names the file");
+
+    const fs::path field = dir.Path / "field.pak";
+    const std::string badManifest = "{ \"ui\": { \"nineslice\": { \"panel\": { \"file\": \"ui/panel.png\" } } } }\n";
+    const std::vector<unsigned char> fieldBytes = BuildPak({
+        {"manifest.json", BytesOf(badManifest)},
+        {"ui/panel.png", png},
+    });
+    {
+        std::ofstream out(field, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(fieldBytes.data()),
+                  static_cast<std::streamsize>(fieldBytes.size()));
+    }
+    Check(!LoadPack(field, data, failed, error), "a slice without a margin fails");
+    CheckHas(error, "border_px", "a bad slice names the field");
+    CheckHas(error, "manifest.json", "a bad slice names the manifest");
+}
+
 } // namespace
 
 int main()
@@ -575,6 +754,7 @@ int main()
     TestTileScope(data, dir);
     TestMarkers(data, dir);
     TestProps(data, dir);
+    TestPak(data, dir);
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

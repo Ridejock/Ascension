@@ -6,17 +6,28 @@ A private build can replace pictures without putting those files in this repo. T
 
 Startup looks in this order:
 
-1. `--art-pack <dir>` (the next argument, or `--art-pack=<dir>`). A relative path is relative to the working directory. The directory has to exist.
-2. Otherwise, a directory named `artpack` next to the executable, when that directory exists.
-3. Otherwise there is no pack. Drawing stays on the built-in CC0 art, the same as a build with no flag and no folder.
+1. `--art-pack <path>` (the next argument, or `--art-pack=<path>`). A relative path is relative to the working directory. The path may be an `ascension.pak` file, or a directory that contains `ascension.pak`. A directory with no pak is still a loose pack: its `manifest.json` is read from disk.
+2. Otherwise, `artpack/ascension.pak` next to the executable, when that file exists.
+3. Otherwise, a directory named `artpack` next to the executable, when that directory exists and there is no pak in it.
+4. Otherwise there is no pack. Drawing stays on the built-in CC0 art, the same as a build with no flag and no folder. A missing default file is not an error.
 
-`--art-pack` does not change the hero or the save. A bad manifest stops the process before the window and names the file and the field, the same way a bad file under `data/` does.
+The on-disk name `ascension.pak`, inside a folder named `artpack` when the flag is omitted, is the contract.
 
-The folder is gitignored. Packaging copies `data/` and `assets/` by name and does not copy `artpack/`. A zip that contains that folder fails the package step.
+`--art-pack` does not change the hero or the save. A bad manifest, header, table, or CRC stops the process before the window and names the file and the field, the same way a bad file under `data/` does. A path the manifest does not list is not an error: that id stays on the built-in art.
+
+The folder is gitignored. Packaging copies `data/` and `assets/` by name and does not copy `artpack/`. A zip that contains that folder fails the package step. The public zip does not install `ascension.pak`.
+
+## APAK v1
+
+Emerald reads the pak. Ascension asks for `manifest.json` and for each path. The file is not unpacked onto disk. The bytes are little-endian and uncompressed. `flags` is 0. A version other than 1, or a flags value the reader does not understand, is rejected. Bit 0 of `flags` is reserved for a future zstd payload and bit 1 for a future XOR.
+
+The header is 32 bytes: magic `APAK`, version `1`, flags `0`, entry count, `toc_offset` (32), `toc_size`, and reserved `0`. Each table entry is a path length, the UTF-8 path, the blob offset, the blob size, a zlib CRC-32, and per-entry flags (`0`). Paths are unique, sorted as UTF-8 bytes, relative, use `/`, and have no `.` or `..` segment. `manifest.json` is required. The format is also written in Emerald's `docs/assets-audio-saves.md`.
 
 ## manifest.json
 
-The pack root holds `manifest.json`. Every picture is a PNG inside the pack. Paths use `/`, stay relative, and cannot climb out with `..`. An unknown key is an error. A content id has to already exist in the loaded data. A picture is either a path string or an object with `file`.
+The pack root holds `manifest.json`. Picture paths use `/`, stay relative, and cannot climb out with `..`. An unknown key is an error. A content id in the original lists has to already exist in the loaded data. A picture is either a path string or an object with `file`.
+
+The packed manifest keeps those lists and adds `credit`, `ui`, `fonts`, `icons`, `items`, `vfx`, `backdrops`, `audio`, and `licenses`. `licenses` is checked and then ignored: the license files stay inside the pak. Icon, item, VFX, and backdrop ids do not have to already be in `data/`. An id the pack does not list keeps the built-in art.
 
 | List | Id comes from | Pictures |
 |---|---|---|
@@ -27,6 +38,15 @@ The pack root holds `manifest.json`. Every picture is a PNG inside the pack. Pat
 | `npcs` | `data/dialogue/<id>.json` | `sprite`, `portrait`, or both |
 | `markers` | `hero`, `rest`, `shop`, `exit` | `file` replaces that overland marker |
 | `props` | a prop id placed on a map | `file` is one PNG for that id |
+| `credit` | The pack. A short name | No picture. The title and pause line is "Art and audio: " plus this name |
+| `ui` | `nineslice` ids and `files` | 9-slice panels (`border_px`, optional `size`) and extra pictures such as bar fills |
+| `fonts` | `roles` `ui`, `body`, `damage`, `fallback` | `file` is a `.ttf` or `.otf`, `size` is the pixel size |
+| `icons` | an icon id, which may contain `/` | `file` replaces that icon when the id matches |
+| `items` | an item-picture id | `file` is one PNG |
+| `vfx` | a sheet id | `file` is one horizontal sheet. A picture wider than it is tall is split into square frames |
+| `backdrops` | a backdrop id | `flat` and/or `layers` (back to front) |
+| `audio` | `roles` such as `title`, `hub`, `overland`, `barrow`, `battle`, `victory`, and the `ambience_*` roles | each role is one `.ogg` path. `files` lists the one-shots |
+| `licenses` | private | `pack` and `file`. The text is not copied into this repo |
 
 Each list can be omitted. An empty file replaces nothing. A foe row can name one picture and leave the other out; the one left out stays on the CC0 art. The same is true of an NPC and of a marker.
 
