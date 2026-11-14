@@ -2,7 +2,7 @@
 
 A LitRPG vertical slice on the [Emerald](https://github.com/Ridejock/Emerald) engine (C++20, SDL3, SDL GPU): turn-based combat and a class change at level 5. This tree is the project skeleton, the JSON data layer, and a combat sandbox. A Fighter earns XP, ranks skills by using them, and at level 5 chooses Berserker or Guardian. The window draws that fight with rectangles and Emerald's built-in debug font.
 
-Emerald is fetched by CMake and pinned to commit `e4f692d6f4859bf8f3dfe2910670fab98bbd2eef` (see `CMakeLists.txt`). That commit reads an APAK v1 file and can play Ogg bytes from it. Public headers name Emerald types only; SDL stays inside the engine. To use a local checkout instead:
+Emerald is fetched by CMake and pinned to commit `2952e05970d73dcd0461335d9ff5c3d0be6edee0` (see `CMakeLists.txt`). That commit reads an APAK v1 file and can play Ogg bytes from it. Public headers name Emerald types only; SDL stays inside the engine. To use a local checkout instead:
 
 ```sh
 cmake --preset debug -DASCENSION_EMERALD_SOURCE_DIR=C:/dev/Emerald
