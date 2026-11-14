@@ -979,17 +979,18 @@ bool AscensionApp::SpawnFightOpen() const
     return m_OnMap && m_MapFight.Active && m_Battle != nullptr;
 }
 
-void AscensionApp::TouchSpawn(const ContactQuery& query)
+bool AscensionApp::TouchSpawn(const ContactQuery& query)
 {
     if (!m_Walker.Placed() || SpawnFightOpen())
-        return;
+        return false;
     const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
     if (map == nullptr)
-        return;
+        return false;
     const MapFightRequest request =
         OfferSpawn(m_Data, *map, query, m_MapMemory, m_Places, &m_Gallery.GetPack());
     if (!request.Active)
-        return;
+        return false;
+    ResetDanger(m_Danger, m_Data.GetDanger());
     m_MapFight.Active = true;
     m_MapFight.SpawnId = request.SpawnId;
     m_MapFight.EncounterId = request.EncounterId;
@@ -998,9 +999,80 @@ void AscensionApp::TouchSpawn(const ContactQuery& query)
     m_MapFight.ReturnTile = request.ReturnTile;
     m_MapFight.Once = request.Once;
     m_MapFight.AllowFlee = request.AllowFlee;
+    m_MapFight.Wild = false;
     m_MapFight.Foes = request.Foes;
     m_MapFight.Seats = request.Seats;
     BeginSpawnFight();
+    return true;
+}
+
+void AscensionApp::TouchDanger(const WalkPlace& before, WalkStepKind kind)
+{
+    if (!m_Walker.Placed() || SpawnFightOpen())
+        return;
+    if (kind != WalkStepKind::Moved && kind != WalkStepKind::Exited)
+        return;
+    // A key script walks a fixed route onto the placed spawns. A wild fight
+    // would spend the next key on a battle that script did not write.
+    if (!m_Play.Keys.empty())
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const MapTile tile = m_Walker.Place().Tile;
+    const std::string* cell = map->Cell(tile.X, tile.Y);
+    if (cell == nullptr)
+        return;
+    const DangerRules& rules = m_Data.GetDanger();
+    const i32 rating = DangerRatingOf(rules, *cell);
+    const u32 cap = rules.Cap > 0 ? static_cast<u32>(rules.Cap) : 1u;
+    const DangerStep stepped = AdvanceDanger(m_Danger, rules, rating, NextDangerRoll(m_DangerRng, cap));
+    if (!stepped.Fight)
+        return;
+    if (m_Hero.IsReady() && m_Hero.NextFightBlock() != nullptr)
+        return;
+    const DangerTable* table = FindDangerTable(rules, map->Id, *cell);
+    if (table == nullptr)
+        return;
+    const std::string encounter =
+        PickDangerEncounter(*table, NextDangerRoll(m_DangerRng, 0x7fffffffu));
+    if (encounter.empty() || m_Data.FindEncounter(encounter) == nullptr)
+        return;
+
+    m_MapFight = {};
+    m_MapFight.Active = true;
+    m_MapFight.Wild = true;
+    m_MapFight.EncounterId = encounter;
+    m_MapFight.MapId = map->Id;
+    m_MapFight.SpawnTile = tile;
+    m_MapFight.Once = false;
+    m_MapFight.AllowFlee = DangerEncounterFlees(m_Data, encounter);
+    const bool sameMap = kind == WalkStepKind::Moved && before.MapId == map->Id;
+    m_MapFight.ReturnTile = sameMap ? before.Tile : tile;
+    ResetDanger(m_Danger, rules);
+    BeginSpawnFight();
+}
+
+std::string AscensionApp::DangerWord() const
+{
+    if (!m_Walker.Placed() || m_Danger.Value < 1)
+        return {};
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return {};
+    const MapTile tile = m_Walker.Place().Tile;
+    const std::string* cell = map->Cell(tile.X, tile.Y);
+    if (cell == nullptr || DangerRatingOf(m_Data.GetDanger(), *cell) < 1)
+        return {};
+    const DangerHint* hint = DangerHintFor(m_Data.GetDanger(), m_Danger.Value);
+    if (hint == nullptr || hint->Text.empty())
+        return {};
+    std::string word = hint->Text;
+    for (char& code : word) {
+        if (code >= 'a' && code <= 'z')
+            code = static_cast<char>(code - 'a' + 'A');
+    }
+    return word;
 }
 
 void AscensionApp::BeginSpawnFight()
@@ -1176,10 +1248,14 @@ void AscensionApp::MaybeSettle()
     }
     if (!placed) {
         Note("The way back is gone.");
+    } else if (result == BattleResult::Victory && m_MapFight.Wild) {
+        Note("The wild goes quiet.");
     } else if (result == BattleResult::Victory && settled.Return.ClearSpawn) {
         Note("The foe is gone.");
     } else if (result == BattleResult::Victory) {
         Note("The foe remains.");
+    } else if (result == BattleResult::Fled && m_MapFight.Wild) {
+        Note("You slip back.");
     } else if (result == BattleResult::Fled) {
         Note("The foe holds its ground.");
     } else if (settled.Return.Hub) {
@@ -1193,6 +1269,7 @@ void AscensionApp::MaybeSettle()
         m_Vitals.ReturnToHub = false;
 
     m_Battle.reset();
+    ResetDanger(m_Danger, m_Data.GetDanger());
     m_MapFight = {};
     SyncPlaces();
     if (result == BattleResult::Victory)
@@ -1236,6 +1313,30 @@ void AscensionApp::OpenResumedSpawn()
         m_MapFight.ReturnTile = offer.ReturnTile;
     else
         m_MapFight.ReturnTile = ref.Map->Start;
+    BeginSpawnFight();
+}
+
+void AscensionApp::OpenResumedWild()
+{
+    const bool held = m_HoldVictory;
+    m_WildResume = false;
+    if (m_WildEncounter.empty() || m_Data.FindEncounter(m_WildEncounter) == nullptr) {
+        m_HoldVictory = false;
+        m_ResumeFight = {};
+        if (!held)
+            m_Standing = RunStanding::None;
+        Note("The wild is gone.");
+        return;
+    }
+    m_MapFight = {};
+    m_MapFight.Active = true;
+    m_MapFight.Wild = true;
+    m_MapFight.EncounterId = m_WildEncounter;
+    m_MapFight.MapId = m_Walker.Placed() ? std::string(m_Walker.Place().MapId) : m_PlaceMap;
+    m_MapFight.SpawnTile = m_Walker.Placed() ? m_Walker.Place().Tile : m_PlaceTile;
+    m_MapFight.ReturnTile = m_WildReturn;
+    m_MapFight.Once = false;
+    m_MapFight.AllowFlee = DangerEncounterFlees(m_Data, m_WildEncounter);
     BeginSpawnFight();
 }
 
@@ -1513,9 +1614,17 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     const char* block = m_Hero.IsReady() ? m_Hero.NextFightBlock() : nullptr;
     const LoadedSpawn plan =
         PlanLoadedSpawn(m_Standing, m_ResumeSpawn, m_ResumeFight.Known, block);
+    if (m_WildResume && m_Standing == RunStanding::Victory &&
+        (block == nullptr || block[0] == '\0'))
+        m_WildResume = false;
+    if (m_WildResume && m_Standing == RunStanding::Victory)
+        m_HoldVictory = true;
     if (plan == LoadedSpawn::Hold || plan == LoadedSpawn::Settle)
         m_HoldVictory = true;
-    if (plan == LoadedSpawn::Resume || m_HoldVictory)
+    if (m_WildResume && m_ResumeSpawn.empty() &&
+        (m_Standing == RunStanding::Ongoing || m_HoldVictory))
+        OpenResumedWild();
+    else if (plan == LoadedSpawn::Resume || m_HoldVictory)
         OpenResumedSpawn();
     else if (m_Standing == RunStanding::Ongoing) {
         // A version 3 fight was the encounter list. It names no spawn, so the
@@ -3033,6 +3142,11 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
     m_ResumeMana = 0;
     m_ResumeFight = {};
     m_ResumeSpawn.clear();
+    m_Danger = {};
+    m_DangerRng = {};
+    m_WildResume = false;
+    m_WildEncounter.clear();
+    m_WildReturn = {};
     m_Vitals = fresh.Pools;
     m_VitalsSettled = false;
     m_XpAwarded = false;
@@ -3325,6 +3439,7 @@ void AscensionApp::StepMap(f32 dt)
         Note("Blocked.");
     if (step.Kind == WalkStepKind::Exited || m_PlacesMap != m_Walker.Place().MapId)
         SyncPlaces();
+    bool spawned = false;
     if (step.Kind == WalkStepKind::Moved || step.Kind == WalkStepKind::Exited) {
         ContactQuery contact;
         contact.Tile = m_Walker.Place().Tile;
@@ -3332,8 +3447,10 @@ void AscensionApp::StepMap(f32 dt)
             contact.HasFrom = true;
             contact.From = before.Tile;
         }
-        TouchSpawn(contact);
+        spawned = TouchSpawn(contact);
     }
+    if (!spawned && !SpawnFightOpen())
+        TouchDanger(before, step.Kind);
     if (SpawnFightOpen())
         m_Walker.Halt();
     else if (step.Kind == WalkStepKind::Moved)
@@ -3561,10 +3678,18 @@ bool AscensionApp::WriteSave()
     const auto encounters = m_Data.GetEncounters();
     const bool spawnFight = m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing &&
                             m_MapFight.Active && !m_MapFight.EncounterId.empty();
-    if (spawnFight)
+    if (m_MapFight.Active && m_MapFight.Wild && !m_MapFight.EncounterId.empty())
+        run.EncounterId = m_MapFight.EncounterId;
+    else if (spawnFight)
         run.EncounterId = m_MapFight.EncounterId;
     else if (m_EnemyIndex >= 0 && m_EnemyIndex < static_cast<i32>(encounters.size()))
         run.EncounterId = encounters[static_cast<usize>(m_EnemyIndex)].Id;
+    run.DangerValue = m_Danger.Value;
+    run.DangerGrace = m_Danger.Grace;
+    run.DangerRoad = m_Danger.OnRoad;
+    run.DangerRng = m_DangerRng.State < 1u ? 1 : static_cast<i32>(m_DangerRng.State);
+    run.Wild = m_MapFight.Active && m_MapFight.Wild;
+    run.WildReturn = m_MapFight.ReturnTile;
 
     FightRecord fought;
     fought.BattleLive = m_Battle != nullptr;
@@ -3664,6 +3789,15 @@ bool AscensionApp::LoadSlot(std::string_view slot, std::string& error)
     m_PlaceMap = run.MapId;
     m_PlaceTile = run.Tile;
     m_ResumeSpawn = run.SpawnId;
+    m_Danger.Value = run.DangerValue;
+    m_Danger.Grace = run.DangerGrace;
+    m_Danger.OnRoad = run.DangerRoad;
+    if (m_Data.GetDanger().Cap > 0 && m_Danger.Value > m_Data.GetDanger().Cap)
+        m_Danger.Value = m_Data.GetDanger().Cap;
+    m_DangerRng.State = run.DangerRng < 1 ? 1u : static_cast<u32>(run.DangerRng);
+    m_WildResume = run.Wild;
+    m_WildEncounter = run.Wild ? run.EncounterId : std::string{};
+    m_WildReturn = run.WildReturn;
     m_ResumeResources = false;
     m_ResumeFight = {};
     if (ResumeWound(run)) {
@@ -4594,6 +4728,15 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                       &m_Glides);
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
+        const std::string dangerWord = DangerWord();
+        if (!dangerWord.empty()) {
+            const UiRgb& ink = m_Data.GetBattleUi().Style.Dim;
+            const Emerald::Vec4 dim = {static_cast<f32>(ink.Red) / 255.0f,
+                                       static_cast<f32>(ink.Green) / 255.0f,
+                                       static_cast<f32>(ink.Blue) / 255.0f, 1.0f};
+            Emerald::DrawDebugText(renderer, {16.0f, promptY}, dangerWord, dim, 2);
+            promptY += Emerald::DebugTextLineHeight(2) + 4.0f;
+        }
         if (m_Pause.Open) {
             const PromptRules& prompts = m_Data.GetPrompts();
             std::vector<HintChip> pauseHints;

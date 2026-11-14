@@ -20,11 +20,11 @@
     ],
     "legend": {
       "#": "barrow",
-      ".": "grass",
+      ".": "forest",
       ",": "path",
       "~": "water",
       "T": "tree",
-      "=": "stone"
+      "=": "barrow_ground"
     },
     "start": { "x": 1, "y": 7 },
     "spawns": [

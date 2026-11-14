@@ -58,6 +58,16 @@ struct RunState {
     i32 Focus = 0;
     i32 Mana = 0;
     FightSnapshot Fight;
+    // Off-road meter. A version 7 file that omits these keys starts at 0, on
+    // the road, with the default roll. They are not a new save version.
+    i32 DangerValue = 0;
+    i32 DangerGrace = 0;
+    bool DangerRoad = true;
+    i32 DangerRng = 1;
+    // An unresolved wild fight. The encounter id is EncounterId. The return
+    // tile is where a flee steps back. A file without the key has none.
+    bool Wild = false;
+    MapTile WildReturn;
 };
 
 // Records the fight's result and the pools the caller wants kept. A win, a flee, and an
@@ -262,7 +272,10 @@ public:
     // Version 7. The System ledger (counters, titles, skill offers, granted skills, and
     // spent free points) is stored, plus free.floor. A version 6 file has none of those
     // keys. The migration marks it free.legacy so the load settles free points at the
-    // level already reached, instead of asking for every past level at once. Version 6
+    // level already reached, instead of asking for every past level at once. The off-road
+    // meter (danger, danger.grace, danger.road, danger.rng) and a wild fight (wild,
+    // wild.x, wild.y) are optional on this same version. A file that omits them loads
+    // with an empty meter. Version 6
     // is the six primaries, and the carried pools are HP, focus, and mana. A version 5
     // file keeps its class and name. A custom build's vitality becomes stamina and its
     // focus attribute becomes will; intellect is 0 until spent. A missing mana key is

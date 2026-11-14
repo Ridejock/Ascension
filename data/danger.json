@@ -1,0 +1,51 @@
+{
+  "danger": {
+    "cap": 100,
+    "graceSteps": 3,
+    "curve": "square",
+    "ratings": [
+      { "tile": "floor", "rating": 0 },
+      { "tile": "wall", "rating": 0 },
+      { "tile": "grass", "rating": 4 },
+      { "tile": "path", "rating": 0 },
+      { "tile": "water", "rating": 0 },
+      { "tile": "tree", "rating": 0 },
+      { "tile": "stone", "rating": 0 },
+      { "tile": "barrow", "rating": 0 },
+      { "tile": "rubble", "rating": 0 },
+      { "tile": "forest", "rating": 8 },
+      { "tile": "barrow_ground", "rating": 18 }
+    ],
+    "hints": [
+      { "at": 1, "text": "uneasy" },
+      { "at": 25, "text": "wary" },
+      { "at": 70, "text": "threatened" }
+    ],
+    "tables": [
+      {
+        "id": "meadow",
+        "tile": "grass",
+        "rows": [
+          { "encounter": "wolf", "weight": 1 }
+        ]
+      },
+      {
+        "id": "forest",
+        "tile": "forest",
+        "rows": [
+          { "encounter": "wolf", "weight": 3 },
+          { "encounter": "wolf_pack", "weight": 1 }
+        ]
+      },
+      {
+        "id": "barrow_ground",
+        "tile": "barrow_ground",
+        "rows": [
+          { "encounter": "wolf", "weight": 2 },
+          { "encounter": "bandit", "weight": 2 },
+          { "encounter": "bear", "weight": 1 }
+        ]
+      }
+    ]
+  }
+}

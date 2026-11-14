@@ -27,9 +27,9 @@ constexpr const char* kFileNames[] = {
     "stats.json",    "effects.json", "schools.json",   "skills.json",
     "statuses.json", "classes.json", "titles.json",    "enemies.json",
     "encounters.json", "items.json",  "shop.json",      "combat.json",
-    "progress.json", "rarities.json", "tiles.json",     "walk.json",
-    "movers.json",   "input.json",    "prompts.json",   "battle_ui.json",
-    "shop_ui.json",
+    "progress.json", "rarities.json", "tiles.json",     "danger.json",
+    "walk.json",     "movers.json",   "input.json",     "prompts.json",
+    "battle_ui.json", "shop_ui.json",
 };
 
 // Dev builds read the source assets/icons when that sheet is there. A packaged build, where the
@@ -398,6 +398,7 @@ struct Parsed {
     CombatRules Rules;
     ProgressRules Progress;
     WalkRules Walk;
+    DangerRules Danger;
     ControlRules Controls;
     PromptRules Prompts;
     BattleUi BattleScreen;
@@ -4345,6 +4346,184 @@ bool LoadTiles(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
+{
+    const auto body = root.find("danger");
+    if (body == root.end() || !body->is_object()) {
+        error = "'danger' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*body, {"cap", "graceSteps", "curve", "ratings", "tables", "hints"}, unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    DangerRules rules;
+    if (!RequireInt(*body, "cap", 1, 10000, rules.Cap, error) ||
+        !RequireInt(*body, "graceSteps", 0, 99, rules.GraceSteps, error))
+        return false;
+    std::string curve;
+    if (!RequireString(*body, "curve", curve, error))
+        return false;
+    if (curve == "linear")
+        rules.Curve = DangerCurve::Linear;
+    else if (curve == "square")
+        rules.Curve = DangerCurve::Square;
+    else {
+        error = "'curve' must be \"linear\" or \"square\"";
+        return false;
+    }
+
+    const auto ratings = body->find("ratings");
+    if (ratings == body->end() || !ratings->is_array()) {
+        error = "'ratings' must be a list";
+        return false;
+    }
+    for (const Json& entry : *ratings) {
+        if (!entry.is_object()) {
+            error = "rating entries must be objects";
+            return false;
+        }
+        if (!AllowKeys(entry, {"tile", "rating"}, unknown)) {
+            error = "unknown field " + Quote(unknown);
+            return false;
+        }
+        DangerRating rating;
+        if (!RequireString(entry, "tile", rating.Tile, error))
+            return false;
+        const std::string where = "rating " + Quote(rating.Tile);
+        if (!IsId(rating.Tile)) {
+            error = where + ": tile must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        if (FindId(parsed.Tiles, rating.Tile) == nullptr) {
+            error = where + ": tile " + Quote(rating.Tile) + " does not exist";
+            return false;
+        }
+        for (const DangerRating& older : rules.Ratings) {
+            if (older.Tile == rating.Tile) {
+                error = where + ": this tile already has a rating";
+                return false;
+            }
+        }
+        if (!RequireInt(entry, "rating", 0, rules.Cap, rating.Rating, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        rules.Ratings.push_back(std::move(rating));
+    }
+
+    const auto hints = body->find("hints");
+    if (hints != body->end()) {
+        if (!hints->is_array()) {
+            error = "'hints' must be a list";
+            return false;
+        }
+        for (const Json& entry : *hints) {
+            if (!entry.is_object()) {
+                error = "hint entries must be objects";
+                return false;
+            }
+            if (!AllowKeys(entry, {"at", "text"}, unknown)) {
+                error = "unknown field " + Quote(unknown);
+                return false;
+            }
+            DangerHint hint;
+            if (!RequireInt(entry, "at", 0, rules.Cap, hint.At, error))
+                return false;
+            if (!RequireString(entry, "text", hint.Text, error))
+                return false;
+            if (hint.Text.size() > 24) {
+                error = "hint text must be 24 characters or fewer";
+                return false;
+            }
+            rules.Hints.push_back(std::move(hint));
+        }
+    }
+
+    const auto tables = body->find("tables");
+    if (tables == body->end() || !tables->is_array()) {
+        error = "'tables' must be a list";
+        return false;
+    }
+    for (const Json& entry : *tables) {
+        if (!entry.is_object()) {
+            error = "table entries must be objects";
+            return false;
+        }
+        if (!AllowKeys(entry, {"id", "map", "tile", "rows"}, unknown)) {
+            error = "unknown field " + Quote(unknown);
+            return false;
+        }
+        DangerTable table;
+        if (!RequireString(entry, "id", table.Id, error))
+            return false;
+        const std::string where = "table " + Quote(table.Id);
+        if (!IsId(table.Id)) {
+            error = where + ": id must be letters, digits and _, starting with a letter";
+            return false;
+        }
+        for (const DangerTable& older : rules.Tables) {
+            if (older.Id == table.Id) {
+                error = where + ": there is another table with this id";
+                return false;
+            }
+        }
+        std::string why;
+        if (!OptionalId(entry, "map", table.Map, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!RequireString(entry, "tile", table.Tile, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+        if (!IsId(table.Tile) || FindId(parsed.Tiles, table.Tile) == nullptr) {
+            error = where + ": tile " + Quote(table.Tile) + " does not exist";
+            return false;
+        }
+        for (const DangerTable& older : rules.Tables) {
+            if (older.Tile == table.Tile && older.Map == table.Map) {
+                error = where + ": this map and tile already have a table";
+                return false;
+            }
+        }
+        const auto rows = entry.find("rows");
+        if (rows == entry.end() || !rows->is_array() || rows->empty()) {
+            error = where + ": 'rows' must list at least one encounter";
+            return false;
+        }
+        for (const Json& rowEntry : *rows) {
+            if (!rowEntry.is_object()) {
+                error = where + ": row entries must be objects";
+                return false;
+            }
+            if (!AllowKeys(rowEntry, {"encounter", "weight"}, unknown)) {
+                error = where + ": unknown field " + Quote(unknown);
+                return false;
+            }
+            DangerRow row;
+            if (!RequireString(rowEntry, "encounter", row.Encounter, error)) {
+                error = where + ": " + error;
+                return false;
+            }
+            if (!IsId(row.Encounter) || FindId(parsed.Encounters, row.Encounter) == nullptr) {
+                error = where + ": encounter " + Quote(row.Encounter) + " does not exist";
+                return false;
+            }
+            if (!RequireInt(rowEntry, "weight", 1, 999, row.Weight, error)) {
+                error = where + ": " + error;
+                return false;
+            }
+            table.Rows.push_back(std::move(row));
+        }
+        rules.Tables.push_back(std::move(table));
+    }
+
+    parsed.Danger = std::move(rules);
+    return true;
+}
+
 std::string Coord(MapTile tile)
 {
     return std::to_string(tile.X) + "," + std::to_string(tile.Y);
@@ -5160,6 +5339,22 @@ bool CheckMapLinks(const Parsed& parsed, std::string& error)
     return true;
 }
 
+// A table may name a map. That map has to exist. Tile and encounter ids are
+// checked while danger.json itself is read, before the map files.
+bool CheckDangerMaps(const Parsed& parsed, std::string& error)
+{
+    for (const DangerTable& table : parsed.Danger.Tables) {
+        if (table.Map.empty())
+            continue;
+        if (FindId(parsed.Maps, table.Map) == nullptr) {
+            error = Err("danger.json", "table " + Quote(table.Id),
+                        "map " + Quote(table.Map) + " does not exist");
+            return false;
+        }
+    }
+    return true;
+}
+
 bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
              std::vector<FileTime>& times, std::string& error)
 {
@@ -5179,16 +5374,16 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     const Loader loaders[] = {LoadStats,   LoadEffects, LoadSchools,   LoadSkills,
                               LoadStatuses, LoadClasses, LoadTitles,   LoadEnemies,
                               LoadEncounters, LoadItems, LoadShop,     LoadCombat,
-                              LoadProgress, LoadRarities, LoadTiles,   LoadWalk,
-                              LoadMovers,   LoadControls, LoadPrompts, LoadBattleUi,
-                              LoadShopUi};
+                              LoadProgress, LoadRarities, LoadTiles,   LoadDanger,
+                              LoadWalk,     LoadMovers,   LoadControls, LoadPrompts,
+                              LoadBattleUi, LoadShopUi};
     static_assert(std::size(loaders) == std::size(kFileNames));
     const char* names[] = {"stats.json",     "effects.json", "schools.json",   "skills.json",
                            "statuses.json",  "classes.json", "titles.json",    "enemies.json",
                            "encounters.json", "items.json",  "shop.json",      "combat.json",
-                           "progress.json",  "rarities.json", "tiles.json",    "walk.json",
-                           "movers.json",    "input.json",   "prompts.json",   "battle_ui.json",
-                           "shop_ui.json"};
+                           "progress.json",  "rarities.json", "tiles.json",    "danger.json",
+                           "walk.json",      "movers.json",  "input.json",     "prompts.json",
+                           "battle_ui.json", "shop_ui.json"};
     static_assert(std::size(names) == std::size(kFileNames));
 
     for (usize i = 0; i < std::size(kFileNames); ++i) {
@@ -5207,9 +5402,9 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const char* allowedTop[] = {"stats",    "effects", "schools",   "skills",
                                     "statuses", "classes", "titles",    "enemies",
                                     "encounters", "items", "shop",      "combat",
-                                    "progress", "rarities", "tiles",    "walk",
-                                    "movers",   "controls", "prompts",  "battleUi",
-                                    "shopUi"};
+                                    "progress", "rarities", "tiles",    "danger",
+                                    "walk",     "movers",   "controls", "prompts",
+                                    "battleUi", "shopUi"};
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
@@ -5274,6 +5469,10 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
     }
     std::string linkError;
     if (!CheckMapLinks(parsed, linkError)) {
+        error = std::move(linkError);
+        return false;
+    }
+    if (!CheckDangerMaps(parsed, linkError)) {
         error = std::move(linkError);
         return false;
     }
@@ -5467,6 +5666,7 @@ bool Database::Load(DataError* error)
     m_Rules = parsed.Rules;
     m_Progress = std::move(parsed.Progress);
     m_Walk = parsed.Walk;
+    m_Danger = std::move(parsed.Danger);
     m_Controls = std::move(parsed.Controls);
     m_Prompts = std::move(parsed.Prompts);
     m_BattleUi = parsed.BattleScreen;

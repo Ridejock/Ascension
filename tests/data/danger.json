@@ -1,0 +1,12 @@
+{
+  "danger": {
+    "cap": 100,
+    "graceSteps": 2,
+    "curve": "linear",
+    "ratings": [
+      { "tile": "floor", "rating": 0 },
+      { "tile": "wall", "rating": 0 }
+    ],
+    "tables": []
+  }
+}

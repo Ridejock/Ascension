@@ -493,6 +493,13 @@ void Store(const RunState& run, Emerald::SaveData& data)
     data.SetString("map", run.MapId);
     data.SetInt("tile.x", run.Tile.X);
     data.SetInt("tile.y", run.Tile.Y);
+    data.SetInt("danger", run.DangerValue < 0 ? 0 : run.DangerValue);
+    data.SetInt("danger.grace", run.DangerGrace < 0 ? 0 : run.DangerGrace);
+    data.SetBool("danger.road", run.DangerRoad);
+    data.SetInt("danger.rng", run.DangerRng < 1 ? 1 : run.DangerRng);
+    data.SetBool("wild", run.Wild);
+    data.SetInt("wild.x", run.WildReturn.X);
+    data.SetInt("wild.y", run.WildReturn.Y);
     data.SetInt("cleared.count", static_cast<i32>(run.Cleared.size()));
     for (i32 index = 0; index < static_cast<i32>(run.Cleared.size()); ++index)
         data.SetString(Key("cleared", index, {}), run.Cleared[static_cast<usize>(index)]);
@@ -709,6 +716,16 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     run.MapId = data.GetString("map");
     run.Tile.X = data.GetInt("tile.x", 0);
     run.Tile.Y = data.GetInt("tile.y", 0);
+    const i32 danger = data.GetInt("danger", 0);
+    run.DangerValue = danger < 0 ? 0 : danger;
+    const i32 grace = data.GetInt("danger.grace", 0);
+    run.DangerGrace = grace < 0 ? 0 : grace;
+    run.DangerRoad = !data.Has("danger.road") || data.GetBool("danger.road", true);
+    const i32 roll = data.GetInt("danger.rng", 1);
+    run.DangerRng = roll < 1 ? 1 : roll;
+    run.Wild = data.GetBool("wild", false);
+    run.WildReturn.X = data.GetInt("wild.x", 0);
+    run.WildReturn.Y = data.GetInt("wild.y", 0);
     run.Cleared.resize(static_cast<usize>(cleared));
     for (i32 index = 0; index < cleared; ++index) {
         const std::string id = data.GetString(Key("cleared", index, {}));
