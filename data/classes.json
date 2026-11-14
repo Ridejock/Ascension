@@ -29,6 +29,11 @@
           "id": "field_mend",
           "skill": "prayer",
           "deed": { "on": "tag", "tag": "heal", "atLeast": 4 }
+        },
+        {
+          "id": "wide_swing",
+          "skill": "cleave",
+          "deed": { "on": "skill", "tag": "crush", "atLeast": 4 }
         }
       ]
     },
@@ -101,6 +106,24 @@
       },
       "skills": ["prayer"],
       "passives": ["bulwark"]
+    },
+    {
+      "id": "reaver",
+      "name": "Reaver",
+      "description": "A {from} who put weight behind the swing. The System offers this at level {evolveLevel}.",
+      "evolvesFrom": "fighter",
+      "evolveLevel": 5,
+      "offer": "meld",
+      "rarity": "rare",
+      "meld": { "on": "skill", "tag": "crush", "atLeast": 8 },
+      "bonus": { "strength": 1, "stamina": 2 },
+      "growth": {
+        "strength": 2,
+        "stamina": 2,
+        "agility": 1
+      },
+      "skills": ["cleave"],
+      "passives": ["heft"]
     },
     {
       "id": "mage",

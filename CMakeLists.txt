@@ -233,7 +233,8 @@ if(ASCENSION_BUILD_TESTS)
     add_executable(AscensionSystemTests tests/SystemTests.cpp tests/Check.h)
     target_link_libraries(AscensionSystemTests PRIVATE AscensionProgress AscensionCombat)
     target_compile_definitions(AscensionSystemTests PRIVATE
-        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionSystemTests)
     add_test(NAME System COMMAND AscensionSystemTests)
 

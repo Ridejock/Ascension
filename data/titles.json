@@ -8,6 +8,34 @@
       "bonus": { "stat": "strength", "amount": 1 }
     },
     {
+      "id": "beast_hunter",
+      "name": "Beast Hunter",
+      "description": "The System counted four beasts. Agility +1.",
+      "deed": { "on": "kill", "tag": "beast", "atLeast": 4 },
+      "bonus": { "stat": "agility", "amount": 1 }
+    },
+    {
+      "id": "tombwalker",
+      "name": "Tombwalker",
+      "description": "The System counted three humanoids. Defense +1.",
+      "deed": { "on": "kill", "tag": "humanoid", "atLeast": 3 },
+      "bonus": { "stat": "defense", "amount": 1 }
+    },
+    {
+      "id": "bear_cull",
+      "name": "Bear Cull",
+      "description": "The System counted the bear. Stamina +1.",
+      "deed": { "on": "kill", "id": "bear", "atLeast": 1 },
+      "bonus": { "stat": "stamina", "amount": 1 }
+    },
+    {
+      "id": "oaths_end",
+      "name": "Oath's End",
+      "description": "The System counted Oathkeeper Varn. Will +1.",
+      "deed": { "on": "kill", "id": "oathkeeper_varn", "atLeast": 1 },
+      "bonus": { "stat": "will", "amount": 1 }
+    },
+    {
       "id": "goblin_slayer",
       "name": "Goblin Slayer",
       "description": "After a hundred goblins, blows bite harder against humanoids.",

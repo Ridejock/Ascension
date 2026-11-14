@@ -1740,11 +1740,14 @@ void TestShippedStarters()
               priest->Skills.size() == 1 && templar->Skills.size() == 1,
           "each evolution adds one skill and one passive");
     const auto fighterPaths = data.EvolutionsOf("fighter");
-    Check(fighterPaths.size() == 3 && fighterPaths[0]->Id == "berserker" &&
+    Check(fighterPaths.size() == 4 && fighterPaths[0]->Id == "berserker" &&
               fighterPaths[0]->Offer == EvolutionOffer::Guaranteed &&
-              fighterPaths[1]->Id == "guardian" && fighterPaths[2]->Id == "oathbound" &&
-              fighterPaths[2]->Offer == EvolutionOffer::Meld,
-          "fighter still evolves into berserker, then guardian, and a meld");
+              fighterPaths[1]->Id == "guardian" &&
+              fighterPaths[1]->Offer == EvolutionOffer::Guaranteed &&
+              fighterPaths[2]->Id == "oathbound" &&
+              fighterPaths[2]->Offer == EvolutionOffer::Meld &&
+              fighterPaths[3]->Id == "reaver" && fighterPaths[3]->Offer == EvolutionOffer::Meld,
+          "fighter evolves into berserker, guardian, the oathbound meld, then reaver");
     const std::string fighterText = data.Describe(*data.FindClass("fighter"));
     const std::string mageText = data.Describe(*mage);
     const std::string rogueText = data.Describe(*rogue);

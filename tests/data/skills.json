@@ -25,6 +25,7 @@
     {
       "id": "heavy_blow",
       "name": "Heavy Blow",
+      "tags": ["crush"],
       "description": "A committed swing. It stuns a foe who is winding up.",
       "kind": "active",
       "target": "enemy",
@@ -60,6 +61,7 @@
     {
       "id": "cleave",
       "name": "Cleave",
+      "tags": ["crush"],
       "description": "A wide swing.",
       "kind": "active",
       "target": "allEnemies",
