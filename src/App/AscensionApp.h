@@ -20,6 +20,7 @@
 #include "Emerald/Core/Application.h"
 #include "Ascension/Input/Controls.h"
 #include "ArtGallery.h"
+#include "PackPlay.h"
 #include "Playtest.h"
 
 namespace Ascension {
@@ -40,6 +41,7 @@ protected:
     void OnStart() override;
     void OnUpdate(f32 dt) override;
     void OnRender2D(Emerald::Renderer2D& renderer) override;
+    [[nodiscard]] std::string CurrentMapId() const;
 
 private:
     void BeginFight();
@@ -273,6 +275,7 @@ private:
     Emerald::AssetHandle<Emerald::Texture> m_Accents;
     // Empty when this launch has no art pack. Drawing then stays on the CC0 art.
     ArtGallery m_Gallery;
+    PackPlay m_PackPlay;
     // The hero is walking a map. A launch with no --enemy opens the hub (or --map
     // when that was passed). --enemy stays on the fight screen.
     bool m_OnMap = false;

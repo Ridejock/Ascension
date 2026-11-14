@@ -1,12 +1,14 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "Ascension/Data/Database.h"
+#include "Emerald/IO/Pak.h"
 
 namespace Ascension {
 
@@ -14,8 +16,14 @@ namespace Ascension {
 // The name is the on-disk contract. It is not a content id.
 inline constexpr std::string_view kArtPackDirectoryName = "artpack";
 
-// The one JSON file in that folder. Same role as a file under data/.
+// The packed file inside that folder, and the name --art-pack accepts.
+inline constexpr std::string_view kArtPackFileName = "ascension.pak";
+
+// The one JSON file in that folder or pak. Same role as a file under data/.
 inline constexpr std::string_view kArtPackManifestName = "manifest.json";
+
+// Shown on the title and the pause menu. A pack credit replaces the name.
+inline constexpr std::string_view kArtCreditName = "Willosuna";
 
 // How long one frame stays up when a strip omits frameDuration. Milliseconds.
 inline constexpr i32 kArtFrameMilliseconds = 200;
@@ -76,6 +84,48 @@ struct ArtImage {
     i32 CellsHigh = 0;
 };
 
+// One 9-slice. Border is the margin, in pixels, on every side. Width and Height
+// are 0 when the manifest omitted size.
+struct ArtNineSlice {
+    std::string Id;
+    std::filesystem::path File;
+    i32 Border = 0;
+    i32 Width = 0;
+    i32 Height = 0;
+};
+
+// One font role. Size is the pixel size the manifest names.
+struct ArtFontRole {
+    std::string Role;
+    std::filesystem::path File;
+    i32 Size = 0;
+};
+
+// An icon, an item picture, or a VFX sheet. Frames is 1 when the sheet is one
+// picture. A sheet wider than it is tall, with a width that divides by the
+// height, is split into square frames.
+struct ArtNamedFile {
+    std::string Id;
+    std::filesystem::path File;
+    i32 Frames = 1;
+    i32 FrameWidth = 0;
+    i32 FrameHeight = 0;
+};
+
+// A battle backdrop. Layers are back to front. Flat is the single picture used
+// when Layers is empty.
+struct ArtBackdrop {
+    std::string Id;
+    std::filesystem::path Flat;
+    std::vector<std::filesystem::path> Layers;
+};
+
+// One music or ambience role. File is the path inside the pack.
+struct ArtAudioRole {
+    std::string Role;
+    std::filesystem::path File;
+};
+
 // Where a picture comes from. Builtin is the CC0 art the game already draws.
 // Pack is a file from the manifest. Picture is set only for Pack.
 enum class ArtOrigin : u8 { Builtin, Pack };
@@ -103,9 +153,31 @@ public:
               DataError* error = nullptr);
 
     [[nodiscard]] bool IsLoaded() const { return m_Loaded; }
+    [[nodiscard]] bool HasArchive() const { return static_cast<bool>(m_Pak); }
     [[nodiscard]] const std::filesystem::path& GetDirectory() const { return m_Directory; }
     [[nodiscard]] const std::string& GetLastError() const { return m_LastError; }
     [[nodiscard]] std::span<const ArtImage> GetImages() const { return m_Images; }
+    [[nodiscard]] const std::string& Credit() const { return m_Credit; }
+    [[nodiscard]] std::span<const ArtNineSlice> Slices() const { return m_Slices; }
+    [[nodiscard]] const ArtNineSlice* FindSlice(std::string_view id) const;
+    [[nodiscard]] std::span<const std::filesystem::path> UiFiles() const { return m_UiFiles; }
+    [[nodiscard]] std::span<const ArtFontRole> Fonts() const { return m_Fonts; }
+    [[nodiscard]] const ArtFontRole* FindFont(std::string_view role) const;
+    [[nodiscard]] std::span<const ArtNamedFile> Icons() const { return m_Icons; }
+    [[nodiscard]] const ArtNamedFile* FindIcon(std::string_view id) const;
+    [[nodiscard]] std::span<const ArtNamedFile> Items() const { return m_Items; }
+    [[nodiscard]] const ArtNamedFile* FindItem(std::string_view id) const;
+    [[nodiscard]] std::span<const ArtNamedFile> Vfx() const { return m_Vfx; }
+    [[nodiscard]] const ArtNamedFile* FindVfx(std::string_view id) const;
+    [[nodiscard]] std::span<const ArtBackdrop> Backdrops() const { return m_Backdrops; }
+    [[nodiscard]] const ArtBackdrop* FindBackdrop(std::string_view id) const;
+    [[nodiscard]] std::span<const ArtAudioRole> AudioRoles() const { return m_Audio; }
+    [[nodiscard]] const ArtAudioRole* FindAudio(std::string_view role) const;
+    [[nodiscard]] std::span<const std::filesystem::path> AudioFiles() const { return m_AudioFiles; }
+    // Copies one file the manifest already accepted. A pak path is relative.
+    // A loose pack path is the absolute file. False names the failure in `error`.
+    [[nodiscard]] bool ReadFile(const std::filesystem::path& file, std::vector<unsigned char>& out,
+                                std::string& error) const;
 
     // Builtin when this slot and id are not in the manifest. A tile row that names a
     // map or a theme is not this result; FindPlaced is. An empty id matches a marker slot.
@@ -123,16 +195,38 @@ private:
         std::string Map;
     };
 
+    void Fail(DataError* error, std::string message);
+
     [[nodiscard]] const std::string* ThemeOf(std::string_view mapId) const;
     [[nodiscard]] const ArtImage* Select(ArtSlot slot, std::string_view id,
                                          std::string_view mapId) const;
 
     std::filesystem::path m_Directory;
+    std::shared_ptr<Emerald::Pak> m_Pak;
     std::vector<ArtImage> m_Images;
     std::vector<ThemeUse> m_Themes;
+    std::string m_Credit;
+    std::vector<ArtNineSlice> m_Slices;
+    std::vector<std::filesystem::path> m_UiFiles;
+    std::vector<ArtFontRole> m_Fonts;
+    std::vector<ArtNamedFile> m_Icons;
+    std::vector<ArtNamedFile> m_Items;
+    std::vector<ArtNamedFile> m_Vfx;
+    std::vector<ArtBackdrop> m_Backdrops;
+    std::vector<ArtAudioRole> m_Audio;
+    std::vector<std::filesystem::path> m_AudioFiles;
     std::string m_LastError;
     bool m_Loaded = false;
 };
+
+// "Art and audio: Willosuna", or the pack's credit when it names one.
+[[nodiscard]] inline std::string ArtCreditLine(const ArtPack* pack)
+{
+    std::string who(kArtCreditName);
+    if (pack != nullptr && !pack->Credit().empty())
+        who = pack->Credit();
+    return "Art and audio: " + who;
+}
 
 // Which frame is showing. Frame 0 when the strip has one frame, or when `seconds` is
 // not positive. An omitted duration (0) uses kArtFrameMilliseconds.
@@ -163,9 +257,11 @@ private:
 }
 
 // `requested` is the --art-pack path, or empty when the flag was omitted.
-// A set path has to be a directory. An empty path uses `executableDirectory/artpack`
-// when that directory exists, and otherwise stays empty: the launch keeps the
-// built-in art. A missing default folder is not an error.
+// A set path may be an ascension.pak file, a directory that contains that file,
+// or a loose directory whose manifest.json is read directly. An empty path uses
+// `executableDirectory/artpack/ascension.pak` when that file exists, then a loose
+// `artpack` directory beside the executable. Otherwise it stays empty: the launch
+// keeps the built-in art. A missing default file is not an error.
 [[nodiscard]] bool DiscoverArtPack(std::filesystem::path& requested,
                                    const std::filesystem::path& executableDirectory,
                                    std::string& error);
