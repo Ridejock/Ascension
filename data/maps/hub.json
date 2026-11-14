@@ -22,7 +22,7 @@
       "T..###########.........................T",
       "T......................T......T........T",
       "T................T.....................T",
-      "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+      "TT,TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
     ],
     "legend": {
       "#": "wall",
@@ -43,6 +43,11 @@
         "tile": { "x": 0, "y": 9 },
         "map": "sluice",
         "arrival": { "x": 16, "y": 6 }
+      },
+      {
+        "tile": { "x": 2, "y": 19 },
+        "map": "charcoal",
+        "arrival": { "x": 7, "y": 1 }
       }
     ],
     "points": [
@@ -63,6 +68,11 @@
         "kind": "talk",
         "tile": { "x": 4, "y": 9 },
         "dialogue": "calder"
+      },
+      {
+        "kind": "talk",
+        "tile": { "x": 2, "y": 18 },
+        "dialogue": "bram"
       }
     ],
     "props": [

@@ -57,6 +57,12 @@
       "name": "Sluice Wolf",
       "zone": "Sluice",
       "enemies": ["sluice_wolf"]
+    },
+    {
+      "id": "pit_boar",
+      "name": "Pit Boar",
+      "zone": "Charcoal Hollow",
+      "enemies": ["pit_boar"]
     }
   ]
 }

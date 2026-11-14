@@ -54,6 +54,16 @@
       "value": 35
     },
     {
+      "id": "char_band",
+      "name": "Char Band",
+      "description": "A band of charred hide from the south hollow. It takes a little off a blow.",
+      "icon": "ring",
+      "rarity": "uncommon",
+      "slot": "accessory",
+      "bonus": { "defense": 1 },
+      "value": 18
+    },
+    {
       "id": "alphas_fang",
       "name": "Alpha's Fang",
       "description": "The fang of the wolf that led the pack.",

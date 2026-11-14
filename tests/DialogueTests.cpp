@@ -418,6 +418,54 @@ void TestCalder()
     Check(Enter(*calder, after) && after.Node == "calder_after", "the next talk is the quiet ditch");
 }
 
+void TestBram()
+{
+    Database data(kShipped);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads Bram");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    const DialogueDef* bram = data.FindDialogue("bram");
+    Check(bram != nullptr, "shipped data has Bram");
+    if (bram == nullptr)
+        return;
+
+    World world;
+    TalkMove move;
+    Check(Enter(*bram, world) && world.Node == "bram_greet", "Bram starts with the hollow");
+    const DialogueNode* greet = bram->FindNode("bram_greet");
+    Check(greet != nullptr && greet->Line.find("charcoal") != std::string::npos,
+          "the greeting names the charcoal");
+    Check(Pick(*bram, world, 0, move) && world.Node == "bram_take" && HasFlag(world, "hollow_asked"),
+          "taking the errand sets hollow_asked");
+    const DialogueNode* take = bram->FindNode("bram_take");
+    Check(take != nullptr && take->Line.find("South") != std::string::npos, "the errand points south");
+    Check(Pick(*bram, world, -1, move) && move.Step == TalkStep::Ended, "the errand line ends");
+
+    World waiting = world;
+    Check(Enter(*bram, waiting) && waiting.Node == "bram_waiting",
+          "an open errand waits on the boar");
+
+    World where;
+    Check(Enter(*bram, where) && Pick(*bram, where, 1, move) && where.Node == "bram_where",
+          "asking where opens the other branch");
+    const DialogueNode* place = bram->FindNode("bram_where");
+    Check(place != nullptr && place->Line.find("Not the sluice") != std::string::npos &&
+              HasFlag(where, "hollow_asked"),
+          "Bram separates the hollow from the sluice");
+
+    World done;
+    done.Defeated.push_back("pit_boar");
+    Check(Enter(*bram, done) && done.Node == "bram_done" && HasFlag(done, "hollow_done"),
+          "a felled pit boar opens the thanks and closes the errand");
+    const DialogueNode* thanks = bram->FindNode("bram_done");
+    Check(thanks != nullptr && thanks->Line.find("band is yours") != std::string::npos,
+          "the thanks names the found band");
+
+    World after = done;
+    Check(Enter(*bram, after) && after.Node == "bram_after", "the next talk is the quiet pit");
+}
+
 void TestShipped()
 {
     Database data(kShipped);
@@ -448,6 +496,7 @@ int main()
     TestValidation();
     TestShipped();
     TestCalder();
+    TestBram();
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }

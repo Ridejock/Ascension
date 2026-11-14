@@ -1,0 +1,39 @@
+{
+  "map": {
+    "id": "charcoal",
+    "rows": [
+      "TTTTTTT,TTTTTTTT",
+      "T..............T",
+      "T..............T",
+      "T..%%%....%%%..T",
+      "T..%%%....%%%..T",
+      "T......==......T",
+      "T......==......T",
+      "T..............T",
+      "T..............T",
+      "TTTTTTTTTTTTTTTT"
+    ],
+    "legend": {
+      ".": "grass",
+      ",": "path",
+      "%": "rubble",
+      "=": "stone",
+      "T": "tree"
+    },
+    "start": { "x": 7, "y": 1 },
+    "spawns": [
+      {
+        "id": "pit_boar",
+        "tile": { "x": 7, "y": 7 },
+        "encounter": "pit_boar"
+      }
+    ],
+    "links": [
+      {
+        "tile": { "x": 7, "y": 0 },
+        "map": "hub",
+        "arrival": { "x": 2, "y": 18 }
+      }
+    ]
+  }
+}

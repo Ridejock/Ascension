@@ -1,0 +1,68 @@
+{
+  "dialogue": {
+    "id": "bram",
+    "nodes": [
+      {
+        "id": "bram_after",
+        "line": "The pit can breathe again./South of the trees stays quiet.",
+        "note": "the hollow is quiet and he is back to the fire.",
+        "requires": ["hollow_done"],
+        "choices": [
+          { "text": "Keep the fire.", "end": true }
+        ]
+      },
+      {
+        "id": "bram_done",
+        "line": "Quiet, then. The band is yours./The hollow can take a fire again.",
+        "note": "relief, said like a fact.",
+        "requires": ["defeated.pit_boar"],
+        "sets": ["hollow_done"],
+        "choices": [
+          { "text": "Glad the pit is clear.", "end": true }
+        ]
+      },
+      {
+        "id": "bram_waiting",
+        "line": "Still in the pit. South, through/the trees. You will smell the ash.",
+        "note": "he has already pointed the way.",
+        "requires": ["hollow_asked"],
+        "choices": [
+          { "text": "I'm going.", "end": true }
+        ]
+      },
+      {
+        "id": "bram_greet",
+        "line": "Bram. I burn the charcoal./Something has taken the hollow.",
+        "note": "a working man, not a rumor.",
+        "choices": [
+          { "text": "I'll see it off.", "next": "bram_take" },
+          { "text": "Where is the hollow?", "next": "bram_where" },
+          { "text": "Not my fire.", "next": "bram_bye" }
+        ]
+      },
+      {
+        "id": "bram_take",
+        "line": "Good. South, past the inn./Come back when the pit is quiet.",
+        "note": "he treats the promise as a job.",
+        "sets": ["hollow_asked"],
+        "choices": []
+      },
+      {
+        "id": "bram_where",
+        "line": "Not the sluice. South, through the trees./A hollow under the ash. One boar.",
+        "note": "he separates this job from Calder's ditch.",
+        "sets": ["hollow_asked"],
+        "choices": [
+          { "text": "I'll go.", "end": true },
+          { "text": "Not tonight.", "next": "bram_bye" }
+        ]
+      },
+      {
+        "id": "bram_bye",
+        "line": "The east road is Pell's worry./This pit will still be here.",
+        "note": "no offense taken.",
+        "choices": []
+      }
+    ]
+  }
+}
