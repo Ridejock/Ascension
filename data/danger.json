@@ -3,6 +3,7 @@
     "cap": 100,
     "graceSteps": 3,
     "curve": "square",
+    "cueJoin": " - ",
     "ratings": [
       { "tile": "floor", "rating": 0 },
       { "tile": "wall", "rating": 0 },
@@ -20,6 +21,128 @@
       { "at": 1, "text": "uneasy" },
       { "at": 25, "text": "wary" },
       { "at": 70, "text": "threatened" }
+    ],
+    "signs": [
+      {
+        "id": "meadow_prints",
+        "kind": "tracks",
+        "at": 16,
+        "tile": "grass",
+        "text": "prints",
+        "color": "#996838",
+        "marks": [{ "x": 4, "y": 82, "size": 14 }]
+      },
+      {
+        "id": "meadow_tracks",
+        "kind": "tracks",
+        "at": 36,
+        "tile": "grass",
+        "text": "tracks",
+        "color": "#996838",
+        "marks": [
+          { "x": 4, "y": 82, "size": 14 },
+          { "x": 82, "y": 80, "size": 12 }
+        ]
+      },
+      {
+        "id": "meadow_howl",
+        "kind": "howl",
+        "at": 48,
+        "tile": "grass",
+        "text": "a distant howl",
+        "steps": 2
+      },
+      {
+        "id": "meadow_stalked",
+        "kind": "hint",
+        "at": 56,
+        "tile": "grass",
+        "text": "stalked"
+      },
+      {
+        "id": "meadow_hunted",
+        "kind": "hint",
+        "at": 84,
+        "tile": "grass",
+        "text": "hunted"
+      },
+      {
+        "id": "forest_prints",
+        "kind": "tracks",
+        "at": 8,
+        "tile": "forest",
+        "text": "prints",
+        "color": "#B07A44",
+        "marks": [{ "x": 6, "y": 80, "size": 12 }]
+      },
+      {
+        "id": "forest_tracks",
+        "kind": "tracks",
+        "at": 32,
+        "tile": "forest",
+        "text": "tracks",
+        "color": "#B07A44",
+        "marks": [
+          { "x": 6, "y": 80, "size": 12 },
+          { "x": 82, "y": 4, "size": 12 }
+        ]
+      },
+      {
+        "id": "forest_howl",
+        "kind": "howl",
+        "at": 40,
+        "tile": "forest",
+        "text": "a howl",
+        "steps": 2
+      },
+      {
+        "id": "forest_hunted",
+        "kind": "hint",
+        "at": 48,
+        "tile": "forest",
+        "text": "hunted"
+      },
+      {
+        "id": "forest_close",
+        "kind": "hint",
+        "at": 72,
+        "tile": "forest",
+        "text": "close"
+      },
+      {
+        "id": "barrow_scuffs",
+        "kind": "tracks",
+        "at": 18,
+        "tile": "barrow_ground",
+        "text": "scuffs",
+        "color": "#1A1423",
+        "marks": [
+          { "x": 4, "y": 78, "size": 16 },
+          { "x": 80, "y": 82, "size": 14 }
+        ]
+      },
+      {
+        "id": "barrow_howl",
+        "kind": "howl",
+        "at": 36,
+        "tile": "barrow_ground",
+        "text": "a low howl",
+        "steps": 2
+      },
+      {
+        "id": "barrow_hunted",
+        "kind": "hint",
+        "at": 36,
+        "tile": "barrow_ground",
+        "text": "hunted"
+      },
+      {
+        "id": "barrow_cornered",
+        "kind": "hint",
+        "at": 70,
+        "tile": "barrow_ground",
+        "text": "cornered"
+      }
     ],
     "tables": [
       {
