@@ -192,14 +192,33 @@ const SystemSkillRule* RuleOnChain(const Database& data, std::string_view classI
     return nullptr;
 }
 
-i32 RarityOf(const Database& data, const ClassDef& owner)
+const ClassDef* RarityOwner(const Database& data, const ClassDef& owner)
 {
     const ClassDef* klass = &owner;
     if (klass->Rarity.empty() && klass->IsEvolution()) {
         if (const ClassDef* parent = ParentOf(data, *klass))
             klass = parent;
     }
-    return RarityFreePoints(data, klass->Rarity);
+    return klass;
+}
+
+i32 RarityOf(const Database& data, const ClassDef& owner)
+{
+    return RarityFreePoints(data, RarityOwner(data, owner)->Rarity);
+}
+
+void FillTitleFact(const SystemState& state, TitleFact& fact)
+{
+    fact.Owned = Listed(state.Titles, fact.Id);
+    fact.Equipped = false;
+    fact.Slot = -1;
+    for (i32 index = 0; index < static_cast<i32>(state.Equipped.size()); ++index) {
+        if (state.Equipped[static_cast<usize>(index)] != fact.Id)
+            continue;
+        fact.Equipped = true;
+        fact.Slot = index;
+        return;
+    }
 }
 
 } // namespace
@@ -334,10 +353,36 @@ bool EvolutionOffered(const SystemState& state, const ClassDef& evolution, i32 l
     return DeedMet(state, evolution.Meld);
 }
 
+i32 TitleSlotCount(const Database& data, std::string_view classId)
+{
+    const ClassDef* klass = data.FindClass(classId);
+    if (klass == nullptr)
+        return 0;
+    const ClassDef* owner = RarityOwner(data, *klass);
+    const RarityDef* rarity = data.FindRarity(owner->Rarity);
+    if (rarity == nullptr || rarity->TitleSlots < 0)
+        return 0;
+    return rarity->TitleSlots;
+}
+
+void ClampEquippedTitles(SystemState& state, const Database& data, std::string_view classId)
+{
+    std::vector<std::string> kept;
+    for (const std::string& id : state.Equipped) {
+        if (!Listed(state.Titles, id) || Listed(kept, id))
+            continue;
+        kept.push_back(id);
+    }
+    const i32 slots = TitleSlotCount(data, classId);
+    if (static_cast<i32>(kept.size()) > slots)
+        kept.resize(static_cast<usize>(slots < 0 ? 0 : slots));
+    state.Equipped = std::move(kept);
+}
+
 StatBlock TitleStatBonus(const Database& data, const SystemState& state)
 {
     StatBlock bonus;
-    for (const std::string& id : state.Titles) {
+    for (const std::string& id : state.Equipped) {
         const TitleDef* title = data.FindTitle(id);
         if (title == nullptr || title->Bonus.Stat.empty() || title->Bonus.Amount == 0)
             continue;
@@ -350,7 +395,7 @@ StatBlock TitleStatBonus(const Database& data, const SystemState& state)
 std::vector<TagDamage> TitleTagDamage(const Database& data, const SystemState& state)
 {
     std::vector<TagDamage> rows;
-    for (const std::string& id : state.Titles) {
+    for (const std::string& id : state.Equipped) {
         const TitleDef* title = data.FindTitle(id);
         if (title == nullptr || title->Bonus.DamagePercent == 0 || title->Bonus.Against.empty())
             continue;
@@ -360,6 +405,76 @@ std::vector<TagDamage> TitleTagDamage(const Database& data, const SystemState& s
         rows.push_back(std::move(row));
     }
     return rows;
+}
+
+std::vector<TitleFact> QueryTitles(const Database& data, const SystemState& state)
+{
+    std::vector<TitleFact> facts;
+    for (const TitleDef& title : data.GetTitles()) {
+        TitleFact fact;
+        fact.Id = title.Id;
+        fact.Name = title.Name;
+        fact.Description = title.Description;
+        fact.Bonus = title.Bonus;
+        FillTitleFact(state, fact);
+        facts.push_back(std::move(fact));
+    }
+    auto known = [&facts](std::string_view id) {
+        for (const TitleFact& fact : facts) {
+            if (fact.Id == id)
+                return true;
+        }
+        return false;
+    };
+    for (const std::string& id : state.Titles) {
+        if (known(id))
+            continue;
+        TitleFact fact;
+        fact.Id = id;
+        FillTitleFact(state, fact);
+        facts.push_back(std::move(fact));
+    }
+    for (const std::string& id : state.Equipped) {
+        if (known(id))
+            continue;
+        TitleFact fact;
+        fact.Id = id;
+        FillTitleFact(state, fact);
+        facts.push_back(std::move(fact));
+    }
+    return facts;
+}
+
+bool FindTitleFact(const Database& data, const SystemState& state, std::string_view id,
+                   TitleFact& out)
+{
+    if (id.empty())
+        return false;
+    if (const TitleDef* title = data.FindTitle(id)) {
+        out = {};
+        out.Id = title->Id;
+        out.Name = title->Name;
+        out.Description = title->Description;
+        out.Bonus = title->Bonus;
+        FillTitleFact(state, out);
+        return true;
+    }
+    if (!Listed(state.Titles, id) && !Listed(state.Equipped, id))
+        return false;
+    out = {};
+    out.Id = std::string(id);
+    FillTitleFact(state, out);
+    return true;
+}
+
+bool TitleOwned(const SystemState& state, std::string_view id)
+{
+    return Listed(state.Titles, id);
+}
+
+bool TitleIsEquipped(const SystemState& state, std::string_view id)
+{
+    return Listed(state.Equipped, id);
 }
 
 const SystemSkillRule* FindSystemSkillRule(const Database& data, std::string_view classId,
@@ -386,6 +501,48 @@ bool AcceptTitle(SystemState& state, const Database& data, std::string_view id, 
     state.TitleOffers = std::move(left);
     if (!Listed(state.Titles, id))
         state.Titles.emplace_back(id);
+    error.clear();
+    return true;
+}
+
+bool EquipTitle(SystemState& state, const Database& data, std::string_view classId,
+                std::string_view id, std::string& error)
+{
+    if (!Listed(state.Titles, id)) {
+        error = "title '" + std::string(id) + "' is not owned";
+        return false;
+    }
+    if (data.FindTitle(id) == nullptr) {
+        error = "title '" + std::string(id) + "' does not exist";
+        return false;
+    }
+    if (Listed(state.Equipped, id)) {
+        error = "title '" + std::string(id) + "' is already equipped";
+        return false;
+    }
+    ClampEquippedTitles(state, data, classId);
+    const i32 slots = TitleSlotCount(data, classId);
+    if (static_cast<i32>(state.Equipped.size()) >= slots) {
+        error = slots <= 0 ? "no title slot is open" : "every title slot is filled";
+        return false;
+    }
+    state.Equipped.emplace_back(id);
+    error.clear();
+    return true;
+}
+
+bool UnequipTitle(SystemState& state, std::string_view id, std::string& error)
+{
+    if (!Listed(state.Equipped, id)) {
+        error = "title '" + std::string(id) + "' is not equipped";
+        return false;
+    }
+    std::vector<std::string> left;
+    for (const std::string& worn : state.Equipped) {
+        if (worn != id)
+            left.push_back(worn);
+    }
+    state.Equipped = std::move(left);
     error.clear();
     return true;
 }

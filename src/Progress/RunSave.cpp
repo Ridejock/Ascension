@@ -454,6 +454,9 @@ void Store(const RunState& run, Emerald::SaveData& data)
     data.SetInt("title.count", static_cast<i32>(system.Titles.size()));
     for (i32 index = 0; index < static_cast<i32>(system.Titles.size()); ++index)
         data.SetString(Key("title", index, {}), system.Titles[static_cast<usize>(index)]);
+    data.SetInt("titleEquip.count", static_cast<i32>(system.Equipped.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.Equipped.size()); ++index)
+        data.SetString(Key("titleEquip", index, {}), system.Equipped[static_cast<usize>(index)]);
     data.SetInt("titleOffer.count", static_cast<i32>(system.TitleOffers.size()));
     for (i32 index = 0; index < static_cast<i32>(system.TitleOffers.size()); ++index)
         data.SetString(Key("titleOffer", index, {}), system.TitleOffers[static_cast<usize>(index)]);
@@ -633,6 +636,22 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
             return false;
         }
         system.Titles[static_cast<usize>(index)] = id;
+    }
+    if (!data.Has("titleEquip.count")) {
+        run.Career.EquippedLegacy = true;
+    } else {
+        const i32 equipped = data.GetInt("titleEquip.count", 0);
+        if (!CountOk(equipped, error))
+            return false;
+        system.Equipped.resize(static_cast<usize>(equipped));
+        for (i32 index = 0; index < equipped; ++index) {
+            const std::string id = data.GetString(Key("titleEquip", index, {}));
+            if (id.empty()) {
+                error = "the save's equipped titles are damaged";
+                return false;
+            }
+            system.Equipped[static_cast<usize>(index)] = id;
+        }
     }
     system.TitleOffers.resize(static_cast<usize>(titleOffers));
     for (i32 index = 0; index < titleOffers; ++index) {

@@ -46,8 +46,11 @@ struct CareerRecord {
     std::vector<AttributeSource> Sources;
     // The System ledger. FreeLegacy is set by a version 6 migration and is not written
     // back: Import snaps FreeFloor to the loaded level so those levels are not paid again.
+    // EquippedLegacy is set when the file has no titleEquip list. Import wears the owned
+    // titles in order, up to the class's slots, and the flag is not written back.
     SystemState System;
     bool FreeLegacy = false;
+    bool EquippedLegacy = false;
 };
 
 // The Fighter's career: XP, level, skill uses, and the evolution they picked. Skill ids and the
@@ -91,7 +94,22 @@ public:
     [[nodiscard]] const SystemState& System() const { return m_System; }
     [[nodiscard]] bool TitlePending() const { return !m_System.TitleOffers.empty(); }
     [[nodiscard]] std::vector<std::string> TitleOffers() const { return m_System.TitleOffers; }
+    // Owns the title. The bonus waits until it is equipped.
     bool AcceptTitle(std::string_view id, std::string& error);
+    // Wears an owned title in the next open slot of this class's rarity.
+    bool EquipTitle(std::string_view id, std::string& error);
+    // Takes a worn title off. It stays owned, and its bonus stops.
+    bool UnequipTitle(std::string_view id, std::string& error);
+    [[nodiscard]] i32 TitleSlots() const;
+    [[nodiscard]] std::vector<std::string> EquippedTitles() const { return m_System.Equipped; }
+    [[nodiscard]] bool OwnsTitle(std::string_view id) const { return TitleOwned(m_System, id); }
+    [[nodiscard]] bool TitleEquipped(std::string_view id) const {
+        return TitleIsEquipped(m_System, id);
+    }
+    // Catalog titles with this run's owned and equipped flags. Empty when the hero
+    // is not ready. Dialogue can read this later. It does not speak.
+    [[nodiscard]] std::vector<TitleFact> QueryTitles() const;
+    bool TitleFactFor(std::string_view id, TitleFact& out) const;
     [[nodiscard]] bool SystemSkillPending() const { return !m_System.SkillOffers.empty(); }
     [[nodiscard]] std::vector<std::string> SystemSkillOffers() const { return m_System.SkillOffers; }
     bool AcceptSystemSkill(std::string_view offerId, std::string& error);

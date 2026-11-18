@@ -385,6 +385,7 @@ struct Parsed {
     std::vector<StatusDef> Statuses;
     std::vector<ClassDef> Classes;
     std::vector<TitleDef> Titles;
+    TitleLabels Sheet;
     std::vector<EnemyDef> Enemies;
     std::vector<EncounterDef> Encounters;
     std::vector<ItemDef> Items;
@@ -1694,8 +1695,41 @@ bool ReadTitleBonus(const Json& object, TitleBonus& bonus, std::string& error)
     return true;
 }
 
+bool LoadTitleLabels(const Json& root, TitleLabels& labels, std::string& error)
+{
+    const auto sheet = root.find("sheet");
+    if (sheet == root.end() || !sheet->is_object()) {
+        error = "'sheet' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*sheet,
+                   {"equipped", "owned", "empty", "none", "open", "hint", "equipAsk", "unequipAsk",
+                    "equippedNote", "unequippedNote", "worn", "held"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireString(*sheet, "equipped", labels.Equipped, error) ||
+        !RequireString(*sheet, "owned", labels.Owned, error) ||
+        !RequireString(*sheet, "empty", labels.Empty, error) ||
+        !RequireString(*sheet, "none", labels.None, error) ||
+        !RequireString(*sheet, "open", labels.Open, error) ||
+        !RequireString(*sheet, "hint", labels.Hint, error) ||
+        !RequireString(*sheet, "equipAsk", labels.EquipAsk, error) ||
+        !RequireString(*sheet, "unequipAsk", labels.UnequipAsk, error) ||
+        !RequireString(*sheet, "equippedNote", labels.EquippedNote, error) ||
+        !RequireString(*sheet, "unequippedNote", labels.UnequippedNote, error) ||
+        !RequireString(*sheet, "worn", labels.Worn, error) ||
+        !RequireString(*sheet, "held", labels.Held, error))
+        return false;
+    return true;
+}
+
 bool LoadTitles(const Json& root, Parsed& parsed, std::string& error)
 {
+    if (!LoadTitleLabels(root, parsed.Sheet, error))
+        return false;
     const auto list = root.find("titles");
     if (list == root.end() || !list->is_array()) {
         error = "'titles' must be a list";
@@ -2528,7 +2562,9 @@ bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
             return false;
         }
         std::string unknown;
-        if (!AllowKeys(entry, {"id", "name", "color", "uniquePerType", "freePoints"}, unknown)) {
+        if (!AllowKeys(entry,
+                       {"id", "name", "color", "uniquePerType", "freePoints", "titleSlots"},
+                       unknown)) {
             error = where + ": unknown field " + Quote(unknown);
             return false;
         }
@@ -2551,7 +2587,8 @@ bool LoadRarities(const Json& root, Parsed& parsed, std::string& error)
             }
             rarity.UniquePerType = unique->get<bool>();
         }
-        if (!OptionalInt(entry, "freePoints", 0, 99, rarity.FreePoints, why)) {
+        if (!OptionalInt(entry, "freePoints", 0, 99, rarity.FreePoints, why) ||
+            !OptionalInt(entry, "titleSlots", 0, 99, rarity.TitleSlots, why)) {
             error = where + ": " + why;
             return false;
         }
@@ -5408,6 +5445,8 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         static_assert(std::size(allowedTop) == std::size(kFileNames));
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
+                            : std::string_view(names[i]) == "titles.json"
+                                ? AllowKeys(root, {"sheet", "titles"}, unknown)
                                 : AllowKeys(root, {allowedTop[i]}, unknown);
         if (!keysOk) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
@@ -5653,6 +5692,7 @@ bool Database::Load(DataError* error)
     m_Statuses = std::move(parsed.Statuses);
     m_Classes = std::move(parsed.Classes);
     m_Titles = std::move(parsed.Titles);
+    m_TitleLabels = std::move(parsed.Sheet);
     m_Enemies = std::move(parsed.Enemies);
     m_Encounters = std::move(parsed.Encounters);
     m_Items = std::move(parsed.Items);

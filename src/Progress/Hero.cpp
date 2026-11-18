@@ -55,6 +55,7 @@ bool Hero::ApplyData(std::string& error)
     }
     NoteLevelSteps();
     EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
+    ClampEquippedTitles(m_System, *m_Data, m_ClassId);
     error.clear();
     return true;
 }
@@ -169,6 +170,45 @@ bool Hero::AcceptTitle(std::string_view id, std::string& error)
         return false;
     }
     return Ascension::AcceptTitle(m_System, *m_Data, id, error);
+}
+
+bool Hero::EquipTitle(std::string_view id, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the hero is not ready";
+        return false;
+    }
+    return Ascension::EquipTitle(m_System, *m_Data, m_ClassId, id, error);
+}
+
+bool Hero::UnequipTitle(std::string_view id, std::string& error)
+{
+    if (m_Data == nullptr) {
+        error = "the hero is not ready";
+        return false;
+    }
+    return Ascension::UnequipTitle(m_System, id, error);
+}
+
+i32 Hero::TitleSlots() const
+{
+    if (m_Data == nullptr)
+        return 0;
+    return TitleSlotCount(*m_Data, m_ClassId);
+}
+
+std::vector<TitleFact> Hero::QueryTitles() const
+{
+    if (m_Data == nullptr)
+        return {};
+    return Ascension::QueryTitles(*m_Data, m_System);
+}
+
+bool Hero::TitleFactFor(std::string_view id, TitleFact& out) const
+{
+    if (m_Data == nullptr)
+        return false;
+    return FindTitleFact(*m_Data, m_System, id, out);
 }
 
 bool Hero::AcceptSystemSkill(std::string_view offerId, std::string& error)
@@ -350,8 +390,10 @@ bool Hero::Choose(std::string_view evolutionId, std::string& error)
         return false;
     }
     m_ClassId = std::string(evolutionId);
-    if (m_Data != nullptr)
+    if (m_Data != nullptr) {
         EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
+        ClampEquippedTitles(m_System, *m_Data, m_ClassId);
+    }
     if (m_Custom && m_Data != nullptr) {
         const ClassDef* evolved = m_Data->FindClass(m_ClassId);
         if (evolved != nullptr) {
@@ -388,8 +430,10 @@ bool Hero::ResetBuild(std::string& error)
     m_Picked.clear();
     m_System.GrantedSkills.clear();
     m_System.SkillOffers.clear();
-    if (m_Data != nullptr)
+    if (m_Data != nullptr) {
         EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
+        ClampEquippedTitles(m_System, *m_Data, m_ClassId);
+    }
     error.clear();
     return true;
 }
@@ -425,8 +469,10 @@ bool Hero::ChooseStarter(std::string_view classId, std::string& error)
     m_ClassId = picked;
     m_SpendId = picked;
     m_ChoosingStarter = false;
-    if (m_Data != nullptr)
+    if (m_Data != nullptr) {
         EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
+        ClampEquippedTitles(m_System, *m_Data, m_ClassId);
+    }
     bool listed = false;
     for (const AttributeSource& source : m_ClassSources) {
         if (source.Id == picked)
@@ -462,6 +508,7 @@ bool Hero::AdoptStarter(std::string_view classId, std::string& error)
         m_Picked.clear();
     }
     EvaluateSystem(m_System, *m_Data, m_ClassId, Level());
+    ClampEquippedTitles(m_System, *m_Data, m_ClassId);
     error.clear();
     return true;
 }
@@ -688,6 +735,7 @@ void Hero::ExportCareer(CareerRecord& out) const
     }
     out.System = m_System;
     out.FreeLegacy = false;
+    out.EquippedLegacy = false;
 }
 
 bool Hero::ImportCareer(const CareerRecord& in, std::string& error)
@@ -740,6 +788,16 @@ bool Hero::ImportCareer(const CareerRecord& in, std::string& error)
         m_System.FreeFloor = 1;
     if (in.FreeLegacy)
         m_System.FreeFloor = Level();
+    if (in.EquippedLegacy) {
+        const std::vector<std::string> owned = m_System.Titles;
+        m_System.Equipped.clear();
+        for (const std::string& id : owned) {
+            std::string ignored;
+            if (!Ascension::EquipTitle(m_System, *m_Data, m_ClassId, id, ignored) &&
+                static_cast<i32>(m_System.Equipped.size()) >= TitleSlotCount(*m_Data, m_ClassId))
+                break;
+        }
+    }
     return ApplyData(error);
 }
 

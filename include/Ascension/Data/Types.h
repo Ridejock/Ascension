@@ -310,7 +310,9 @@ struct SystemSkillRule {
 };
 
 // A flat title bonus. Stat, when set, is one of the six primaries. DamagePercent is added
-// to damage dealt against a foe that carries Against. Titles have no rarity and do not evolve.
+// to damage dealt against a foe that carries Against. The bonus applies only while the
+// title is equipped. Titles have no rarity and do not evolve. How many can be worn is
+// the class rarity's titleSlots.
 struct TitleBonus {
     std::string Stat;
     i32 Amount = 0;
@@ -324,6 +326,23 @@ struct TitleDef {
     std::string Description;
     DeedDef Deed;
     TitleBonus Bonus;
+};
+
+// Words for the title sheet in titles.json. EquipAsk, UnequipAsk, EquippedNote, and
+// UnequippedNote may contain {name}, which the sheet replaces with the title's name.
+struct TitleLabels {
+    std::string Equipped;
+    std::string Owned;
+    std::string Empty;
+    std::string None;
+    std::string Open;
+    std::string Hint;
+    std::string EquipAsk;
+    std::string UnequipAsk;
+    std::string EquippedNote;
+    std::string UnequippedNote;
+    std::string Worn;
+    std::string Held;
 };
 
 // Extra damage the attacker deals when the defender carries Tag. The fight adds these
@@ -504,6 +523,9 @@ struct RarityDef {
     // Free stat points a class of this rarity earns on each level step, on top of the
     // class growth. Items ignore it. 0 is the default, so a row that omits it changes nothing.
     i32 FreePoints = 0;
+    // How many titles a class of this rarity can wear. A row that omits it wears none.
+    // Items ignore it. Only an equipped title grants its bonus.
+    i32 TitleSlots = 0;
 };
 
 struct ItemDef {
