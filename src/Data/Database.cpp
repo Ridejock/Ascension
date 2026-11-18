@@ -2751,6 +2751,135 @@ bool PlainTalkText(std::string_view text, std::string& error)
     return true;
 }
 
+// A titleSense line may name the fact's name and description. Any other brace is a
+// typo, the same way a skill description rejects a field it does not have.
+bool TitleSensePlaceholders(std::string_view text, std::string& error)
+{
+    std::string_view rest = text;
+    while (!rest.empty()) {
+        const usize open = rest.find('{');
+        if (open == std::string_view::npos)
+            return true;
+        const usize close = rest.find('}', open);
+        if (close == std::string_view::npos) {
+            error = "a placeholder must close";
+            return false;
+        }
+        const std::string token(rest.substr(open, close - open + 1));
+        if (token != "{title.name}" && token != "{title.description}") {
+            error = "unknown placeholder " + token;
+            return false;
+        }
+        rest.remove_prefix(close + 1);
+    }
+    return true;
+}
+
+bool ReadTitleSenseLine(const Json& entry, const Parsed& parsed, TitleSenseLine& line,
+                        std::string& error)
+{
+    if (!entry.is_object()) {
+        error = "line entries must be objects";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(entry, {"line", "titleEquipped", "titleOwned", "anyTitleEquipped", "fallback"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireString(entry, "line", line.Line, error))
+        return false;
+    if (!TitleSensePlaceholders(line.Line, error))
+        return false;
+    const bool equipped = entry.contains("titleEquipped");
+    const bool owned = entry.contains("titleOwned");
+    const bool anyWorn = entry.contains("anyTitleEquipped");
+    const bool fallback = entry.contains("fallback");
+    const int conditions =
+        static_cast<int>(equipped) + static_cast<int>(owned) + static_cast<int>(anyWorn) +
+        static_cast<int>(fallback);
+    if (conditions != 1) {
+        error = "needs one of titleEquipped, titleOwned, anyTitleEquipped, or fallback";
+        return false;
+    }
+    if (equipped || owned) {
+        const char* key = equipped ? "titleEquipped" : "titleOwned";
+        if (!entry[key].is_string()) {
+            error = std::string("'") + key + "' must be a title id";
+            return false;
+        }
+        line.TitleId = entry[key].get<std::string>();
+        line.When = equipped ? TitleSenseWhen::Equipped : TitleSenseWhen::Owned;
+        if (!IsId(line.TitleId)) {
+            error = std::string("'") + key + "' must be a title id";
+            return false;
+        }
+        if (FindId(parsed.Titles, line.TitleId) == nullptr) {
+            error = "title " + Quote(line.TitleId) + " does not exist";
+            return false;
+        }
+        return true;
+    }
+    if (anyWorn) {
+        if (!entry["anyTitleEquipped"].is_boolean() || !entry["anyTitleEquipped"].get<bool>()) {
+            error = "'anyTitleEquipped' must be true";
+            return false;
+        }
+        line.When = TitleSenseWhen::AnyEquipped;
+        return true;
+    }
+    if (!entry["fallback"].is_boolean() || !entry["fallback"].get<bool>()) {
+        error = "'fallback' must be true";
+        return false;
+    }
+    line.When = TitleSenseWhen::Fallback;
+    return true;
+}
+
+// Missing titleSense means this NPC does not remark. The block names the lines in the
+// order they are tried. A fallback is the else, so it has to be last.
+bool ReadTitleSense(const Json& body, const Parsed& parsed, TitleSense& sense, std::string& error)
+{
+    const auto block = body.find("titleSense");
+    if (block == body.end())
+        return true;
+    if (!block->is_object()) {
+        error = "'titleSense' must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(*block, {"lines"}, unknown)) {
+        error = "titleSense: unknown field " + Quote(unknown);
+        return false;
+    }
+    const auto lines = block->find("lines");
+    if (lines == block->end() || !lines->is_array()) {
+        error = "titleSense: 'lines' must be a list";
+        return false;
+    }
+    if (lines->empty()) {
+        error = "titleSense: 'lines' must list at least one line";
+        return false;
+    }
+    bool sawFallback = false;
+    for (const Json& entry : *lines) {
+        if (sawFallback) {
+            error = "titleSense: fallback must be the last line";
+            return false;
+        }
+        TitleSenseLine line;
+        if (!ReadTitleSenseLine(entry, parsed, line, error)) {
+            error = "titleSense: " + error;
+            return false;
+        }
+        if (line.When == TitleSenseWhen::Fallback)
+            sawFallback = true;
+        sense.Lines.push_back(std::move(line));
+    }
+    return true;
+}
+
 bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed, std::string& error)
 {
     const auto body = root.find("dialogue");
@@ -2759,7 +2888,7 @@ bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed,
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body, {"id", "nodes"}, unknown)) {
+    if (!AllowKeys(*body, {"id", "titleSense", "nodes"}, unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
@@ -2778,6 +2907,8 @@ bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed,
         error = "there is another dialogue with this id";
         return false;
     }
+    if (!ReadTitleSense(*body, parsed, talk.Sense, error))
+        return false;
     const auto nodes = body->find("nodes");
     if (nodes == body->end() || !nodes->is_array()) {
         error = "'nodes' must be a list";

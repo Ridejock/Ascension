@@ -107,7 +107,7 @@ public:
         return TitleIsEquipped(m_System, id);
     }
     // Catalog titles with this run's owned and equipped flags. Empty when the hero
-    // is not ready. Dialogue can read this later. It does not speak.
+    // is not ready. Dialogue reads the facts. A missing id is not one of them.
     [[nodiscard]] std::vector<TitleFact> QueryTitles() const;
     bool TitleFactFor(std::string_view id, TitleFact& out) const;
     [[nodiscard]] bool SystemSkillPending() const { return !m_System.SkillOffers.empty(); }

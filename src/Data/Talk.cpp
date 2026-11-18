@@ -27,6 +27,116 @@ bool ListHas(const TalkFacts& facts, std::string_view name, std::string_view id)
     return false;
 }
 
+bool HasToken(std::string_view line, std::string_view token)
+{
+    return line.find(token) != std::string_view::npos;
+}
+
+const TitleFact* FactWithId(std::span<const TitleFact> facts, std::string_view id)
+{
+    if (id.empty())
+        return nullptr;
+    for (const TitleFact& fact : facts) {
+        if (fact.Id == id)
+            return &fact;
+    }
+    return nullptr;
+}
+
+// The worn title in the earliest slot. An empty name is skipped when the line would
+// have to print that name, because the id is not a name.
+const TitleFact* ProminentWorn(std::span<const TitleFact> facts, bool needName)
+{
+    const TitleFact* best = nullptr;
+    for (const TitleFact& fact : facts) {
+        if (!fact.Equipped || fact.Slot < 0)
+            continue;
+        if (needName && fact.Name.empty())
+            continue;
+        if (best == nullptr || fact.Slot < best->Slot)
+            best = &fact;
+    }
+    return best;
+}
+
+struct SensePick {
+    bool Match = false;
+    const TitleFact* Fact = nullptr;
+};
+
+SensePick PickSenseLine(const TitleSenseLine& line, std::span<const TitleFact> facts)
+{
+    SensePick pick;
+    const bool needsName = HasToken(line.Line, "{title.name}");
+    const bool needsFact = needsName || HasToken(line.Line, "{title.");
+    if (line.When == TitleSenseWhen::Fallback && !needsFact) {
+        pick.Match = true;
+        pick.Fact = ProminentWorn(facts, false);
+        return pick;
+    }
+    const TitleFact* fact = nullptr;
+    if (line.When == TitleSenseWhen::Equipped || line.When == TitleSenseWhen::Owned) {
+        fact = FactWithId(facts, line.TitleId);
+        if (fact == nullptr)
+            return pick;
+        if (line.When == TitleSenseWhen::Equipped) {
+            if (!fact->Equipped || fact->Slot < 0)
+                return pick;
+        } else if (!fact->Owned) {
+            return pick;
+        }
+    } else if (line.When == TitleSenseWhen::AnyEquipped || line.When == TitleSenseWhen::Fallback) {
+        fact = ProminentWorn(facts, needsName);
+        if (fact == nullptr)
+            return pick;
+    } else {
+        return pick;
+    }
+    if (fact == nullptr || (needsName && fact->Name.empty()))
+        return pick;
+    pick.Match = true;
+    pick.Fact = fact;
+    return pick;
+}
+
+// False when a brace is not {title.name} or {title.description}, or when {title.name}
+// has nothing to print. The id is never copied in.
+bool FillTitleLine(std::string_view pattern, const TitleFact* fact, std::string& out)
+{
+    out.clear();
+    std::string_view rest = pattern;
+    while (!rest.empty()) {
+        const usize open = rest.find('{');
+        if (open == std::string_view::npos) {
+            out.append(rest);
+            break;
+        }
+        out.append(rest.substr(0, open));
+        rest.remove_prefix(open + 1);
+        const usize close = rest.find('}');
+        if (close == std::string_view::npos)
+            return false;
+        const std::string_view key = rest.substr(0, close);
+        rest.remove_prefix(close + 1);
+        if (key == "title.name") {
+            if (fact == nullptr || fact->Name.empty())
+                return false;
+            out.append(fact->Name);
+        } else if (key == "title.description") {
+            if (fact == nullptr)
+                return false;
+            out.append(fact->Description);
+        } else {
+            return false;
+        }
+    }
+    for (const char c : out) {
+        if (c != ' ' && c != '/')
+            return true;
+    }
+    return false;
+}
+
 void WrapPiece(std::string_view piece, i32 width, std::vector<std::string>& out)
 {
     std::string_view rest = piece;
@@ -169,6 +279,25 @@ void TalkBoxLines(std::string_view line, i32 width, std::vector<std::string>& ou
             return;
         rest.remove_prefix(slash + 1);
     }
+}
+
+TitleSenseMatch ResolveTitleSense(const TitleSense& sense, std::span<const TitleFact> facts)
+{
+    TitleSenseMatch match;
+    for (const TitleSenseLine& line : sense.Lines) {
+        const SensePick pick = PickSenseLine(line, facts);
+        if (!pick.Match)
+            continue;
+        std::string spoken;
+        if (!FillTitleLine(line.Line, pick.Fact, spoken))
+            continue;
+        match.Spoken = true;
+        match.Line = std::move(spoken);
+        if (pick.Fact != nullptr)
+            match.TitleId = pick.Fact->Id;
+        return match;
+    }
+    return match;
 }
 
 } // namespace Ascension

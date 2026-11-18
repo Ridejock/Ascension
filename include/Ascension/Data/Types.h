@@ -603,9 +603,27 @@ struct DialogueNode {
     std::vector<DialogueChoice> Choices;
 };
 
-// One NPC file under data/dialogue/. Id matches the file name.
+// How one titleSense line decides it is the remark. Equipped and Owned name a catalog
+// title. AnyEquipped is whatever title is worn in the earliest slot. Fallback is the
+// else, and the file puts it last. Worn titles are what another person notices. Owned
+// still sees a title that is not being worn, and that check stays rare.
+enum class TitleSenseWhen : u8 { Equipped, Owned, AnyEquipped, Fallback };
+
+struct TitleSenseLine {
+    TitleSenseWhen When = TitleSenseWhen::Fallback;
+    std::string TitleId;
+    std::string Line;
+};
+
+struct TitleSense {
+    std::vector<TitleSenseLine> Lines;
+};
+
+// One NPC file under data/dialogue/. Id matches the file name. Sense, when it has
+// lines, is the remark this NPC makes about a title. It does not pick the start node.
 struct DialogueDef {
     std::string Id;
+    TitleSense Sense;
     std::vector<DialogueNode> Nodes;
 
     [[nodiscard]] const DialogueNode* FindNode(std::string_view id) const;

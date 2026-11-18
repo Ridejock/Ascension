@@ -47,8 +47,9 @@ struct SystemState {
 };
 
 // One catalog title as this run wears it. Slot is the equipped index, or -1 when it is
-// not worn. A future dialogue line can read Owned, Equipped, and the name. This does
-// not speak. An owned id whose row is gone keeps the id and leaves the name empty.
+// not worn. Dialogue reads Owned, Equipped, Name, and Description from this fact. It
+// does not turn the id into words. An owned id whose row is gone keeps the id and
+// leaves the name empty.
 struct TitleFact {
     std::string Id;
     std::string Name;
@@ -107,7 +108,8 @@ void ClampEquippedTitles(SystemState& state, const Database& data, std::string_v
 [[nodiscard]] std::vector<TagDamage> TitleTagDamage(const Database& data, const SystemState& state);
 
 // Every catalog title, in file order, then any owned or equipped id the catalog no
-// longer has. Equipped and Slot describe this run.
+// longer has. Equipped and Slot describe this run. An id that is not returned is
+// not a fact.
 [[nodiscard]] std::vector<TitleFact> QueryTitles(const Database& data, const SystemState& state);
 // False when `id` is not a catalog title and this run does not own or wear it.
 bool FindTitleFact(const Database& data, const SystemState& state, std::string_view id,
