@@ -45,6 +45,7 @@ protected:
     [[nodiscard]] std::string CurrentMapId() const;
 
 private:
+    void ReportGalleryFault();
     void BeginFight();
     // Starts the battle at the hero's carried HP and focus. A lone Start() fills both;
     // this path is the one the encounter list uses.
@@ -290,6 +291,9 @@ private:
     Emerald::AssetHandle<Emerald::Texture> m_Accents;
     // Empty when this launch has no art pack. Drawing then stays on the CC0 art.
     ArtGallery m_Gallery;
+    // Set after the first frame is drawn. Background uploads wait until then, so
+    // the first present is not behind the rest of the pack.
+    bool m_Presented = false;
     PackPlay m_PackPlay;
     // The hero is walking a map. A launch with no --enemy opens the hub (or --map
     // when that was passed). --enemy stays on the fight screen.

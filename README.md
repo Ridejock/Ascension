@@ -93,6 +93,7 @@ ctest --preset debug
 | `prompts.json` | Button glyphs per device family, and the icon and text scales for hint rows |
 | `battle_ui.json` | Type size, color, spacing, panels, and message hold for the fight screen. The shop uses the same type and color |
 | `shop_ui.json` | How many shop rows are on screen, the icon scale, and the gap between the bag and the stock |
+| `gallery.json` | How many pack pictures upload in the background each frame (`uploadsPerFrame`, `budgetMilliseconds`) and the section `order`. A picture on screen uploads on that frame |
 
 Pad buttons are positional, so the same `input.json` row is A on Xbox, Cross on PlayStation, and B on a Switch. Keyboard `I` stays Interact and `E` stays Confirm. `A` on the keyboard is MoveWest.
 
@@ -278,6 +279,8 @@ South of the inn, on the grass at the gap in the trees, is Bram. `i` talks. "I'l
 ## Art pack
 
 Place `artpack/ascension.pak` next to the executable, or pass `--art-pack` with that file (or with a folder that contains it). The pak is one APAK v1 file. Emerald reads it. The game asks for `manifest.json` and for each picture, font, and sound. Nothing is unpacked onto disk.
+
+Startup records the pictures and does not upload them. The frame that draws a picture uploads that picture first, so the frame matches a pack that was uploaded ahead of time. Pictures that are not on screen yet upload a few at a time. `gallery.json` sets how many (`uploadsPerFrame`) and how long that pass may run (`budgetMilliseconds`). Either value at 0 waits until a draw needs the picture. `order` is the background sequence: a section left out follows the ones that are listed.
 
 Without the file, the game stays on the built-in CC0 art, the debug font, and silence. A missing default file is not an error. An id the manifest does not list stays on that built-in art. A bad header, table, CRC, or manifest stops startup and names the file and the field.
 

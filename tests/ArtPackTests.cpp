@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Ascension/Data/ArtPack.h"
+#include "ArtGallery.h"
 #include "Check.h"
 
 namespace {
@@ -732,6 +733,88 @@ void TestPak(const Database& data, const PackDir& dir)
     CheckHas(error, "manifest.json", "a bad slice names the manifest");
 }
 
+void TestGalleryBudget(const PackDir& dir)
+{
+    GalleryBudget missing;
+    std::string error;
+    const fs::path empty = dir.Path / "empty-data";
+    std::error_code code;
+    fs::create_directories(empty, code);
+    Check(LoadGalleryBudget(empty, missing, error), "a missing gallery.json keeps the defaults");
+    Check(missing.UploadsPerFrame == 8, "the default background count is 8");
+    Check(missing.BudgetMilliseconds == 4, "the default background budget is 4 ms");
+    Check(!missing.Order.empty() && missing.Order.front() == "fonts", "fonts stream first by default");
+
+    WriteText(dir.Path / "tuned" / "gallery.json",
+              "{\n"
+              "  \"gallery\": {\n"
+              "    \"uploadsPerFrame\": 0,\n"
+              "    \"budgetMilliseconds\": 12,\n"
+              "    \"order\": [\"tiles\", \"ui\"]\n"
+              "  }\n"
+              "}\n");
+    GalleryBudget tuned;
+    Check(LoadGalleryBudget(dir.Path / "tuned", tuned, error), "a gallery budget loads");
+    Check(tuned.UploadsPerFrame == 0, "zero uploads turns the background stream off");
+    Check(tuned.BudgetMilliseconds == 12, "the millisecond budget is kept");
+    Check(tuned.Order.size() >= 2 && tuned.Order[0] == "tiles" && tuned.Order[1] == "ui",
+          "the listed sections stay in front");
+    Check(!tuned.Order.empty() && tuned.Order.back() == "vfx", "a section left out is appended");
+
+    WriteText(dir.Path / "bad-gallery" / "gallery.json", "{ \"gallery\": { \"uploads\": 1 } }\n");
+    GalleryBudget bad;
+    Check(!LoadGalleryBudget(dir.Path / "bad-gallery", bad, error), "an unknown gallery field fails");
+    CheckHas(error, "uploads", "the unknown field is named");
+    CheckHas(error, "gallery.json", "the file is named");
+
+    WriteText(dir.Path / "repeat-gallery" / "gallery.json",
+              "{ \"gallery\": { \"order\": [\"ui\", \"ui\"] } }\n");
+    Check(!LoadGalleryBudget(dir.Path / "repeat-gallery", bad, error), "a repeated section fails");
+    CheckHas(error, "repeated", "the repeat is named");
+
+    GalleryBudget shipped;
+    Check(LoadGalleryBudget(ASCENSION_SHIPPED_DATA_DIR, shipped, error), "data/gallery.json loads");
+    if (!error.empty())
+        std::printf("    message was: %s\n", error.c_str());
+    Check(shipped.UploadsPerFrame > 0 && shipped.BudgetMilliseconds > 0,
+          "the shipped budget streams");
+}
+
+void TestGalleryDefers(const Database& data, const PackDir& dir)
+{
+    const fs::path root = dir.Path / "defer";
+    WritePng(root / "tiles" / "floor.png");
+    WritePng(root / "ui" / "panel.png");
+    WriteText(root / "manifest.json",
+              "{\n"
+              "  \"tiles\": [ { \"id\": \"floor\", \"file\": \"tiles/floor.png\" } ],\n"
+              "  \"ui\": { \"nineslice\": { \"panel\": { \"file\": \"ui/panel.png\", \"border_px\": 4 } } }\n"
+              "}\n");
+    ArtPack pack;
+    std::string error;
+    Check(LoadPack(root, data, pack, error), "a two-picture pack loads");
+    if (!error.empty())
+        std::printf("    message was: %s\n", error.c_str());
+    GalleryBudget budget;
+    budget.UploadsPerFrame = 0;
+    budget.BudgetMilliseconds = 0;
+    budget.Order = {"ui", "tiles"};
+    ArtGallery gallery;
+    Check(gallery.Load(nullptr, nullptr, pack, budget, error), "the gallery catalogues without a device");
+    Check(error.empty(), "cataloguing clears the error");
+    Check(gallery.Pending() == 2, "both pictures wait");
+    Check(gallery.Resident() == 0, "nothing is uploaded at startup");
+    Check(!gallery.IsEmpty(), "a catalogued pack is not the built-in art");
+    gallery.Pump();
+    Check(gallery.Resident() == 0, "a zero budget does not upload");
+    const std::vector<fs::path> order = gallery.UploadOrder();
+    Check(order.size() == 2, "the queue lists both files");
+    if (order.size() == 2) {
+        Check(order[0].filename() == "panel.png", "ui is ahead of tiles");
+        Check(order[1].filename() == "floor.png", "the tile follows the panel");
+    }
+}
+
 } // namespace
 
 int main()
@@ -755,6 +838,8 @@ int main()
     TestMarkers(data, dir);
     TestProps(data, dir);
     TestPak(data, dir);
+    TestGalleryBudget(dir);
+    TestGalleryDefers(data, dir);
     std::printf("%s: %d failure(s)\n", g_Failures == 0 ? "Passed" : "Failed", g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
