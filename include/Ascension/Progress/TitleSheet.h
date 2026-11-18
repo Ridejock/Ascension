@@ -120,7 +120,7 @@ inline void ClampTitleSheet(TitleSheet& sheet, i32 slots, i32 owned)
         if (sheet.Column == 0) {
             if (sheet.Row >= 0 && sheet.Row < equipped)
                 sheet.Ask = TitleAsk::Unequip;
-        } else if (sheet.Row >= 0 && sheet.Row < owned) {
+        } else if (sheet.Row >= 0 && sheet.Row < owned && equipped < slots) {
             sheet.Ask = TitleAsk::Equip;
         }
         return TitleSheetStep::None;

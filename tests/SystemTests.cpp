@@ -680,6 +680,13 @@ void TestTitleSheet()
     Check(ApplyTitleSheet(sheet, kConfirm, 2, 1, 0) == TitleSheetStep::None &&
               sheet.Ask == TitleAsk::None,
           "an empty slot does not arm take-off");
+    sheet.Open = true;
+    sheet.Column = 1;
+    sheet.Row = 0;
+    sheet.Ask = TitleAsk::None;
+    Check(ApplyTitleSheet(sheet, kConfirm, 1, 1, 1) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::None,
+          "a full bar does not arm equip");
     Check(ApplyTitleSheet(sheet, kCancel, 2, 1, 0) == TitleSheetStep::Back && !sheet.Open,
           "cancel from the sheet returns to camp");
     sheet.Open = true;
