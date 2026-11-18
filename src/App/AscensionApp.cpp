@@ -1,6 +1,7 @@
 #include "AscensionApp.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <string>
 
@@ -9,6 +10,7 @@
 #include "MapView.h"
 #include "SourceTag.h"
 
+#include "Emerald/Core/Log.h"
 #include "Emerald/Input/InputBindings.h"
 #include "Emerald/Math/Mat4.h"
 #include "Emerald/Renderer/DebugText.h"
@@ -1638,8 +1640,17 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     return true;
 }
 
+namespace {
+
+std::chrono::steady_clock::time_point g_Boot;
+bool g_NotedFrame = false;
+
+} // namespace
+
 void AscensionApp::OnStart()
 {
+    g_Boot = std::chrono::steady_clock::now();
+    g_NotedFrame = false;
     if (!m_Play.Transcript.empty()) {
         m_Transcript.open(m_Play.Transcript, std::ios::app);
         if (!m_Transcript) {
@@ -1659,9 +1670,19 @@ void AscensionApp::OnStart()
         }
         return;
     }
+    GalleryBudget budget;
+    std::string budgetWhy;
+    if (!LoadGalleryBudget(m_Data.GetDirectory(), budget, budgetWhy)) {
+        m_StartError = std::move(budgetWhy);
+        std::fprintf(stderr, "%s\n", m_StartError.c_str());
+        Note(m_StartError);
+        Quit();
+        return;
+    }
     if (!m_Play.ArtPackDir.empty()) {
         ArtPack pack;
         DataError packError;
+        const auto packStart = std::chrono::steady_clock::now();
         if (!pack.Load(m_Play.ArtPackDir, m_Data, &packError)) {
             m_StartError =
                 packError.Message.empty() ? "could not load art pack" : packError.Message;
@@ -1670,8 +1691,12 @@ void AscensionApp::OnStart()
             Quit();
             return;
         }
+        const double packMs = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - packStart)
+                                  .count();
+        EM_INFO("art pack loaded in {:.1f} ms ({} rows)", packMs, pack.GetImages().size());
         std::string packWhy;
-        if (!m_Gallery.Load(GetAssets(), GetRenderer().GetDevice(), pack, packWhy)) {
+        if (!m_Gallery.Load(&GetAssets(), GetRenderer().GetDevice(), pack, budget, packWhy)) {
             m_StartError = std::move(packWhy);
             std::fprintf(stderr, "%s\n", m_StartError.c_str());
             Note(m_StartError);
@@ -3527,8 +3552,21 @@ std::string AscensionApp::CurrentMapId() const
     return m_PlaceMap;
 }
 
+void AscensionApp::ReportGalleryFault()
+{
+    if (m_Gallery.Fault().empty() || !m_StartError.empty())
+        return;
+    m_StartError = m_Gallery.Fault();
+    std::fprintf(stderr, "%s\n", m_StartError.c_str());
+    Note(m_StartError);
+    Quit();
+}
+
 void AscensionApp::OnUpdate(f32 dt)
 {
+    if (m_Presented)
+        m_Gallery.Pump();
+    ReportGalleryFault();
     m_Gallery.Advance(dt);
     const bool fighting = m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing;
     const bool victory = m_Battle != nullptr && m_Battle->Result() == BattleResult::Victory;
@@ -4682,6 +4720,27 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
 
 void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 {
+    auto reportFault = [this]() { ReportGalleryFault(); };
+    struct FaultGuard {
+        decltype(reportFault)* Fn;
+        ~FaultGuard() { (*Fn)(); }
+    } faultGuard{&reportFault};
+    auto noteFrame = [this]() {
+        m_Presented = true;
+        if (g_NotedFrame)
+            return;
+        g_NotedFrame = true;
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_Boot)
+                .count();
+        EM_INFO("first frame {:.1f} ms, gallery pending {} resident {} on demand {} upload {:.1f} ms",
+                ms, m_Gallery.Pending(), m_Gallery.Resident(), m_Gallery.OnDemand(),
+                m_Gallery.UploadMilliseconds());
+    };
+    struct NoteGuard {
+        decltype(noteFrame)* Fn;
+        ~NoteGuard() { (*Fn)(); }
+    } noteGuard{&noteFrame};
     g_PackGallery = &m_Gallery;
     const Emerald::Vec2i pixels = GetWindowSizeInPixels();
     if (pixels.x <= 0 || pixels.y <= 0)

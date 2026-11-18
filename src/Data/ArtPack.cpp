@@ -1899,4 +1899,103 @@ bool DiscoverArtPack(std::filesystem::path& requested,
     return true;
 }
 
+bool LoadGalleryBudget(const std::filesystem::path& directory, GalleryBudget& out, std::string& error)
+{
+    constexpr const char* kSections[] = {
+        "fonts", "ui",     "icons", "tiles", "markers", "props",
+        "heroes", "npcs",  "foes",  "items", "backdrops", "vfx",
+    };
+    auto known = [&](std::string_view name) {
+        for (const char* section : kSections) {
+            if (name == section)
+                return true;
+        }
+        return false;
+    };
+    auto finish = [&](GalleryBudget& budget) {
+        std::vector<std::string> order = budget.Order;
+        for (const char* section : kSections) {
+            bool found = false;
+            for (const std::string& name : order) {
+                if (name == section)
+                    found = true;
+            }
+            if (!found)
+                order.emplace_back(section);
+        }
+        budget.Order = std::move(order);
+    };
+
+    out = {};
+    finish(out);
+    const std::filesystem::path path = directory / "gallery.json";
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(path, missing) || missing) {
+        error.clear();
+        return true;
+    }
+    std::string text;
+    std::string why;
+    if (!ReadText(path, text, why)) {
+        error = "gallery.json: " + why;
+        return false;
+    }
+    Json root;
+    if (!ParseRoot(text, root, why)) {
+        error = "gallery.json: " + why;
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(root, {"gallery"}, unknown)) {
+        error = "gallery.json: unknown field " + Quote(unknown);
+        return false;
+    }
+    const auto body = root.find("gallery");
+    if (body == root.end() || !body->is_object()) {
+        error = "gallery.json: 'gallery' must be an object";
+        return false;
+    }
+    if (!AllowKeys(*body, {"uploadsPerFrame", "budgetMilliseconds", "order"}, unknown)) {
+        error = "gallery.json: unknown field " + Quote(unknown);
+        return false;
+    }
+    GalleryBudget parsed;
+    parsed.UploadsPerFrame = out.UploadsPerFrame;
+    parsed.BudgetMilliseconds = out.BudgetMilliseconds;
+    if (!OptionalInt(*body, "uploadsPerFrame", 0, 100000, parsed.UploadsPerFrame, why) ||
+        !OptionalInt(*body, "budgetMilliseconds", 0, 1000, parsed.BudgetMilliseconds, why)) {
+        error = "gallery.json: " + why;
+        return false;
+    }
+    const auto listed = body->find("order");
+    if (listed != body->end()) {
+        if (!listed->is_array()) {
+            error = "gallery.json: 'order' must be a list";
+            return false;
+        }
+        for (const Json& entry : *listed) {
+            if (!entry.is_string()) {
+                error = "gallery.json: 'order' entries must be strings";
+                return false;
+            }
+            const std::string name = entry.get<std::string>();
+            if (!known(name)) {
+                error = "gallery.json: order " + Quote(name) + " is not a section";
+                return false;
+            }
+            for (const std::string& have : parsed.Order) {
+                if (have == name) {
+                    error = "gallery.json: order " + Quote(name) + " is repeated";
+                    return false;
+                }
+            }
+            parsed.Order.push_back(name);
+        }
+    }
+    finish(parsed);
+    out = std::move(parsed);
+    error.clear();
+    return true;
+}
+
 } // namespace Ascension

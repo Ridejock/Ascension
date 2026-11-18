@@ -13,6 +13,8 @@ Startup looks in this order:
 
 The on-disk name `ascension.pak`, inside a folder named `artpack` when the flag is omitted, is the contract.
 
+The gallery does not upload every picture before the first frame. A draw uploads the picture it needs, and `data/gallery.json` streams the rest a few files at a time. The pixels of a frame are the same as an eager upload.
+
 `--art-pack` does not change the hero or the save. A bad manifest, header, table, or CRC stops the process before the window and names the file and the field, the same way a bad file under `data/` does. A path the manifest does not list is not an error: that id stays on the built-in art.
 
 The folder is gitignored. Packaging copies `data/` and `assets/` by name and does not copy `artpack/`. A zip that contains that folder fails the package step. The public zip does not install `ascension.pak`.
