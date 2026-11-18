@@ -1,6 +1,22 @@
 {
   "dialogue": {
     "id": "bram",
+    "titleSense": {
+      "lines": [
+        {
+          "titleEquipped": "wolf_cull",
+          "line": "Wolf Cull. The ash does not hide/what the System counted."
+        },
+        {
+          "titleEquipped": "beast_hunter",
+          "line": "Beast Hunter. The hollow knows/a hunter when it smells one."
+        },
+        {
+          "fallback": true,
+          "line": "The System marks what you wear./{title.name}."
+        }
+      ]
+    },
     "nodes": [
       {
         "id": "bram_after",

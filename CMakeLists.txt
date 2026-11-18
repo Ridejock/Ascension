@@ -309,7 +309,7 @@ if(ASCENSION_BUILD_TESTS)
     )
 
     add_executable(AscensionDialogueTests tests/DialogueTests.cpp tests/Check.h)
-    target_link_libraries(AscensionDialogueTests PRIVATE AscensionData)
+    target_link_libraries(AscensionDialogueTests PRIVATE AscensionData AscensionProgress)
     target_compile_definitions(AscensionDialogueTests PRIVATE
         ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
         ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"

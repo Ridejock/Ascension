@@ -278,6 +278,10 @@ private:
     i32 m_TalkRow = 0;
     std::string m_TalkId;
     std::string m_TalkNode;
+    // The remark spoken with the node that opened this talk. Empty when this NPC has
+    // nothing to say about a worn title. Later nodes do not repeat it.
+    std::string m_TalkSense;
+    std::string m_TalkSenseNode;
     std::vector<std::string> m_TalkFlags;
     std::vector<std::string> m_Defeated;
     // Unique drops already claimed. R starts the fight over and does not clear this.
