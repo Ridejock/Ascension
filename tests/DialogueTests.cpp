@@ -10,6 +10,7 @@
 
 #include "Ascension/Data/Database.h"
 #include "Ascension/Data/Talk.h"
+#include "Ascension/Progress/Hero.h"
 #include "Check.h"
 
 namespace {
@@ -466,6 +467,356 @@ void TestBram()
     Check(Enter(*bram, after) && after.Node == "bram_after", "the next talk is the quiet pit");
 }
 
+TitleFact MakeFact(const char* id, const char* name, const char* description, bool owned,
+                   bool equipped, i32 slot)
+{
+    TitleFact fact;
+    fact.Id = id;
+    fact.Name = name;
+    fact.Description = description;
+    fact.Owned = owned;
+    fact.Equipped = equipped;
+    fact.Slot = slot;
+    return fact;
+}
+
+TitleSenseLine SenseLine(TitleSenseWhen when, const char* id, const char* text)
+{
+    TitleSenseLine line;
+    line.When = when;
+    if (id != nullptr)
+        line.TitleId = id;
+    line.Line = text;
+    return line;
+}
+
+TitleSenseMatch Hear(const TitleSense& sense, const std::vector<TitleFact>& facts)
+{
+    return ResolveTitleSense(sense, facts);
+}
+
+void TestTitleConditions()
+{
+    const TitleFact wolf = MakeFact("wolf_cull", "Wolf Cull", "The System counted a wolf.", true,
+                                    true, 0);
+    const TitleFact wolfHeld =
+        MakeFact("wolf_cull", "Wolf Cull", "The System counted a wolf.", true, false, -1);
+    const TitleFact beastHeld =
+        MakeFact("beast_hunter", "Beast Hunter", "The System counted four beasts.", true, false,
+                 -1);
+    const TitleFact tomb = MakeFact("tombwalker", "Tombwalker", "The System counted three humanoids.",
+                                    true, true, 0);
+    const TitleFact bear = MakeFact("bear_cull", "Bear Cull", "The System counted the bear.", true,
+                                    true, 1);
+    const TitleFact unnamed = MakeFact("gone_title", "", "", true, true, 0);
+
+    TitleSense specific;
+    specific.Lines.push_back(SenseLine(TitleSenseWhen::Equipped, "wolf_cull", "the wolf line"));
+    specific.Lines.push_back(SenseLine(TitleSenseWhen::Owned, "beast_hunter", "kept {title.name}"));
+    specific.Lines.push_back(
+        SenseLine(TitleSenseWhen::Fallback, nullptr, "{title.name} / {title.description}"));
+
+    {
+        const std::vector<TitleFact> facts{wolf, beastHeld};
+        const TitleSenseMatch match = Hear(specific, facts);
+        Check(match.Spoken && match.Line == "the wolf line" && match.TitleId == "wolf_cull",
+              "a worn title uses its own line");
+    }
+    {
+        const std::vector<TitleFact> facts{wolfHeld, beastHeld};
+        const TitleSenseMatch match = Hear(specific, facts);
+        Check(match.Spoken && match.Line == "kept Beast Hunter" && match.TitleId == "beast_hunter",
+              "an owned title that is not worn uses the owned line");
+    }
+    {
+        const TitleFact beastWorn = MakeFact("beast_hunter", "Beast Hunter",
+                                             "The System counted four beasts.", true, true, 0);
+        TitleSense ownedOnly;
+        ownedOnly.Lines.push_back(
+            SenseLine(TitleSenseWhen::Owned, "beast_hunter", "kept {title.name}"));
+        const std::vector<TitleFact> facts{beastWorn};
+        const TitleSenseMatch match = Hear(ownedOnly, facts);
+        Check(match.Spoken && match.Line == "kept Beast Hunter",
+              "a worn title still satisfies an owned check");
+    }
+    {
+        const std::vector<TitleFact> facts{wolfHeld};
+        const TitleSenseMatch match = Hear(specific, facts);
+        Check(!match.Spoken && match.Line.empty() && match.TitleId.empty(),
+              "an owned title with no owned line and nothing worn stays silent");
+    }
+    {
+        const std::vector<TitleFact> facts{
+            MakeFact("wolf_cull", "Wolf Cull", "The System counted a wolf.", false, false, -1)};
+        const TitleSenseMatch match = Hear(specific, facts);
+        Check(!match.Spoken && match.Line.empty(), "a title that is neither owned nor worn is silence");
+    }
+    {
+        const std::vector<TitleFact> facts{tomb, bear};
+        const TitleSenseMatch match = Hear(specific, facts);
+        Check(match.Spoken && match.TitleId == "tombwalker" &&
+                  match.Line == "Tombwalker / The System counted three humanoids.",
+              "a worn title with no bespoke line fills the fallback from the earliest slot");
+        Check(match.Line.find("tombwalker") == std::string::npos &&
+                  match.Line.find("bear_cull") == std::string::npos,
+              "the fallback does not print a raw id");
+    }
+    {
+        TitleSense anyFirst;
+        anyFirst.Lines.push_back(SenseLine(TitleSenseWhen::AnyEquipped, nullptr, "any {title.name}"));
+        anyFirst.Lines.push_back(SenseLine(TitleSenseWhen::Equipped, "wolf_cull", "the wolf line"));
+        const TitleFact wolfLate =
+            MakeFact("wolf_cull", "Wolf Cull", "The System counted a wolf.", true, true, 1);
+        const std::vector<TitleFact> facts{tomb, wolfLate};
+        const TitleSenseMatch match = Hear(anyFirst, facts);
+        Check(match.Spoken && match.Line == "any Tombwalker" && match.TitleId == "tombwalker",
+              "any worn title matches the earliest slot, ahead of a later line");
+    }
+    {
+        const TitleFact unslotted =
+            MakeFact("wolf_cull", "Wolf Cull", "The System counted a wolf.", true, true, -1);
+        const std::vector<TitleFact> facts{unslotted};
+        const TitleSenseMatch match = Hear(specific, facts);
+        Check(!match.Spoken, "a fact with no slot is not a worn title");
+    }
+    {
+        TitleSense unknown;
+        unknown.Lines.push_back(SenseLine(TitleSenseWhen::Equipped, "no_such_title", "{title.name}"));
+        const std::vector<TitleFact> facts{wolf};
+        const TitleSenseMatch match = Hear(unknown, facts);
+        Check(!match.Spoken && match.Line.empty(), "an unknown id is not a fact");
+        Check(match.Line.find("no_such_title") == std::string::npos, "an unknown id is not spoken");
+    }
+    {
+        TitleSense lost;
+        lost.Lines.push_back(SenseLine(TitleSenseWhen::Fallback, nullptr, "{title.name}"));
+        const std::vector<TitleFact> facts{unnamed};
+        const TitleSenseMatch match = Hear(lost, facts);
+        Check(!match.Spoken && match.Line.find("gone_title") == std::string::npos,
+              "an empty name is not replaced with the id");
+    }
+    {
+        TitleSense marked;
+        marked.Lines.push_back(SenseLine(TitleSenseWhen::Fallback, nullptr, "A mark remains."));
+        const std::vector<TitleFact> facts{unnamed};
+        const TitleSenseMatch match = Hear(marked, facts);
+        Check(match.Spoken && match.Line == "A mark remains." &&
+                  match.Line.find("gone_title") == std::string::npos && match.TitleId == "gone_title",
+              "a bespoke fallback can speak without inventing a name");
+    }
+    {
+        TitleSense broken;
+        broken.Lines.push_back(SenseLine(TitleSenseWhen::Equipped, "wolf_cull", "{title.rank}"));
+        broken.Lines.push_back(SenseLine(TitleSenseWhen::Fallback, nullptr, "{title.name}."));
+        const std::vector<TitleFact> facts{wolf};
+        const TitleSenseMatch match = Hear(broken, facts);
+        Check(match.Spoken && match.Line == "Wolf Cull.",
+              "a placeholder that is not a fact field falls through");
+        Check(match.Line.find("{") == std::string::npos, "an unknown placeholder is not shown");
+    }
+    {
+        TitleSense twice;
+        twice.Lines.push_back(
+            SenseLine(TitleSenseWhen::Equipped, "wolf_cull", "{title.name} and {title.name}"));
+        const std::vector<TitleFact> facts{wolf};
+        const TitleSenseMatch match = Hear(twice, facts);
+        Check(match.Spoken && match.Line == "Wolf Cull and Wolf Cull",
+              "each title token is replaced from the fact");
+    }
+    {
+        TitleSense bare;
+        bare.Lines.push_back(SenseLine(TitleSenseWhen::Fallback, nullptr, "Nothing is written."));
+        const TitleSenseMatch match = Hear(bare, {});
+        Check(match.Spoken && match.Line == "Nothing is written." && match.TitleId.empty(),
+              "a fallback with no title token is the else");
+    }
+}
+
+void TestTitleSenseFiles()
+{
+    const char* good =
+        "{\n"
+        "  \"dialogue\": {\n"
+        "    \"id\": \"sense\",\n"
+        "    \"titleSense\": {\n"
+        "      \"lines\": [\n"
+        "        { \"titleEquipped\": \"wolf_cull\", \"line\": \"Wolf.\" },\n"
+        "        { \"titleOwned\": \"beast_hunter\", \"line\": \"Kept {title.name}.\" },\n"
+        "        { \"anyTitleEquipped\": true, \"line\": \"Any {title.name}.\" },\n"
+        "        { \"fallback\": true, \"line\": \"{title.name} / {title.description}\" }\n"
+        "      ]\n"
+        "    },\n"
+        "    \"nodes\": [\n"
+        "      { \"id\": \"hi\", \"line\": \"Hello.\", \"choices\": [] }\n"
+        "    ]\n"
+        "  }\n"
+        "}\n";
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "dialogue" / "sense.json", good);
+        Database data(copy.Path);
+        DataError error;
+        Check(data.Load(&error), "a titleSense block loads");
+        if (!error.Message.empty())
+            std::printf("    %s\n", error.Message.c_str());
+        const DialogueDef* talk = data.FindDialogue("sense");
+        Check(talk != nullptr && talk->Sense.Lines.size() == 4, "the four sense lines are kept");
+        if (talk != nullptr && talk->Sense.Lines.size() == 4) {
+            Check(talk->Sense.Lines[0].When == TitleSenseWhen::Equipped &&
+                      talk->Sense.Lines[0].TitleId == "wolf_cull",
+                  "titleEquipped keeps the title id");
+            Check(talk->Sense.Lines[1].When == TitleSenseWhen::Owned &&
+                      talk->Sense.Lines[1].Line == "Kept {title.name}.",
+                  "titleOwned stays in the file until a talk resolves it");
+            Check(talk->Sense.Lines[2].When == TitleSenseWhen::AnyEquipped &&
+                      talk->Sense.Lines[2].TitleId.empty(),
+                  "anyTitleEquipped does not name one title");
+            Check(talk->Sense.Lines[3].When == TitleSenseWhen::Fallback &&
+                      talk->Sense.Lines[3].Line.find("{title.description}") != std::string::npos,
+                  "the fallback template is stored as written");
+            World world;
+            Check(Enter(*talk, world) && world.Node == "hi",
+                  "title sense does not change the opening node");
+        }
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "dialogue" / "sense.json", good);
+        ReplaceInFile(copy.Path / "dialogue" / "sense.json", "wolf_cull", "no_such_title");
+        Reject(copy.Path, "dialogue/sense.json", "no_such_title", "an unknown title id is rejected");
+        Reject(copy.Path, "dialogue/sense.json", "does not exist", "the error says the title is missing");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "dialogue" / "sense.json", good);
+        ReplaceInFile(copy.Path / "dialogue" / "sense.json", "{title.name}", "{title.rank}");
+        Reject(copy.Path, "dialogue/sense.json", "{title.rank}", "an unknown title placeholder is rejected");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "dialogue" / "sense.json", good);
+        ReplaceInFile(copy.Path / "dialogue" / "sense.json", "\"line\": \"Wolf.\"",
+                      "\"line\": \"Wolf.\", \"mood\": \"dry\"");
+        Reject(copy.Path, "dialogue/sense.json", "mood", "a sense line rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "dialogue" / "sense.json", good);
+        ReplaceInFile(copy.Path / "dialogue" / "sense.json",
+                      "{ \"titleEquipped\": \"wolf_cull\", \"line\": \"Wolf.\" }",
+                      "{ \"titleEquipped\": \"wolf_cull\", \"fallback\": true, \"line\": \"Wolf.\" }");
+        Reject(copy.Path, "dialogue/sense.json", "needs one of", "a sense line has one condition");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "dialogue" / "sense.json", good);
+        ReplaceInFile(copy.Path / "dialogue" / "sense.json",
+                      "{ \"titleEquipped\": \"wolf_cull\", \"line\": \"Wolf.\" }",
+                      "{ \"fallback\": true, \"line\": \"Else.\" },\n        { \"titleEquipped\": \"wolf_cull\", \"line\": \"Wolf.\" }");
+        Reject(copy.Path, "dialogue/sense.json", "fallback must be the last line",
+               "a line after the fallback is rejected");
+    }
+}
+
+void ExpectVillageSense(const DialogueDef* talk, const char* who)
+{
+    Check(talk != nullptr && talk->Sense.Lines.size() == 3, who);
+    if (talk == nullptr || talk->Sense.Lines.size() != 3)
+        return;
+    Check(talk->Sense.Lines[0].When == TitleSenseWhen::Equipped &&
+              talk->Sense.Lines[0].TitleId == "wolf_cull" &&
+              talk->Sense.Lines[0].Line.find("Wolf Cull") != std::string::npos,
+          who);
+    Check(talk->Sense.Lines[1].When == TitleSenseWhen::Equipped &&
+              talk->Sense.Lines[1].TitleId == "beast_hunter" &&
+              talk->Sense.Lines[1].Line.find("Beast Hunter") != std::string::npos,
+          who);
+    Check(talk->Sense.Lines[2].When == TitleSenseWhen::Fallback &&
+              talk->Sense.Lines[2].Line.find("{title.name}") != std::string::npos,
+          who);
+}
+
+void TestVillageSense()
+{
+    Database data(kShipped);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads title sense");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    if (!data.IsLoaded())
+        return;
+    const DialogueDef* pell = data.FindDialogue("pell");
+    const DialogueDef* bram = data.FindDialogue("bram");
+    const DialogueDef* calder = data.FindDialogue("calder");
+    ExpectVillageSense(pell, "Pell senses a worn title");
+    ExpectVillageSense(bram, "Bram senses a worn title");
+    ExpectVillageSense(calder, "Calder senses a worn title");
+    Check(pell != nullptr && pell->Sense.Lines.size() == 3 &&
+              pell->Sense.Lines[2].Line.find("{title.description}") != std::string::npos,
+          "Pell's fallback can read the title description");
+
+    SystemState none;
+    TitleFact missing;
+    Check(!FindTitleFact(data, none, "no_such_title", missing),
+          "the query does not invent a fact for an unknown id");
+    TitleSense unknown;
+    unknown.Lines.push_back(SenseLine(TitleSenseWhen::Equipped, "no_such_title", "{title.name}"));
+    const std::vector<TitleFact> catalog = QueryTitles(data, none);
+    const TitleSenseMatch quiet = Hear(unknown, catalog);
+    Check(!quiet.Spoken && quiet.Line.find("no_such_title") == std::string::npos,
+          "a queried list does not speak an unknown id");
+
+    SystemState worn;
+    worn.Titles.push_back("tombwalker");
+    worn.Equipped.push_back("tombwalker");
+    TitleFact tomb;
+    Check(FindTitleFact(data, worn, "tombwalker", tomb) && tomb.Equipped && tomb.Name == "Tombwalker" &&
+              !tomb.Description.empty(),
+          "FindTitleFact returns the worn catalog title");
+    const std::vector<TitleFact> facts = QueryTitles(data, worn);
+    Check(pell != nullptr, "Pell is loaded");
+    if (pell == nullptr)
+        return;
+    const TitleSenseMatch other = Hear(pell->Sense, facts);
+    Check(other.Spoken && other.TitleId == tomb.Id && other.Line.find(tomb.Name) != std::string::npos &&
+              other.Line.find(tomb.Description) != std::string::npos,
+          "another worn title fills Pell's fallback from the fact");
+    Check(other.Line.find("tombwalker") == std::string::npos, "Pell does not speak the raw id");
+
+    Hero hero;
+    std::string why;
+    Check(hero.Start(data, why), "a hero can be asked about titles");
+    if (!why.empty())
+        std::printf("    %s\n", why.c_str());
+    if (!hero.IsReady())
+        return;
+    for (i32 n = 0; n < 4; ++n)
+        hero.NoteKill("wolf");
+    Check(hero.AcceptTitle("wolf_cull", why), "Wolf Cull can be owned");
+    const TitleSenseMatch held = Hear(pell->Sense, hero.QueryTitles());
+    TitleFact wolf;
+    Check(hero.TitleFactFor("wolf_cull", wolf) && wolf.Owned && !wolf.Equipped && wolf.Name == "Wolf Cull",
+          "the owned title is a fact and is not worn yet");
+    Check(!held.Spoken, "Pell does not remark on a title that is only owned");
+    Check(!hero.TitleFactFor("no_such_title", wolf), "TitleFactFor refuses an unknown id");
+    Check(hero.TitleSlots() >= 1 && hero.EquipTitle("wolf_cull", why), "Wolf Cull can be worn");
+    const TitleSenseMatch cull = Hear(pell->Sense, hero.QueryTitles());
+    Check(cull.Spoken && cull.TitleId == "wolf_cull" && cull.Line == pell->Sense.Lines[0].Line,
+          "the worn Wolf Cull line is the one in Pell's file");
+    Check(hero.AcceptTitle("beast_hunter", why) && hero.UnequipTitle("wolf_cull", why) &&
+              hero.EquipTitle("beast_hunter", why),
+          "Beast Hunter can take the slot");
+    const TitleSenseMatch hunter = Hear(bram->Sense, hero.QueryTitles());
+    Check(bram != nullptr && hunter.Spoken && hunter.TitleId == "beast_hunter" &&
+              hunter.Line == bram->Sense.Lines[1].Line,
+          "Bram uses the Beast Hunter line from his file");
+    if (calder != nullptr) {
+        World world;
+        Check(Enter(*calder, world) && world.Node == "calder_greet",
+              "a worn title does not replace Calder's opening node");
+    }
+}
+
 void TestShipped()
 {
     Database data(kShipped);
@@ -494,6 +845,9 @@ int main()
     TestGreetB(data);
     TestSets();
     TestValidation();
+    TestTitleConditions();
+    TestTitleSenseFiles();
+    TestVillageSense();
     TestShipped();
     TestCalder();
     TestBram();

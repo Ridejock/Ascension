@@ -1491,6 +1491,16 @@ bool AscensionApp::OpenTalk(std::string_view dialogueId)
     m_TalkId = id;
     m_TalkNode = node->Id;
     m_TalkRow = 0;
+    m_TalkSense.clear();
+    m_TalkSenseNode.clear();
+    if (m_Hero.IsReady() && !talk->Sense.Lines.empty()) {
+        const std::vector<TitleFact> titles = m_Hero.QueryTitles();
+        const TitleSenseMatch heard = ResolveTitleSense(talk->Sense, titles);
+        if (heard.Spoken) {
+            m_TalkSense = heard.Line;
+            m_TalkSenseNode = node->Id;
+        }
+    }
     m_Camp = false;
     m_Picking = false;
     NoteTalk(*node);
@@ -1499,6 +1509,12 @@ bool AscensionApp::OpenTalk(std::string_view dialogueId)
 
 void AscensionApp::NoteTalk(const DialogueNode& node)
 {
+    if (node.Id == m_TalkSenseNode && !m_TalkSense.empty()) {
+        std::vector<std::string> sense;
+        TalkBoxLines(m_TalkSense, kTalkLineWidth, sense);
+        for (const std::string& line : sense)
+            Note(line);
+    }
     std::vector<std::string> lines;
     TalkBoxLines(node.Line, kTalkLineWidth, lines);
     for (const std::string& line : lines)
@@ -5856,6 +5872,9 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
     if (m_TalkRow >= static_cast<i32>(visible.size()))
         m_TalkRow = visible.empty() ? 0 : static_cast<i32>(visible.size()) - 1;
 
+    std::vector<std::string> senseLines;
+    if (m_TalkNode == m_TalkSenseNode && !m_TalkSense.empty())
+        TalkBoxLines(m_TalkSense, kTalkLineWidth, senseLines);
     std::vector<std::string> lines;
     TalkBoxLines(node->Line, kTalkLineWidth, lines);
 
@@ -5888,6 +5907,14 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
     DrawUiText(renderer, {textX, y}, Upper(m_Data.GetShop().Keeper), edge, scale);
     y += lineH + lineGap;
     const f32 bodyFloor = visible.empty() ? textFloor : textFloor - lineH * 2.0f;
+    for (const std::string& line : senseLines) {
+        if (y + lineH > bodyFloor)
+            break;
+        DrawUiText(renderer, {textX, y}, Upper(line), ink, scale, textWrap);
+        y += lineH;
+    }
+    if (!senseLines.empty() && !lines.empty())
+        y += lineGap;
     for (const std::string& line : lines) {
         if (y + lineH > bodyFloor)
             break;
