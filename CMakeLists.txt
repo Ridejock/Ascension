@@ -289,10 +289,16 @@ if(ASCENSION_BUILD_TESTS)
     emerald_set_warnings(AscensionPlaytestTests)
     add_test(NAME Playtest COMMAND AscensionPlaytestTests)
 
-    add_executable(AscensionArtPackTests tests/ArtPackTests.cpp tests/Check.h)
+    add_executable(AscensionArtPackTests
+        tests/ArtPackTests.cpp
+        tests/Check.h
+        src/App/ArtGallery.cpp
+        src/App/ArtGallery.h)
+    target_include_directories(AscensionArtPackTests PRIVATE src/App)
     target_link_libraries(AscensionArtPackTests PRIVATE AscensionData)
     target_compile_definitions(AscensionArtPackTests PRIVATE
-        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}")
+        ASCENSION_DATA_DIR="${ASCENSION_TEST_DATA_DIR}"
+        ASCENSION_SHIPPED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
     emerald_set_warnings(AscensionArtPackTests)
     add_test(NAME ArtPack COMMAND AscensionArtPackTests)
 

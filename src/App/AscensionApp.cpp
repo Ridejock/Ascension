@@ -1,6 +1,7 @@
 #include "AscensionApp.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <string>
 
@@ -9,6 +10,7 @@
 #include "MapView.h"
 #include "SourceTag.h"
 
+#include "Emerald/Core/Log.h"
 #include "Emerald/Input/InputBindings.h"
 #include "Emerald/Math/Mat4.h"
 #include "Emerald/Renderer/DebugText.h"
@@ -990,7 +992,7 @@ bool AscensionApp::TouchSpawn(const ContactQuery& query)
         OfferSpawn(m_Data, *map, query, m_MapMemory, m_Places, &m_Gallery.GetPack());
     if (!request.Active)
         return false;
-    ResetDanger(m_Danger, m_Data.GetDanger());
+    QuietDanger();
     m_MapFight.Active = true;
     m_MapFight.SpawnId = request.SpawnId;
     m_MapFight.EncounterId = request.EncounterId;
@@ -1027,6 +1029,7 @@ void AscensionApp::TouchDanger(const WalkPlace& before, WalkStepKind kind)
     const i32 rating = DangerRatingOf(rules, *cell);
     const u32 cap = rules.Cap > 0 ? static_cast<u32>(rules.Cap) : 1u;
     const DangerStep stepped = AdvanceDanger(m_Danger, rules, rating, NextDangerRoll(m_DangerRng, cap));
+    AdvanceDangerSigns(m_SignState, rules, m_Danger.Value, map->Id, *cell);
     if (!stepped.Fight)
         return;
     if (m_Hero.IsReady() && m_Hero.NextFightBlock() != nullptr)
@@ -1049,8 +1052,14 @@ void AscensionApp::TouchDanger(const WalkPlace& before, WalkStepKind kind)
     m_MapFight.AllowFlee = DangerEncounterFlees(m_Data, encounter);
     const bool sameMap = kind == WalkStepKind::Moved && before.MapId == map->Id;
     m_MapFight.ReturnTile = sameMap ? before.Tile : tile;
-    ResetDanger(m_Danger, rules);
+    QuietDanger();
     BeginSpawnFight();
+}
+
+void AscensionApp::QuietDanger()
+{
+    ResetDanger(m_Danger, m_Data.GetDanger());
+    ClearDangerSigns(m_SignState);
 }
 
 std::string AscensionApp::DangerWord() const
@@ -1062,17 +1071,30 @@ std::string AscensionApp::DangerWord() const
         return {};
     const MapTile tile = m_Walker.Place().Tile;
     const std::string* cell = map->Cell(tile.X, tile.Y);
-    if (cell == nullptr || DangerRatingOf(m_Data.GetDanger(), *cell) < 1)
+    if (cell == nullptr)
         return {};
-    const DangerHint* hint = DangerHintFor(m_Data.GetDanger(), m_Danger.Value);
-    if (hint == nullptr || hint->Text.empty())
-        return {};
-    std::string word = hint->Text;
+    std::string word =
+        DangerCueLine(m_Data.GetDanger(), m_SignState, m_Danger.Value, map->Id, *cell);
     for (char& code : word) {
         if (code >= 'a' && code <= 'z')
             code = static_cast<char>(code - 'a' + 'A');
     }
     return word;
+}
+
+void AscensionApp::GatherDangerMarks(std::vector<DangerMarkSpot>& out) const
+{
+    out.clear();
+    if (!m_Walker.Placed() || m_Danger.Value < 1)
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const MapTile tile = m_Walker.Place().Tile;
+    const std::string* cell = map->Cell(tile.X, tile.Y);
+    if (cell == nullptr)
+        return;
+    CollectDangerMarks(m_Data.GetDanger(), m_Danger.Value, map->Id, *cell, tile.X, tile.Y, out);
 }
 
 void AscensionApp::BeginSpawnFight()
@@ -1269,7 +1291,7 @@ void AscensionApp::MaybeSettle()
         m_Vitals.ReturnToHub = false;
 
     m_Battle.reset();
-    ResetDanger(m_Danger, m_Data.GetDanger());
+    QuietDanger();
     m_MapFight = {};
     SyncPlaces();
     if (result == BattleResult::Victory)
@@ -1598,6 +1620,14 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     }
     if (!stood)
         return false;
+    if (m_Walker.Placed()) {
+        const WalkPlace& here = m_Walker.Place();
+        if (const MapDef* hereMap = m_Data.FindMap(here.MapId)) {
+            if (const std::string* hereCell = hereMap->Cell(here.Tile.X, here.Tile.Y))
+                SettleDangerSigns(m_SignState, m_Data.GetDanger(), m_Danger.Value, hereMap->Id,
+                                  *hereCell);
+        }
+    }
     m_OnMap = true;
     m_HasPlace = true;
     m_PlaceMap = m_Walker.Place().MapId;
@@ -1630,8 +1660,17 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     return true;
 }
 
+namespace {
+
+std::chrono::steady_clock::time_point g_Boot;
+bool g_NotedFrame = false;
+
+} // namespace
+
 void AscensionApp::OnStart()
 {
+    g_Boot = std::chrono::steady_clock::now();
+    g_NotedFrame = false;
     if (!m_Play.Transcript.empty()) {
         m_Transcript.open(m_Play.Transcript, std::ios::app);
         if (!m_Transcript) {
@@ -1651,9 +1690,19 @@ void AscensionApp::OnStart()
         }
         return;
     }
+    GalleryBudget budget;
+    std::string budgetWhy;
+    if (!LoadGalleryBudget(m_Data.GetDirectory(), budget, budgetWhy)) {
+        m_StartError = std::move(budgetWhy);
+        std::fprintf(stderr, "%s\n", m_StartError.c_str());
+        Note(m_StartError);
+        Quit();
+        return;
+    }
     if (!m_Play.ArtPackDir.empty()) {
         ArtPack pack;
         DataError packError;
+        const auto packStart = std::chrono::steady_clock::now();
         if (!pack.Load(m_Play.ArtPackDir, m_Data, &packError)) {
             m_StartError =
                 packError.Message.empty() ? "could not load art pack" : packError.Message;
@@ -1662,8 +1711,12 @@ void AscensionApp::OnStart()
             Quit();
             return;
         }
+        const double packMs = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - packStart)
+                                  .count();
+        EM_INFO("art pack loaded in {:.1f} ms ({} rows)", packMs, pack.GetImages().size());
         std::string packWhy;
-        if (!m_Gallery.Load(GetAssets(), GetRenderer().GetDevice(), pack, packWhy)) {
+        if (!m_Gallery.Load(&GetAssets(), GetRenderer().GetDevice(), pack, budget, packWhy)) {
             m_StartError = std::move(packWhy);
             std::fprintf(stderr, "%s\n", m_StartError.c_str());
             Note(m_StartError);
@@ -3137,6 +3190,7 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
     m_ResumeSpawn.clear();
     m_Danger = {};
     m_DangerRng = {};
+    m_SignState = {};
     m_WildResume = false;
     m_WildEncounter.clear();
     m_WildReturn = {};
@@ -3524,8 +3578,21 @@ std::string AscensionApp::CurrentMapId() const
     return m_PlaceMap;
 }
 
+void AscensionApp::ReportGalleryFault()
+{
+    if (m_Gallery.Fault().empty() || !m_StartError.empty())
+        return;
+    m_StartError = m_Gallery.Fault();
+    std::fprintf(stderr, "%s\n", m_StartError.c_str());
+    Note(m_StartError);
+    Quit();
+}
+
 void AscensionApp::OnUpdate(f32 dt)
 {
+    if (m_Presented)
+        m_Gallery.Pump();
+    ReportGalleryFault();
     m_Gallery.Advance(dt);
     const bool fighting = m_Battle != nullptr && m_Battle->Result() == BattleResult::Ongoing;
     const bool victory = m_Battle != nullptr && m_Battle->Result() == BattleResult::Victory;
@@ -3792,6 +3859,7 @@ bool AscensionApp::LoadSlot(std::string_view slot, std::string& error)
     if (m_Data.GetDanger().Cap > 0 && m_Danger.Value > m_Data.GetDanger().Cap)
         m_Danger.Value = m_Data.GetDanger().Cap;
     m_DangerRng.State = run.DangerRng < 1 ? 1u : static_cast<u32>(run.DangerRng);
+    m_SignState = {};
     m_WildResume = run.Wild;
     m_WildEncounter = run.Wild ? run.EncounterId : std::string{};
     m_WildReturn = run.WildReturn;
@@ -4679,6 +4747,27 @@ void AscensionApp::DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 heigh
 
 void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
 {
+    auto reportFault = [this]() { ReportGalleryFault(); };
+    struct FaultGuard {
+        decltype(reportFault)* Fn;
+        ~FaultGuard() { (*Fn)(); }
+    } faultGuard{&reportFault};
+    auto noteFrame = [this]() {
+        m_Presented = true;
+        if (g_NotedFrame)
+            return;
+        g_NotedFrame = true;
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_Boot)
+                .count();
+        EM_INFO("first frame {:.1f} ms, gallery pending {} resident {} on demand {} upload {:.1f} ms",
+                ms, m_Gallery.Pending(), m_Gallery.Resident(), m_Gallery.OnDemand(),
+                m_Gallery.UploadMilliseconds());
+    };
+    struct NoteGuard {
+        decltype(noteFrame)* Fn;
+        ~NoteGuard() { (*Fn)(); }
+    } noteGuard{&noteFrame};
     g_PackGallery = &m_Gallery;
     const Emerald::Vec2i pixels = GetWindowSizeInPixels();
     if (pixels.x <= 0 || pixels.y <= 0)
@@ -4719,10 +4808,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                   ? HeroPools(m_Data, m_Hero, m_Inventory)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
+        std::vector<DangerMarkSpot> marks;
+        GatherDangerMarks(marks);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
                       shown.Focus, caps.MaxFocus, shown.Mana, caps.MaxMana, m_MapMemory.Cleared,
-                      m_Places, &m_Gallery,
-                      &m_Glides);
+                      m_Places, &m_Gallery, &m_Glides, marks);
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
         const std::string dangerWord = DangerWord();

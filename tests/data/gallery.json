@@ -1,0 +1,20 @@
+{
+  "gallery": {
+    "uploadsPerFrame": 8,
+    "budgetMilliseconds": 4,
+    "order": [
+      "fonts",
+      "ui",
+      "icons",
+      "tiles",
+      "markers",
+      "props",
+      "heroes",
+      "npcs",
+      "foes",
+      "items",
+      "backdrops",
+      "vfx"
+    ]
+  }
+}

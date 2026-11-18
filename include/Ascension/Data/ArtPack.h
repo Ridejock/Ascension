@@ -256,6 +256,20 @@ private:
     return false;
 }
 
+// How many pack pictures the gallery may upload in the background each frame.
+// Either number at 0 uploads nothing until a draw needs the picture. `order` is
+// the section sequence. A section left out follows the ones that are listed.
+struct GalleryBudget {
+    i32 UploadsPerFrame = 8;
+    i32 BudgetMilliseconds = 4;
+    std::vector<std::string> Order;
+};
+
+// Reads `directory`/gallery.json. A missing file leaves `out` at the defaults.
+// A bad file returns false and names the file and the field.
+[[nodiscard]] bool LoadGalleryBudget(const std::filesystem::path& directory, GalleryBudget& out,
+                                     std::string& error);
+
 // `requested` is the --art-pack path, or empty when the flag was omitted.
 // A set path may be an ascension.pak file, a directory that contains that file,
 // or a loose directory whose manifest.json is read directly. An empty path uses
