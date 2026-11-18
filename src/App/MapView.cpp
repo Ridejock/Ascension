@@ -70,6 +70,27 @@ const std::string* SpawnFoeId(const Database& data, const MapSpawn& spawn)
     return &encounter->Enemies.front();
 }
 
+void DrawDangerMarks(Emerald::Renderer2D& renderer, const MapDef& map, const WalkFrame& frame,
+                     f32 tile, i32 firstX, i32 firstY, i32 lastX, i32 lastY,
+                     std::span<const DangerMarkSpot> marks)
+{
+    for (const DangerMarkSpot& mark : marks) {
+        if (mark.MapId != map.Id || mark.Size < 1)
+            continue;
+        if (mark.TileX < firstX || mark.TileX >= lastX || mark.TileY < firstY ||
+            mark.TileY >= lastY)
+            continue;
+        const f32 markSize = tile * static_cast<f32>(mark.Size) / 100.0f;
+        if (markSize < 1.0f)
+            continue;
+        const f32 left = (static_cast<f32>(mark.TileX) - frame.OriginX) * tile +
+                         tile * static_cast<f32>(mark.X) / 100.0f;
+        const f32 top = (static_cast<f32>(mark.TileY) - frame.OriginY) * tile +
+                        tile * static_cast<f32>(mark.Y) / 100.0f;
+        DrawCell(renderer, left, top, markSize, ByteColor(mark.Red, mark.Green, mark.Blue));
+    }
+}
+
 } // namespace
 
 void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Walker& walker,
@@ -77,7 +98,7 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
                    i32 focus, i32 maxFocus, i32 mana, i32 maxMana,
                    std::span<const std::string> cleared,
                    std::span<const SpawnPlace> places, const ArtGallery* art,
-                   const SpawnGlides* motion)
+                   const SpawnGlides* motion, std::span<const DangerMarkSpot> marks)
 {
     const UiStyle& style = data.GetBattleUi().Style;
     const Emerald::Vec4 label = ByteColor(style.Ink.Red, style.Ink.Green, style.Ink.Blue);
@@ -141,6 +162,9 @@ void DrawMapScreen(Emerald::Renderer2D& renderer, const Database& data, const Wa
             }
         }
     }
+
+    // On the ground, under props and the hero, so a print stays a mark on the tile.
+    DrawDangerMarks(renderer, *map, frame, tile, firstX, firstY, lastX, lastY, marks);
 
     // Ground is already down. Props, markers, foes, and the hero share one south-to-north
     // order: a smaller SortY is farther north and is drawn first. A prop sorts on the south

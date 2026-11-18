@@ -1,4 +1,4 @@
-// The off-road meter, the encounter roll, and danger.json. No window.
+// The off-road meter, the encounter roll, the encounter signs, and danger.json. No window.
 
 #include <filesystem>
 #include <fstream>
@@ -196,6 +196,120 @@ void TestRollSequence()
     Check(left.State <= 0x7fffffffu, "the saved roll stays in a positive int");
 }
 
+DangerSign MakeSign(DangerSignKind kind, const char* id, i32 at, const char* tile, const char* text)
+{
+    DangerSign sign;
+    sign.Kind = kind;
+    sign.Id = id;
+    sign.At = at;
+    sign.Tile = tile;
+    sign.Text = text;
+    return sign;
+}
+
+void TestSigns()
+{
+    DangerRules rules = SampleRules();
+    rules.Ratings.push_back({"path", 0});
+    rules.Ratings.push_back({"grass", 4});
+    rules.Ratings.push_back({"forest", 8});
+    rules.Hints.push_back({1, "uneasy"});
+    rules.Hints.push_back({25, "wary"});
+
+    DangerSign prints = MakeSign(DangerSignKind::Tracks, "prints", 8, "forest", "prints");
+    prints.HasColor = true;
+    prints.Red = 1;
+    prints.Marks.push_back({6, 80, 12});
+    DangerSign tracks = MakeSign(DangerSignKind::Tracks, "tracks", 32, "forest", "tracks");
+    tracks.HasColor = true;
+    tracks.Red = 2;
+    tracks.Marks.push_back({6, 80, 12});
+    tracks.Marks.push_back({82, 4, 12});
+    DangerSign howl = MakeSign(DangerSignKind::Howl, "howl", 40, "forest", "a howl");
+    howl.Steps = 2;
+    DangerSign hunted = MakeSign(DangerSignKind::Hint, "hunted", 48, "forest", "hunted");
+    DangerSign meadow = MakeSign(DangerSignKind::Howl, "meadow_howl", 20, "grass", "a distant howl");
+    meadow.Steps = 1;
+    DangerSign spoor = MakeSign(DangerSignKind::Tracks, "spoor", 8, "forest", "spoor");
+    spoor.Map = "overland";
+    spoor.HasColor = true;
+    spoor.Red = 3;
+    spoor.Marks.push_back({4, 4, 8});
+    rules.Signs.push_back(prints);
+    rules.Signs.push_back(tracks);
+    rules.Signs.push_back(howl);
+    rules.Signs.push_back(hunted);
+    rules.Signs.push_back(meadow);
+    rules.Signs.push_back(spoor);
+
+    DangerSignsState state;
+    std::vector<DangerMarkSpot> marks;
+    Check(DangerCueLine(rules, state, 0, "overland", "forest").empty(), "zero has no cue line");
+    CollectDangerMarks(rules, 0, "overland", "forest", 3, 4, marks);
+    Check(marks.empty(), "zero draws no tracks");
+    Check(DangerCueLine(rules, state, 50, "overland", "path").empty(), "a road shows no cue");
+    CollectDangerMarks(rules, 50, "overland", "path", 1, 1, marks);
+    Check(marks.empty(), "a road draws no tracks");
+
+    Check(DangerCueLine(rules, state, 8, "hub", "forest") == "uneasy - prints",
+          "the first forest tier is the generic hint plus prints");
+    CollectDangerMarks(rules, 8, "hub", "forest", 2, 5, marks);
+    Check(marks.size() == 1 && marks[0].TileX == 2 && marks[0].TileY == 5 && marks[0].Red == 1 &&
+              marks[0].X == 6 && marks[0].Size == 12,
+          "prints are one square on the hero's tile");
+    Check(DangerCueLine(rules, state, 32, "hub", "forest") == "wary - tracks",
+          "a higher tracks sign replaces the word");
+    CollectDangerMarks(rules, 32, "hub", "forest", 2, 5, marks);
+    Check(marks.size() == 2 && marks[1].Red == 2, "the higher tracks sign is the one drawn");
+    Check(DangerCueLine(rules, state, 8, "overland", "forest") == "uneasy - spoor",
+          "a map sign wins over the tile-only tracks");
+    CollectDangerMarks(rules, 8, "overland", "forest", 2, 5, marks);
+    Check(marks.size() == 1 && marks[0].Red == 3, "the map sign's mark is the one drawn");
+
+    Check(DangerCueLine(rules, state, 30, "hub", "forest") == "wary - prints",
+          "below the terrain hint, the generic word stays");
+    Check(DangerCueLine(rules, state, 48, "hub", "forest") == "hunted - tracks",
+          "the terrain hint replaces the generic word");
+    Check(DangerCueLine(rules, state, 48, "hub", "grass") == "wary",
+          "another tile keeps the generic hint");
+
+    AdvanceDangerSigns(state, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, state, 40, "hub", "forest") == "wary - tracks - a howl",
+          "crossing the howl shows it once");
+    AdvanceDangerSigns(state, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, state, 40, "hub", "forest") == "wary - tracks - a howl",
+          "the howl stays for its second step");
+    AdvanceDangerSigns(state, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, state, 40, "hub", "forest") == "wary - tracks",
+          "the howl does not repeat while the meter stays up");
+
+    DangerSignsState again;
+    AdvanceDangerSigns(again, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, again, 40, "hub", "path").empty(), "a road hides a live howl");
+    AdvanceDangerSigns(again, rules, 40, "hub", "path");
+    AdvanceDangerSigns(again, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, again, 40, "hub", "forest") == "wary - tracks",
+          "a road step counts the howl down, and it does not start again");
+
+    DangerSignsState fresh;
+    AdvanceDangerSigns(fresh, rules, 40, "hub", "grass");
+    Check(DangerCueLine(rules, fresh, 40, "hub", "grass") == "wary - a distant howl",
+          "grass has its own howl");
+    AdvanceDangerSigns(fresh, rules, 40, "hub", "grass");
+    Check(DangerCueLine(rules, fresh, 40, "hub", "grass") == "wary",
+          "a one-step howl is gone on the next step");
+
+    DangerSignsState loaded;
+    SettleDangerSigns(loaded, rules, 40, "hub", "forest");
+    AdvanceDangerSigns(loaded, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, loaded, 40, "hub", "forest") == "wary - tracks",
+          "a loaded meter does not howl for a threshold it has already passed");
+    ClearDangerSigns(loaded);
+    AdvanceDangerSigns(loaded, rules, 40, "hub", "forest");
+    Check(DangerCueLine(rules, loaded, 40, "hub", "forest") == "wary - tracks - a howl",
+          "clearing the cues lets the next climb howl again");
+}
+
 void TestShippedDanger()
 {
     Database data(ASCENSION_SHIPPED_DATA_DIR);
@@ -292,6 +406,95 @@ void TestShippedDanger()
               wary != nullptr && wary->Text == "wary" && threatened != nullptr &&
               threatened->Text == "threatened",
           "the hints are uneasy, wary, then threatened");
+    Check(rules.CueJoin == " - ", "the cue line joins with a spaced hyphen");
+
+    const DangerSign* meadowPrints = nullptr;
+    const DangerSign* meadowTracks = nullptr;
+    const DangerSign* meadowHowl = nullptr;
+    const DangerSign* meadowStalked = nullptr;
+    const DangerSign* meadowHunted = nullptr;
+    const DangerSign* forestPrints = nullptr;
+    const DangerSign* forestTracks = nullptr;
+    const DangerSign* forestHowl = nullptr;
+    const DangerSign* forestHunted = nullptr;
+    const DangerSign* forestClose = nullptr;
+    const DangerSign* barrowScuffs = nullptr;
+    const DangerSign* barrowHowl = nullptr;
+    const DangerSign* barrowHunted = nullptr;
+    const DangerSign* barrowCornered = nullptr;
+    for (const DangerSign& sign : rules.Signs) {
+        if (sign.Id == "meadow_prints")
+            meadowPrints = &sign;
+        else if (sign.Id == "meadow_tracks")
+            meadowTracks = &sign;
+        else if (sign.Id == "meadow_howl")
+            meadowHowl = &sign;
+        else if (sign.Id == "meadow_stalked")
+            meadowStalked = &sign;
+        else if (sign.Id == "meadow_hunted")
+            meadowHunted = &sign;
+        else if (sign.Id == "forest_prints")
+            forestPrints = &sign;
+        else if (sign.Id == "forest_tracks")
+            forestTracks = &sign;
+        else if (sign.Id == "forest_howl")
+            forestHowl = &sign;
+        else if (sign.Id == "forest_hunted")
+            forestHunted = &sign;
+        else if (sign.Id == "forest_close")
+            forestClose = &sign;
+        else if (sign.Id == "barrow_scuffs")
+            barrowScuffs = &sign;
+        else if (sign.Id == "barrow_howl")
+            barrowHowl = &sign;
+        else if (sign.Id == "barrow_hunted")
+            barrowHunted = &sign;
+        else if (sign.Id == "barrow_cornered")
+            barrowCornered = &sign;
+    }
+    const bool meadowOk = meadowPrints != nullptr && meadowTracks != nullptr &&
+                          meadowHowl != nullptr && meadowStalked != nullptr &&
+                          meadowHunted != nullptr && meadowPrints->Kind == DangerSignKind::Tracks &&
+                          meadowPrints->At == 16 && meadowPrints->Tile == "grass" &&
+                          meadowPrints->Text == "prints" && meadowPrints->Marks.size() == 1 &&
+                          meadowPrints->Red == 0x99 && meadowPrints->Green == 0x68 &&
+                          meadowPrints->Blue == 0x38 && meadowTracks->At == 36 &&
+                          meadowTracks->Text == "tracks" && meadowTracks->Marks.size() == 2 &&
+                          meadowHowl->Kind == DangerSignKind::Howl && meadowHowl->At == 48 &&
+                          meadowHowl->Text == "a distant howl" && meadowHowl->Steps == 2 &&
+                          meadowStalked->Kind == DangerSignKind::Hint && meadowStalked->At == 56 &&
+                          meadowStalked->Text == "stalked" && meadowHunted->At == 84 &&
+                          meadowHunted->Text == "hunted";
+    Check(meadowOk, "meadow signs are prints, tracks, a distant howl, stalked, then hunted");
+    const bool forestOk =
+        forestPrints != nullptr && forestTracks != nullptr && forestHowl != nullptr &&
+        forestHunted != nullptr && forestClose != nullptr && forestPrints->At == 8 &&
+        forestPrints->Text == "prints" && forestPrints->Marks.size() == 1 &&
+        forestPrints->Marks[0].X == 6 && forestPrints->Marks[0].Y == 80 &&
+        forestPrints->Marks[0].Size == 12 && forestPrints->Red == 0xB0 &&
+        forestPrints->Green == 0x7A && forestPrints->Blue == 0x44 && forestTracks->At == 32 &&
+        forestTracks->Text == "tracks" && forestTracks->Marks.size() == 2 &&
+        forestHowl->At == 40 && forestHowl->Text == "a howl" && forestHowl->Steps == 2 &&
+        forestHunted->Text == "hunted" && forestHunted->At == 48 && forestClose->Text == "close" &&
+        forestClose->At == 72;
+    Check(forestOk, "forest signs are prints, tracks, a howl, hunted, then close");
+    const bool barrowOk = barrowScuffs != nullptr && barrowHowl != nullptr &&
+                          barrowHunted != nullptr && barrowCornered != nullptr &&
+                          barrowScuffs->At == 18 && barrowScuffs->Tile == "barrow_ground" &&
+                          barrowScuffs->Text == "scuffs" && barrowScuffs->Marks.size() == 2 &&
+                          barrowScuffs->Red == 0x1A && barrowScuffs->Green == 0x14 &&
+                          barrowScuffs->Blue == 0x23 && barrowHowl->At == 36 &&
+                          barrowHowl->Text == "a low howl" && barrowHowl->Steps == 2 &&
+                          barrowHunted->At == 36 && barrowHunted->Text == "hunted" &&
+                          barrowCornered->At == 70 && barrowCornered->Text == "cornered";
+    Check(barrowOk, "barrow ground signs are scuffs, a low howl, hunted, then cornered");
+    DangerSignsState quiet;
+    Check(DangerCueLine(rules, quiet, 8, "overland", "forest") == "uneasy - prints",
+          "the shipped forest opens with prints");
+    Check(DangerCueLine(rules, quiet, 18, "overland", "barrow_ground") == "uneasy - scuffs",
+          "the shipped barrow ground opens with scuffs");
+    Check(DangerCueLine(rules, quiet, 80, "overland", "path").empty(),
+          "the shipped road still shows nothing");
 }
 
 void TestRejectedDanger()
@@ -348,6 +551,8 @@ void TestRejectedDanger()
         Check(data.Load(&loadError), "a tile with no rating still loads");
         Check(data.IsLoaded() && DangerRatingOf(data.GetDanger(), "wall") == 0,
               "an unlisted tile rates 0 and never rolls");
+        Check(data.GetDanger().Signs.empty() && data.GetDanger().CueJoin == kDefaultCueJoin,
+              "a file with no signs keeps the default join");
     }
     {
         TempCopy copy;
@@ -372,6 +577,128 @@ void TestRejectedDanger()
         DataError loadError;
         Check(!load(copy.Path, loadError), "an unknown map fails");
         CheckHas(loadError.Message, "no_such", "the missing map is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"cueJoin\": \" / \", \"ratings\": [ { \"tile\": \"floor\", \"rating\": 1 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"scuff\", \"kind\": \"tracks\", \"at\": 10, \"tile\": \"floor\", "
+                  "\"text\": \"scuffs\", \"color\": \"#112233\", \"marks\": [ "
+                  "{ \"x\": 4, \"y\": 80, \"size\": 10 } ] }, "
+                  "{ \"id\": \"cry\", \"kind\": \"howl\", \"at\": 20, \"tile\": \"floor\", "
+                  "\"text\": \"a howl\", \"steps\": 2 }, "
+                  "{ \"id\": \"mean\", \"kind\": \"hint\", \"at\": 30, \"tile\": \"floor\", "
+                  "\"text\": \"close\" } ] } }\n");
+        Database data(copy.Path);
+        DataError loadError;
+        Check(data.Load(&loadError), "signs load");
+        if (!loadError.Message.empty())
+            std::printf("    %s\n", loadError.Message.c_str());
+        bool loaded = data.IsLoaded() && data.GetDanger().CueJoin == " / " &&
+                      data.GetDanger().Signs.size() == 3;
+        const DangerSign* scuff = nullptr;
+        const DangerSign* cry = nullptr;
+        const DangerSign* mean = nullptr;
+        if (data.IsLoaded()) {
+            for (const DangerSign& sign : data.GetDanger().Signs) {
+                if (sign.Id == "scuff")
+                    scuff = &sign;
+                else if (sign.Id == "cry")
+                    cry = &sign;
+                else if (sign.Id == "mean")
+                    mean = &sign;
+            }
+        }
+        loaded = loaded && scuff != nullptr && scuff->Kind == DangerSignKind::Tracks &&
+                 scuff->HasColor && scuff->Red == 0x11 && scuff->Green == 0x22 &&
+                 scuff->Blue == 0x33 && scuff->Marks.size() == 1 && scuff->Marks[0].X == 4 &&
+                 cry != nullptr && cry->Steps == 2 && cry->Text == "a howl" && mean != nullptr &&
+                 mean->Kind == DangerSignKind::Hint && mean->Text == "close";
+        Check(loaded, "a tracks sign, a howl, and a hint keep their fields");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"sound\", \"at\": 1, \"text\": \"no\" } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "a bad sign kind fails");
+        CheckHas(loadError.Message, "sound", "the kind is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"howl\", \"at\": 1, \"text\": \"a howl\", "
+                  "\"steps\": 1, \"volume\": 2 } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "an unknown sign field fails");
+        CheckHas(loadError.Message, "volume", "the unknown sign field is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"howl\", \"at\": 1, \"steps\": 1 } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "a howl with no text fails");
+        CheckHas(loadError.Message, "text", "the missing howl text is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"tracks\", \"at\": 1, \"tile\": \"floor\", "
+                  "\"marks\": [ { \"x\": 4, \"y\": 4, \"size\": 8 } ] } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "tracks marks need a color");
+        CheckHas(loadError.Message, "color", "the missing mark color is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"hint\", \"at\": 1, \"text\": \"close\", "
+                  "\"steps\": 2 } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "a hint does not take steps");
+        CheckHas(loadError.Message, "steps", "the hint steps field is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"hint\", \"at\": 1, \"tile\": \"missing\", "
+                  "\"text\": \"close\" } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "a sign with an unknown tile fails");
+        CheckHas(loadError.Message, "missing", "the missing sign tile is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [], \"signs\": [ "
+                  "{ \"id\": \"bad\", \"kind\": \"hint\", \"at\": 1, \"map\": \"no_such\", "
+                  "\"text\": \"close\" } ] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "a sign with an unknown map fails");
+        CheckHas(loadError.Message, "no_such", "the missing sign map is named");
     }
 }
 
@@ -421,6 +748,7 @@ int main()
     TestCurves();
     TestTables();
     TestRollSequence();
+    TestSigns();
     TestShippedDanger();
     TestRejectedDanger();
     TestOldSaveLoads();

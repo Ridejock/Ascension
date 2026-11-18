@@ -990,7 +990,7 @@ bool AscensionApp::TouchSpawn(const ContactQuery& query)
         OfferSpawn(m_Data, *map, query, m_MapMemory, m_Places, &m_Gallery.GetPack());
     if (!request.Active)
         return false;
-    ResetDanger(m_Danger, m_Data.GetDanger());
+    QuietDanger();
     m_MapFight.Active = true;
     m_MapFight.SpawnId = request.SpawnId;
     m_MapFight.EncounterId = request.EncounterId;
@@ -1027,6 +1027,7 @@ void AscensionApp::TouchDanger(const WalkPlace& before, WalkStepKind kind)
     const i32 rating = DangerRatingOf(rules, *cell);
     const u32 cap = rules.Cap > 0 ? static_cast<u32>(rules.Cap) : 1u;
     const DangerStep stepped = AdvanceDanger(m_Danger, rules, rating, NextDangerRoll(m_DangerRng, cap));
+    AdvanceDangerSigns(m_SignState, rules, m_Danger.Value, map->Id, *cell);
     if (!stepped.Fight)
         return;
     if (m_Hero.IsReady() && m_Hero.NextFightBlock() != nullptr)
@@ -1049,8 +1050,14 @@ void AscensionApp::TouchDanger(const WalkPlace& before, WalkStepKind kind)
     m_MapFight.AllowFlee = DangerEncounterFlees(m_Data, encounter);
     const bool sameMap = kind == WalkStepKind::Moved && before.MapId == map->Id;
     m_MapFight.ReturnTile = sameMap ? before.Tile : tile;
-    ResetDanger(m_Danger, rules);
+    QuietDanger();
     BeginSpawnFight();
+}
+
+void AscensionApp::QuietDanger()
+{
+    ResetDanger(m_Danger, m_Data.GetDanger());
+    ClearDangerSigns(m_SignState);
 }
 
 std::string AscensionApp::DangerWord() const
@@ -1062,17 +1069,30 @@ std::string AscensionApp::DangerWord() const
         return {};
     const MapTile tile = m_Walker.Place().Tile;
     const std::string* cell = map->Cell(tile.X, tile.Y);
-    if (cell == nullptr || DangerRatingOf(m_Data.GetDanger(), *cell) < 1)
+    if (cell == nullptr)
         return {};
-    const DangerHint* hint = DangerHintFor(m_Data.GetDanger(), m_Danger.Value);
-    if (hint == nullptr || hint->Text.empty())
-        return {};
-    std::string word = hint->Text;
+    std::string word =
+        DangerCueLine(m_Data.GetDanger(), m_SignState, m_Danger.Value, map->Id, *cell);
     for (char& code : word) {
         if (code >= 'a' && code <= 'z')
             code = static_cast<char>(code - 'a' + 'A');
     }
     return word;
+}
+
+void AscensionApp::GatherDangerMarks(std::vector<DangerMarkSpot>& out) const
+{
+    out.clear();
+    if (!m_Walker.Placed() || m_Danger.Value < 1)
+        return;
+    const MapDef* map = m_Data.FindMap(m_Walker.Place().MapId);
+    if (map == nullptr)
+        return;
+    const MapTile tile = m_Walker.Place().Tile;
+    const std::string* cell = map->Cell(tile.X, tile.Y);
+    if (cell == nullptr)
+        return;
+    CollectDangerMarks(m_Data.GetDanger(), m_Danger.Value, map->Id, *cell, tile.X, tile.Y, out);
 }
 
 void AscensionApp::BeginSpawnFight()
@@ -1269,7 +1289,7 @@ void AscensionApp::MaybeSettle()
         m_Vitals.ReturnToHub = false;
 
     m_Battle.reset();
-    ResetDanger(m_Danger, m_Data.GetDanger());
+    QuietDanger();
     m_MapFight = {};
     SyncPlaces();
     if (result == BattleResult::Victory)
@@ -1606,6 +1626,14 @@ bool AscensionApp::EnterOverland(std::string_view preferred)
     }
     if (!stood)
         return false;
+    if (m_Walker.Placed()) {
+        const WalkPlace& here = m_Walker.Place();
+        if (const MapDef* hereMap = m_Data.FindMap(here.MapId)) {
+            if (const std::string* hereCell = hereMap->Cell(here.Tile.X, here.Tile.Y))
+                SettleDangerSigns(m_SignState, m_Data.GetDanger(), m_Danger.Value, hereMap->Id,
+                                  *hereCell);
+        }
+    }
     m_OnMap = true;
     m_HasPlace = true;
     m_PlaceMap = m_Walker.Place().MapId;
@@ -3144,6 +3172,7 @@ void AscensionApp::ApplyFreshRun(const FreshStart& fresh)
     m_ResumeSpawn.clear();
     m_Danger = {};
     m_DangerRng = {};
+    m_SignState = {};
     m_WildResume = false;
     m_WildEncounter.clear();
     m_WildReturn = {};
@@ -3795,6 +3824,7 @@ bool AscensionApp::LoadSlot(std::string_view slot, std::string& error)
     if (m_Data.GetDanger().Cap > 0 && m_Danger.Value > m_Data.GetDanger().Cap)
         m_Danger.Value = m_Data.GetDanger().Cap;
     m_DangerRng.State = run.DangerRng < 1 ? 1u : static_cast<u32>(run.DangerRng);
+    m_SignState = {};
     m_WildResume = run.Wild;
     m_WildEncounter = run.Wild ? run.EncounterId : std::string{};
     m_WildReturn = run.WildReturn;
@@ -4722,10 +4752,11 @@ void AscensionApp::OnRender2D(Emerald::Renderer2D& renderer)
                                   ? HeroPools(m_Data, m_Hero, m_Inventory)
                                   : PoolCaps{};
         const PoolPair shown = PoolsFrom(m_Vitals, caps);
+        std::vector<DangerMarkSpot> marks;
+        GatherDangerMarks(marks);
         DrawMapScreen(renderer, m_Data, m_Walker, m_Log, width, height, shown.Hp, caps.MaxHp,
                       shown.Focus, caps.MaxFocus, shown.Mana, caps.MaxMana, m_MapMemory.Cleared,
-                      m_Places, &m_Gallery,
-                      &m_Glides);
+                      m_Places, &m_Gallery, &m_Glides, marks);
         const f32 poolsY = 16.0f + Emerald::DebugTextLineHeight(2) + 4.0f;
         f32 promptY = poolsY + Emerald::DebugTextLineHeight(2) + 4.0f;
         const std::string dangerWord = DangerWord();

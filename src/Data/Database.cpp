@@ -4346,6 +4346,142 @@ bool LoadTiles(const Json& root, Parsed& parsed, std::string& error)
     return true;
 }
 
+bool ReadDangerMark(const Json& entry, const std::string& where, DangerMark& mark,
+                     std::string& error)
+{
+    if (!entry.is_object()) {
+        error = where + ": mark entries must be objects";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(entry, {"x", "y", "size"}, unknown)) {
+        error = where + ": unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireInt(entry, "x", 0, 100, mark.X, error) ||
+        !RequireInt(entry, "y", 0, 100, mark.Y, error) ||
+        !RequireInt(entry, "size", 1, 100, mark.Size, error)) {
+        error = where + ": " + error;
+        return false;
+    }
+    return true;
+}
+
+bool ReadDangerSign(const Json& entry, const Parsed& parsed, i32 cap, DangerSign& sign,
+                    std::string& error)
+{
+    if (!entry.is_object()) {
+        error = "sign entries must be objects";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(entry, {"id", "kind", "at", "tile", "map", "text", "steps", "color", "marks"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    if (!RequireString(entry, "id", sign.Id, error))
+        return false;
+    const std::string where = "sign " + Quote(sign.Id);
+    if (!IsId(sign.Id)) {
+        error = where + ": id must be letters, digits and _, starting with a letter";
+        return false;
+    }
+    std::string kind;
+    if (!RequireString(entry, "kind", kind, error)) {
+        error = where + ": " + error;
+        return false;
+    }
+    if (kind == "tracks")
+        sign.Kind = DangerSignKind::Tracks;
+    else if (kind == "howl")
+        sign.Kind = DangerSignKind::Howl;
+    else if (kind == "hint")
+        sign.Kind = DangerSignKind::Hint;
+    else {
+        error = where + ": kind " + Quote(kind) + " must be \"tracks\", \"howl\", or \"hint\"";
+        return false;
+    }
+    if (!RequireInt(entry, "at", 0, cap, sign.At, error)) {
+        error = where + ": " + error;
+        return false;
+    }
+    std::string why;
+    if (!OptionalId(entry, "tile", sign.Tile, why)) {
+        error = where + ": " + why;
+        return false;
+    }
+    if (!sign.Tile.empty() && FindId(parsed.Tiles, sign.Tile) == nullptr) {
+        error = where + ": tile " + Quote(sign.Tile) + " does not exist";
+        return false;
+    }
+    if (!OptionalId(entry, "map", sign.Map, why)) {
+        error = where + ": " + why;
+        return false;
+    }
+    if (sign.Kind == DangerSignKind::Tracks) {
+        if (!OptionalString(entry, "text", sign.Text, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!Absent(entry, "steps", where, error))
+            return false;
+    } else {
+        if (!RequireString(entry, "text", sign.Text, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!Absent(entry, "marks", where, error) || !Absent(entry, "color", where, error))
+            return false;
+    }
+    if (!sign.Text.empty() && sign.Text.size() > 32) {
+        error = where + ": text must be 32 characters or fewer";
+        return false;
+    }
+    if (sign.Kind == DangerSignKind::Howl) {
+        if (!RequireInt(entry, "steps", 1, 99, sign.Steps, error)) {
+            error = where + ": " + error;
+            return false;
+        }
+    } else if (!Absent(entry, "steps", where, error)) {
+        return false;
+    }
+    if (sign.Kind != DangerSignKind::Tracks)
+        return true;
+    const auto marks = entry.find("marks");
+    if (marks != entry.end()) {
+        if (!marks->is_array()) {
+            error = where + ": 'marks' must be a list";
+            return false;
+        }
+        for (const Json& markEntry : *marks) {
+            DangerMark mark;
+            if (!ReadDangerMark(markEntry, where, mark, error))
+                return false;
+            sign.Marks.push_back(mark);
+        }
+    }
+    if (!sign.Marks.empty()) {
+        std::string color;
+        if (!RequireString(entry, "color", color, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        if (!ParseColor(color, sign.Red, sign.Green, sign.Blue, why)) {
+            error = where + ": " + why;
+            return false;
+        }
+        sign.HasColor = true;
+    } else if (!Absent(entry, "color", where, error)) {
+        return false;
+    }
+    if (sign.Text.empty() && sign.Marks.empty()) {
+        error = where + ": a tracks sign needs text or marks";
+        return false;
+    }
+    return true;
+}
+
 bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
 {
     const auto body = root.find("danger");
@@ -4354,7 +4490,9 @@ bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body, {"cap", "graceSteps", "curve", "ratings", "tables", "hints"}, unknown)) {
+    if (!AllowKeys(*body,
+                   {"cap", "graceSteps", "curve", "cueJoin", "ratings", "tables", "hints", "signs"},
+                   unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
@@ -4372,6 +4510,17 @@ bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
     else {
         error = "'curve' must be \"linear\" or \"square\"";
         return false;
+    }
+    rules.CueJoin = std::string(kDefaultCueJoin);
+    std::string join;
+    if (!OptionalString(*body, "cueJoin", join, error))
+        return false;
+    if (!join.empty()) {
+        if (join.size() > 8) {
+            error = "'cueJoin' must be 8 characters or fewer";
+            return false;
+        }
+        rules.CueJoin = std::move(join);
     }
 
     const auto ratings = body->find("ratings");
@@ -4438,6 +4587,26 @@ bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
                 return false;
             }
             rules.Hints.push_back(std::move(hint));
+        }
+    }
+
+    const auto signs = body->find("signs");
+    if (signs != body->end()) {
+        if (!signs->is_array()) {
+            error = "'signs' must be a list";
+            return false;
+        }
+        for (const Json& entry : *signs) {
+            DangerSign sign;
+            if (!ReadDangerSign(entry, parsed, rules.Cap, sign, error))
+                return false;
+            for (const DangerSign& older : rules.Signs) {
+                if (older.Id == sign.Id) {
+                    error = "sign " + Quote(sign.Id) + ": there is another sign with this id";
+                    return false;
+                }
+            }
+            rules.Signs.push_back(std::move(sign));
         }
     }
 
@@ -5339,8 +5508,8 @@ bool CheckMapLinks(const Parsed& parsed, std::string& error)
     return true;
 }
 
-// A table may name a map. That map has to exist. Tile and encounter ids are
-// checked while danger.json itself is read, before the map files.
+// A table or a sign may name a map. That map has to exist. Tile and encounter
+// ids are checked while danger.json itself is read, before the map files.
 bool CheckDangerMaps(const Parsed& parsed, std::string& error)
 {
     for (const DangerTable& table : parsed.Danger.Tables) {
@@ -5349,6 +5518,15 @@ bool CheckDangerMaps(const Parsed& parsed, std::string& error)
         if (FindId(parsed.Maps, table.Map) == nullptr) {
             error = Err("danger.json", "table " + Quote(table.Id),
                         "map " + Quote(table.Map) + " does not exist");
+            return false;
+        }
+    }
+    for (const DangerSign& sign : parsed.Danger.Signs) {
+        if (sign.Map.empty())
+            continue;
+        if (FindId(parsed.Maps, sign.Map) == nullptr) {
+            error = Err("danger.json", "sign " + Quote(sign.Id),
+                        "map " + Quote(sign.Map) + " does not exist");
             return false;
         }
     }

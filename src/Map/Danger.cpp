@@ -108,6 +108,243 @@ const DangerHint* DangerHintFor(const DangerRules& rules, i32 value)
     return best;
 }
 
+namespace {
+
+bool SignMatches(const DangerSign& sign, std::string_view mapId, std::string_view tileId)
+{
+    if (!sign.Map.empty() && sign.Map != mapId)
+        return false;
+    if (!sign.Tile.empty() && sign.Tile != tileId)
+        return false;
+    return true;
+}
+
+const DangerSign* FindSign(const DangerRules& rules, std::string_view id)
+{
+    for (const DangerSign& sign : rules.Signs) {
+        if (sign.Id == id)
+            return &sign;
+    }
+    return nullptr;
+}
+
+bool SpentHowl(const DangerSignsState& state, std::string_view id)
+{
+    for (const std::string& spent : state.Spent) {
+        if (spent == id)
+            return true;
+    }
+    return false;
+}
+
+// A mapped sign of this kind that fits the meter hides the tile-only ones.
+bool MappedKind(const DangerRules& rules, DangerSignKind kind, i32 value, std::string_view mapId,
+                std::string_view tileId)
+{
+    for (const DangerSign& sign : rules.Signs) {
+        if (sign.Kind != kind || sign.Map.empty() || value < sign.At)
+            continue;
+        if (SignMatches(sign, mapId, tileId))
+            return true;
+    }
+    return false;
+}
+
+const DangerSign* BestSign(const DangerRules& rules, DangerSignKind kind, i32 value,
+                           std::string_view mapId, std::string_view tileId)
+{
+    const bool mapped = MappedKind(rules, kind, value, mapId, tileId);
+    const DangerSign* best = nullptr;
+    for (const DangerSign& sign : rules.Signs) {
+        if (sign.Kind != kind || value < sign.At)
+            continue;
+        if (!SignMatches(sign, mapId, tileId))
+            continue;
+        if (mapped && sign.Map.empty())
+            continue;
+        if (best == nullptr || sign.At >= best->At)
+            best = &sign;
+    }
+    return best;
+}
+
+void AppendCue(std::string& line, std::string_view join, std::string_view part)
+{
+    if (part.empty())
+        return;
+    if (!line.empty())
+        line.append(join);
+    line.append(part);
+}
+
+const DangerSign* LiveHowl(const DangerRules& rules, const DangerSignsState& state, i32 value,
+                           std::string_view mapId, std::string_view tileId)
+{
+    bool mapped = false;
+    for (const DangerHowlHold& hold : state.Howls) {
+        if (hold.Left < 1)
+            continue;
+        const DangerSign* sign = FindSign(rules, hold.SignId);
+        if (sign == nullptr || sign->Kind != DangerSignKind::Howl || value < sign->At)
+            continue;
+        if (!sign->Map.empty() && SignMatches(*sign, mapId, tileId))
+            mapped = true;
+    }
+    const DangerSign* best = nullptr;
+    for (const DangerHowlHold& hold : state.Howls) {
+        if (hold.Left < 1)
+            continue;
+        const DangerSign* sign = FindSign(rules, hold.SignId);
+        if (sign == nullptr || sign->Kind != DangerSignKind::Howl || value < sign->At)
+            continue;
+        if (!SignMatches(*sign, mapId, tileId))
+            continue;
+        if (mapped && sign->Map.empty())
+            continue;
+        if (best == nullptr || sign->At >= best->At)
+            best = sign;
+    }
+    return best;
+}
+
+void DropSpent(DangerSignsState& state, const DangerRules& rules, i32 value)
+{
+    std::vector<std::string> kept;
+    kept.reserve(state.Spent.size());
+    for (const std::string& id : state.Spent) {
+        const DangerSign* sign = FindSign(rules, id);
+        if (sign == nullptr || sign->Kind != DangerSignKind::Howl)
+            continue;
+        if (value < sign->At)
+            continue;
+        kept.push_back(id);
+    }
+    state.Spent = std::move(kept);
+}
+
+void DecayHowls(DangerSignsState& state)
+{
+    std::vector<DangerHowlHold> kept;
+    kept.reserve(state.Howls.size());
+    for (DangerHowlHold& hold : state.Howls) {
+        if (hold.Left > 0)
+            --hold.Left;
+        if (hold.Left > 0)
+            kept.push_back(std::move(hold));
+    }
+    state.Howls = std::move(kept);
+}
+
+} // namespace
+
+std::string DangerCueLine(const DangerRules& rules, const DangerSignsState& state, i32 value,
+                          std::string_view mapId, std::string_view tileId)
+{
+    if (value < 1 || DangerRatingOf(rules, tileId) < 1)
+        return {};
+    std::string hint;
+    if (const DangerSign* terrain = BestSign(rules, DangerSignKind::Hint, value, mapId, tileId))
+        hint = terrain->Text;
+    else if (const DangerHint* word = DangerHintFor(rules, value))
+        hint = word->Text;
+    std::string tracks;
+    if (const DangerSign* trail = BestSign(rules, DangerSignKind::Tracks, value, mapId, tileId))
+        tracks = trail->Text;
+    std::string howl;
+    if (const DangerSign* cry = LiveHowl(rules, state, value, mapId, tileId))
+        howl = cry->Text;
+    const std::string_view join =
+        rules.CueJoin.empty() ? kDefaultCueJoin : std::string_view(rules.CueJoin);
+    std::string line;
+    AppendCue(line, join, hint);
+    AppendCue(line, join, tracks);
+    AppendCue(line, join, howl);
+    return line;
+}
+
+void CollectDangerMarks(const DangerRules& rules, i32 value, std::string_view mapId,
+                        std::string_view tileId, i32 tileX, i32 tileY,
+                        std::vector<DangerMarkSpot>& out)
+{
+    out.clear();
+    if (value < 1 || DangerRatingOf(rules, tileId) < 1)
+        return;
+    const DangerSign* trail = BestSign(rules, DangerSignKind::Tracks, value, mapId, tileId);
+    if (trail == nullptr || !trail->HasColor)
+        return;
+    for (const DangerMark& mark : trail->Marks) {
+        if (mark.Size < 1)
+            continue;
+        DangerMarkSpot spot;
+        spot.MapId = std::string(mapId);
+        spot.TileX = tileX;
+        spot.TileY = tileY;
+        spot.Red = trail->Red;
+        spot.Green = trail->Green;
+        spot.Blue = trail->Blue;
+        spot.X = mark.X;
+        spot.Y = mark.Y;
+        spot.Size = mark.Size;
+        out.push_back(std::move(spot));
+    }
+}
+
+void AdvanceDangerSigns(DangerSignsState& state, const DangerRules& rules, i32 value,
+                        std::string_view mapId, std::string_view tileId)
+{
+    if (value < 0)
+        value = 0;
+    DecayHowls(state);
+    DropSpent(state, rules, value);
+    if (DangerRatingOf(rules, tileId) < 1)
+        return;
+    const bool mapped = MappedKind(rules, DangerSignKind::Howl, value, mapId, tileId);
+    for (const DangerSign& sign : rules.Signs) {
+        if (sign.Kind != DangerSignKind::Howl || value < sign.At)
+            continue;
+        if (!SignMatches(sign, mapId, tileId))
+            continue;
+        if (mapped && sign.Map.empty())
+            continue;
+        if (SpentHowl(state, sign.Id))
+            continue;
+        DangerHowlHold hold;
+        hold.SignId = sign.Id;
+        hold.Left = sign.Steps < 1 ? 1 : sign.Steps;
+        state.Howls.push_back(std::move(hold));
+        state.Spent.push_back(sign.Id);
+    }
+}
+
+void SettleDangerSigns(DangerSignsState& state, const DangerRules& rules, i32 value,
+                       std::string_view mapId, std::string_view tileId)
+{
+    state.Howls.clear();
+    if (value < 0)
+        value = 0;
+    DropSpent(state, rules, value);
+    if (DangerRatingOf(rules, tileId) < 1)
+        return;
+    const bool mapped = MappedKind(rules, DangerSignKind::Howl, value, mapId, tileId);
+    for (const DangerSign& sign : rules.Signs) {
+        if (sign.Kind != DangerSignKind::Howl || value < sign.At)
+            continue;
+        if (!SignMatches(sign, mapId, tileId))
+            continue;
+        if (mapped && sign.Map.empty())
+            continue;
+        if (SpentHowl(state, sign.Id))
+            continue;
+        state.Spent.push_back(sign.Id);
+    }
+}
+
+void ClearDangerSigns(DangerSignsState& state)
+{
+    state.Howls.clear();
+    state.Spent.clear();
+}
+
 DangerStep AdvanceDanger(DangerMeter& meter, const DangerRules& rules, i32 rating, u32 roll)
 {
     DangerStep step;

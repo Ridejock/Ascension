@@ -62,6 +62,8 @@ private:
     bool TouchSpawn(const ContactQuery& query);
     // A committed step that did not open a spawn fight. Rating 0 never rolls.
     void TouchDanger(const WalkPlace& before, WalkStepKind kind);
+    // A fight, including a flee and a placed spawn, clears the meter and the cues.
+    void QuietDanger();
     void BeginSpawnFight();
     // Puts a finished spawn fight back on the map. A list fight never has one open.
     void MaybeSettle();
@@ -71,9 +73,10 @@ private:
     // An ongoing wild fight, or a wild win that is still choosing. The spawn
     // list does not have this fight.
     void OpenResumedWild();
-    // The HUD word for the meter, already uppercased. Empty on the road, at
-    // 0, and when the data has no hint for this value.
+    // The HUD line for the meter, already uppercased. The hint, the tracks
+    // word, and a live howl. Empty on the road, at 0, and when nothing matches.
     [[nodiscard]] std::string DangerWord() const;
+    void GatherDangerMarks(std::vector<DangerMarkSpot>& out) const;
     // A loss fills both pools and marks a hub return. Gold is not touched.
     void RememberDefeat();
     // Standing on a rest point fills both pools, once per arrival.
@@ -319,6 +322,9 @@ private:
     // Builds while the hero walks off a 0-rated tile. A fight sets it back.
     DangerMeter m_Danger;
     DangerRng m_DangerRng;
+    // Howls still on screen, and which howls already played this filling.
+    // Not written to the save.
+    DangerSignsState m_SignState;
     // Set from a save until EnterOverland opens the wild fight or drops it.
     bool m_WildResume = false;
     std::string m_WildEncounter;
