@@ -13,6 +13,7 @@
 #include "Ascension/Map/Movers.h"
 #include "Ascension/Map/Walk.h"
 #include "Ascension/Progress/Hero.h"
+#include "Ascension/Progress/TitleSheet.h"
 #include "Ascension/Progress/Inventory.h"
 #include "Ascension/Progress/DebugRun.h"
 #include "Ascension/Progress/FrontDoor.h"
@@ -93,9 +94,12 @@ private:
     void FinishAction(const ActionResult& result, bool playerActed);
     void DrinkAt(i32 bagIndex);
     void HandlePicker(std::string_view action);
+    void OpenCamp();
     void ClampCamp();
     void HandleCamp(std::string_view action);
+    void HandleTitles(std::string_view action);
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    void DrawTitles(Emerald::Renderer2D& renderer, f32 width, f32 height);
     void DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // One line on the battle and shop screens. Further lines wait, and Confirm skips the wait.
     void ClearPresented();
@@ -373,6 +377,9 @@ private:
     bool m_Aiming = false;
     enum class ShopAsk : u8 { None, Buy, Sell, Equip, Unequip };
     ShopAsk m_ShopAsk = ShopAsk::None;
+    // Worn titles. Opened from the camp's titles row. Confirm arms equip and take-off
+    // the same way the shop arms a worn piece.
+    TitleSheet m_Titles;
     // The line on screen, and the lines still waiting. Age is seconds on the current line.
     std::string m_Shown;
     std::vector<std::string> m_Pending;

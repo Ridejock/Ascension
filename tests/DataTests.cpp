@@ -2267,6 +2267,23 @@ void TestMythicUnique()
         TestRejected(copy.Path, "rarities.json", "uniquePerType",
                      "uniquePerType must be true or false");
     }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "rarities.json", "\"titleSlots\": 1",
+                      "\"titleSlots\": 1, \"crown\": true");
+        TestRejected(copy.Path, "rarities.json", "crown", "a rarity rejects an unknown field");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "rarities.json", "\"titleSlots\": 1", "\"titleSlots\": -1");
+        TestRejected(copy.Path, "rarities.json", "titleSlots", "title slots cannot be negative");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "titles.json", "\"equipped\": \"EQUIPPED\"",
+                      "\"equipped\": \"EQUIPPED\", \"note\": \"x\"");
+        TestRejected(copy.Path, "titles.json", "note", "the title sheet rejects an unknown field");
+    }
 }
 
 void TestDropEntries()

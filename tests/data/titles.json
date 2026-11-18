@@ -1,4 +1,18 @@
 {
+  "sheet": {
+    "equipped": "EQUIPPED",
+    "owned": "OWNED",
+    "empty": "EMPTY",
+    "none": "NONE",
+    "open": "TITLES",
+    "hint": "Only a worn title grants its bonus.",
+    "equipAsk": "Equip {name}?",
+    "unequipAsk": "Take off {name}?",
+    "equippedNote": "Equipped {name}.",
+    "unequippedNote": "Took off {name}.",
+    "worn": "Worn",
+    "held": "Owned"
+  },
   "titles": [
     {
       "id": "wolf_cull",

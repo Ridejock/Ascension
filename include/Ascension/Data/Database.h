@@ -81,6 +81,8 @@ public:
     [[nodiscard]] std::span<const StatusDef> GetStatuses() const { return m_Statuses; }
     [[nodiscard]] std::span<const ClassDef> GetClasses() const { return m_Classes; }
     [[nodiscard]] std::span<const TitleDef> GetTitles() const { return m_Titles; }
+    // Column names and the equip questions. titles.json's sheet object.
+    [[nodiscard]] const TitleLabels& GetTitleLabels() const { return m_TitleLabels; }
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
     [[nodiscard]] std::span<const EncounterDef> GetEncounters() const { return m_Encounters; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
@@ -192,6 +194,7 @@ private:
     std::vector<StatusDef> m_Statuses;
     std::vector<ClassDef> m_Classes;
     std::vector<TitleDef> m_Titles;
+    TitleLabels m_TitleLabels;
     std::vector<EnemyDef> m_Enemies;
     std::vector<EncounterDef> m_Encounters;
     std::vector<ItemDef> m_Items;

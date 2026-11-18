@@ -28,19 +28,35 @@ struct SystemCounter {
     i32 Count = 0;
 };
 
-// The System's memory of one run. Counters are the bus. Titles are accepted. TitleOffers
-// and SkillOffers are still waiting. GrantedSkills are System skill grants already taken.
-// FreeSpent is the free points already placed. FreeFloor is the level through which free
-// points were already settled: a new game uses 1, so every step counts, and a migrated
-// save uses the level it loaded at, so old levels do not dump a spend screen.
+// The System's memory of one run. Counters are the bus. Titles are owned (accepted).
+// Equipped is the owned ids currently worn, in slot order, no longer than the class
+// rarity's titleSlots. Only Equipped grants a bonus. TitleOffers and SkillOffers are
+// still waiting. GrantedSkills are System skill grants already taken. FreeSpent is the
+// free points already placed. FreeFloor is the level through which free points were
+// already settled: a new game uses 1, so every step counts, and a migrated save uses
+// the level it loaded at, so old levels do not dump a spend screen.
 struct SystemState {
     std::vector<SystemCounter> Counters;
     std::vector<std::string> Titles;
+    std::vector<std::string> Equipped;
     std::vector<std::string> TitleOffers;
     std::vector<std::string> SkillOffers;
     std::vector<std::string> GrantedSkills;
     StatBlock FreeSpent;
     i32 FreeFloor = 1;
+};
+
+// One catalog title as this run wears it. Slot is the equipped index, or -1 when it is
+// not worn. A future dialogue line can read Owned, Equipped, and the name. This does
+// not speak. An owned id whose row is gone keeps the id and leaves the name empty.
+struct TitleFact {
+    std::string Id;
+    std::string Name;
+    std::string Description;
+    TitleBonus Bonus;
+    bool Owned = false;
+    bool Equipped = false;
+    i32 Slot = -1;
 };
 
 // Records the event and opens any offer the new totals earn. classId is the class the
@@ -77,8 +93,27 @@ void EvaluateSystem(SystemState& state, const Database& data, std::string_view c
 [[nodiscard]] bool EvolutionOffered(const SystemState& state, const ClassDef& evolution,
                                     i32 level);
 
+// How many titles `classId` can wear. That is its rarity's titleSlots. An evolution
+// with no rarity uses the parent's rarity, the same way free points do. A missing
+// class, or a rarity row that omits titleSlots, wears none.
+[[nodiscard]] i32 TitleSlotCount(const Database& data, std::string_view classId);
+
+// Drops equipped ids that are not owned, then keeps the earliest ones that fit.
+void ClampEquippedTitles(SystemState& state, const Database& data, std::string_view classId);
+
+// Stat and tag bonuses from equipped titles only. An owned title that is not worn
+// adds nothing. A worn id whose row is gone adds nothing and still holds its slot.
 [[nodiscard]] StatBlock TitleStatBonus(const Database& data, const SystemState& state);
 [[nodiscard]] std::vector<TagDamage> TitleTagDamage(const Database& data, const SystemState& state);
+
+// Every catalog title, in file order, then any owned or equipped id the catalog no
+// longer has. Equipped and Slot describe this run.
+[[nodiscard]] std::vector<TitleFact> QueryTitles(const Database& data, const SystemState& state);
+// False when `id` is not a catalog title and this run does not own or wear it.
+bool FindTitleFact(const Database& data, const SystemState& state, std::string_view id,
+                   TitleFact& out);
+[[nodiscard]] bool TitleOwned(const SystemState& state, std::string_view id);
+[[nodiscard]] bool TitleIsEquipped(const SystemState& state, std::string_view id);
 
 // The rule on this class or its parent. Null when the offer is not on that chain.
 [[nodiscard]] const SystemSkillRule* FindSystemSkillRule(const Database& data,
@@ -87,6 +122,12 @@ void EvaluateSystem(SystemState& state, const Database& data, std::string_view c
 
 bool AcceptTitle(SystemState& state, const Database& data, std::string_view id,
                  std::string& error);
+// Wears an owned title in the next open slot. Fails when it is not owned, already
+// worn, unknown, or every slot of `classId` is filled.
+bool EquipTitle(SystemState& state, const Database& data, std::string_view classId,
+                std::string_view id, std::string& error);
+// Takes a worn title off. It stays owned.
+bool UnequipTitle(SystemState& state, std::string_view id, std::string& error);
 bool AcceptSystemSkill(SystemState& state, const Database& data, std::string_view classId,
                        i32 level, std::string_view offerId, std::string& error);
 
