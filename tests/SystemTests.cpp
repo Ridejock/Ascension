@@ -1190,6 +1190,53 @@ void TestLogSave()
           "version 8 keeps the System log");
 }
 
+void TestMissingHurt()
+{
+    Database data = Shipped();
+    if (!data.IsLoaded())
+        return;
+    TempDir older("ascension-system-hurt");
+    Emerald::SaveData file;
+    file.SetString("class", "fighter");
+    file.SetBool("fight.known", true);
+    file.SetString("fight.actor", "player");
+    file.SetInt("fight.order.count", 1);
+    file.SetString("fight.order.0.side", "player");
+    file.SetInt("fight.order.0.index", 0);
+    file.SetInt("fight.order.0.agility", 5);
+    file.SetInt("fight.foe.count", 1);
+    file.SetString("fight.foe.0.id", "wolf");
+    file.SetInt("fight.foe.0.hp", 10);
+    file.SetString("fight.player.id", "fighter");
+    file.SetInt("fight.player.hp", 20);
+    Emerald::SaveSystem version(older.Path, 7);
+    Check(version.Save("run", file, "v7"), "a version 7 mid-fight file writes");
+    RunSave oldSaves(older.Path);
+    const RunLoad old = oldSaves.Read();
+    Check(static_cast<bool>(old) && old.FileVersion == 7 && old.Run.Fight.Known &&
+              old.Run.Fight.PlayerHurt > 0,
+          "a saved fight with no hurt key is already hurt");
+    if (!old)
+        return;
+    Battle fight(data, std::make_unique<AgilityRoundModel>());
+    std::string why;
+    Check(fight.Start("fighter", 1, "wolf", why) && fight.ImportFight(old.Run.Fight, why) &&
+              fight.PlayerHurt() > 0,
+          "the restored fight keeps that hurt");
+    Hero hero = StartHero(data);
+    if (!hero.IsReady())
+        return;
+    hero.NoteVictory(fight.PlayerHurt(), fight.Player().Hp, fight.Player().MaxHp, 0);
+    Check(!HasId(hero.TitleOffers(), "unscathed"),
+          "a fight with no hurt key cannot count as untouched");
+
+    file.SetInt("fight.hurt", 0);
+    Check(version.Save("run", file, "v7"), "an explicit zero hurt writes");
+    const RunLoad clean = oldSaves.Read();
+    Check(static_cast<bool>(clean) && clean.Run.Fight.Known && clean.Run.Fight.PlayerHurt == 0,
+          "a stored zero stays untouched");
+}
+
 void TestGuardBlock()
 {
     Database data = Shipped();
@@ -1237,6 +1284,7 @@ int main()
     TestDeedJson();
     TestPlaystyleTitles();
     TestLogSave();
+    TestMissingHurt();
     TestGuardBlock();
     if (g_Failures == 0)
         std::printf("All system checks passed.\n");
