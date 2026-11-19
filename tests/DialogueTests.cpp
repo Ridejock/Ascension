@@ -1,5 +1,6 @@
 // Dialogue: load, flag syntax, the Fang gate, and Pell's approved lines. No window or GPU.
 
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -718,36 +719,70 @@ void TestTitleSenseFiles()
     }
 }
 
+bool HasSense(const DialogueDef& talk, const char* titleId)
+{
+    for (const TitleSenseLine& line : talk.Sense.Lines) {
+        if (line.When == TitleSenseWhen::Equipped && line.TitleId == titleId && !line.Line.empty())
+            return true;
+    }
+    return false;
+}
+
 void ExpectVillageSense(const DialogueDef* talk, const char* who)
 {
-    Check(talk != nullptr && talk->Sense.Lines.size() >= 6, who);
-    if (talk == nullptr || talk->Sense.Lines.size() < 6)
+    Check(talk != nullptr && talk->Sense.Lines.size() >= 8, who);
+    if (talk == nullptr || talk->Sense.Lines.size() < 8)
         return;
     Check(talk->Sense.Lines[0].When == TitleSenseWhen::Equipped &&
-              talk->Sense.Lines[0].TitleId == "wolf_cull" &&
-              talk->Sense.Lines[0].Line.find("Wolf Cull") != std::string::npos,
+              talk->Sense.Lines[0].TitleId == "wolf_cull",
           who);
     Check(talk->Sense.Lines[1].When == TitleSenseWhen::Equipped &&
-              talk->Sense.Lines[1].TitleId == "beast_hunter" &&
-              talk->Sense.Lines[1].Line.find("Beast Hunter") != std::string::npos,
+              talk->Sense.Lines[1].TitleId == "beast_hunter",
           who);
-    Check(talk->Sense.Lines.back().When == TitleSenseWhen::Fallback &&
-              talk->Sense.Lines.back().Line.find("{title.name}") != std::string::npos,
+    Check(HasSense(*talk, "crusher") && HasSense(*talk, "warden") && HasSense(*talk, "mender") &&
+              HasSense(*talk, "unscathed") && HasSense(*talk, "runner"),
           who);
-    bool crusher = false;
-    bool warden = false;
-    bool mender = false;
-    for (const TitleSenseLine& line : talk->Sense.Lines) {
-        if (line.When != TitleSenseWhen::Equipped)
-            continue;
-        if (line.TitleId == "crusher" && line.Line.find("Crusher") != std::string::npos)
-            crusher = true;
-        if (line.TitleId == "warden" && line.Line.find("Warden") != std::string::npos)
-            warden = true;
-        if (line.TitleId == "mender" && line.Line.find("Mender") != std::string::npos)
-            mender = true;
+    Check(talk->Sense.Lines.back().When == TitleSenseWhen::AnyEquipped &&
+              talk->Sense.Lines.back().Line.find("{title.") == std::string::npos,
+          who);
+}
+
+std::string Folded(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (const unsigned char c : text)
+        out.push_back(static_cast<char>(std::tolower(c)));
+    return out;
+}
+
+void TestSenseDoesNotNameTitles()
+{
+    Database data(kShipped);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads for the name check");
+    if (!data.IsLoaded())
+        return;
+    for (const DialogueDef& talk : data.GetDialogues()) {
+        for (const TitleSenseLine& line : talk.Sense.Lines) {
+            const std::string folded = Folded(line.Line);
+            std::string hit;
+            if (folded.find("{title.name}") != std::string::npos ||
+                folded.find("{title.description}") != std::string::npos)
+                hit = "a title token";
+            for (const TitleDef& title : data.GetTitles()) {
+                if (hit.empty() && !title.Name.empty() &&
+                    folded.find(Folded(title.Name)) != std::string::npos)
+                    hit = title.Name;
+                if (hit.empty() && !title.Description.empty() &&
+                    folded.find(Folded(title.Description)) != std::string::npos)
+                    hit = title.Description;
+            }
+            Check(hit.empty(), "a shipped remark does not say a title's name");
+            if (!hit.empty())
+                std::printf("    %s: %s\n", talk.Id.c_str(), hit.c_str());
+        }
     }
-    Check(crusher && warden && mender, who);
 }
 
 void TestVillageSense()
@@ -766,8 +801,9 @@ void TestVillageSense()
     ExpectVillageSense(bram, "Bram senses a worn title");
     ExpectVillageSense(calder, "Calder senses a worn title");
     Check(pell != nullptr && !pell->Sense.Lines.empty() &&
-              pell->Sense.Lines.back().Line.find("{title.description}") != std::string::npos,
-          "Pell's fallback can read the title description");
+              pell->Sense.Lines.back().When == TitleSenseWhen::AnyEquipped &&
+              pell->Sense.Lines.back().Line.find("loud in my shop") != std::string::npos,
+          "Pell's closing line hints and does not read the title");
 
     SystemState none;
     TitleFact missing;
@@ -792,9 +828,10 @@ void TestVillageSense()
     if (pell == nullptr)
         return;
     const TitleSenseMatch other = Hear(pell->Sense, facts);
-    Check(other.Spoken && other.TitleId == tomb.Id && other.Line.find(tomb.Name) != std::string::npos &&
-              other.Line.find(tomb.Description) != std::string::npos,
-          "another worn title fills Pell's fallback from the fact");
+    Check(other.Spoken && other.TitleId == tomb.Id && other.Line.find(tomb.Name) == std::string::npos &&
+              other.Line.find(tomb.Description) == std::string::npos &&
+              other.Line == pell->Sense.Lines.back().Line,
+          "another worn title gets Pell's hint, not the title's words");
     Check(other.Line.find("tombwalker") == std::string::npos, "Pell does not speak the raw id");
 
     Hero hero;
@@ -831,8 +868,9 @@ void TestVillageSense()
           "Crusher can take the slot");
     const TitleSenseMatch crusher = Hear(pell->Sense, hero.QueryTitles());
     Check(crusher.Spoken && crusher.TitleId == "crusher" &&
-              crusher.Line.find("Crusher") != std::string::npos,
-          "Pell remarks when Crusher is worn");
+              crusher.Line.find("counter owes you gold") != std::string::npos &&
+              crusher.Line.find("Crusher") == std::string::npos,
+          "Pell hints at Crusher and does not say the name");
     if (calder != nullptr) {
         World world;
         Check(Enter(*calder, world) && world.Node == "calder_greet",
@@ -871,6 +909,7 @@ int main()
     TestTitleConditions();
     TestTitleSenseFiles();
     TestVillageSense();
+    TestSenseDoesNotNameTitles();
     TestShipped();
     TestCalder();
     TestBram();
