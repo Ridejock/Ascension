@@ -273,6 +273,11 @@ struct SaveSlot {
 // a script that already writes run.sav still does.
 class RunSave {
 public:
+    // Version 8. The System log (notice.count, notice.N) and the meld ids already
+    // announced (meldNoted.count, meldNoted.N) are stored. A version 7 file has
+    // neither. The migration sets system.settled so the first evaluation records
+    // melds that are already open and does not announce them. fight.hurt, the
+    // damage a saved fight has already dealt the hero, is optional on this version.
     // Version 7. The System ledger (counters, titles, skill offers, granted skills, and
     // spent free points) is stored, plus free.floor. A version 6 file has none of those
     // keys. The migration marks it free.legacy so the load settles free points at the
@@ -291,7 +296,7 @@ public:
     // Version 4 is a map id and a tile, cleared spawns are string ids, and HP and focus
     // are kept between fights, including after a flee. Found ids and dialogue flags were
     // already optional in version 3: a missing list claimed nothing and set no talk flags.
-    static constexpr u32 kVersion = 7;
+    static constexpr u32 kVersion = 8;
 
     explicit RunSave(std::filesystem::path folder);
 

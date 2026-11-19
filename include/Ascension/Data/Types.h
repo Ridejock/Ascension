@@ -290,14 +290,48 @@ struct ProgressRules {
 // What a System deed counts. Kill, skill, and item deeds name an id or a tag (or both,
 // and then both have to be on the event). Tag counts skill and item events that carried
 // the tag, so a heal skill and a heal potion can feed one meld. Level stores the highest
-// level the bus has seen, not a sum.
-enum class DeedOn : u8 { Kill, Skill, Item, Tag, Level };
+// level the bus has seen, not a sum. Mark counts a playstyle fact (a guard that blocked,
+// a flee, gold earned). Class is the hero's class id. Title is an owned title, or a worn
+// one when Worn is set.
+enum class DeedOn : u8 { Kill, Skill, Item, Tag, Level, Mark, Class, Title };
+
+// A deed is one count, or a compound. All is every part. Any is one part. Not is the
+// one part, flipped. A count with no parts is the leaf the older files already wrote.
+enum class DeedOp : u8 { Count, All, Any, Not };
 
 struct DeedDef {
+    DeedOp Op = DeedOp::Count;
     DeedOn On = DeedOn::Kill;
     std::string Id;
     std::string Tag;
     i32 AtLeast = 1;
+    // Title counts. Worn means the title is equipped. Otherwise it is owned.
+    bool Worn = false;
+    std::vector<DeedDef> Parts;
+};
+
+// Facts the fight can report. The tag each one writes lives in titles.json, under
+// system.marks. Dealt is not a counter: a blow at least heavyAt becomes the heavy mark.
+inline constexpr std::string_view kHabitBlocked = "blocked";
+inline constexpr std::string_view kHabitHealed = "healed";
+inline constexpr std::string_view kHabitDealt = "dealt";
+inline constexpr std::string_view kHabitStatus = "status";
+inline constexpr std::string_view kHabitFled = "fled";
+inline constexpr std::string_view kHabitUntouched = "untouched";
+inline constexpr std::string_view kHabitClutch = "clutch";
+inline constexpr std::string_view kHabitGold = "gold";
+inline constexpr std::string_view kHabitStep = "step";
+inline constexpr std::string_view kHabitRegion = "region";
+inline constexpr std::string_view kHabitHeavy = "heavy";
+
+// One observed habit. Kind is one of the ids above. Id is a skill, item, status, or
+// map when the fact has one. Amount is the damage, the gold, or 1. Tags are the
+// skill or item tags that were on the fact, copied so a deed can name them.
+struct HabitNote {
+    std::string Kind;
+    std::string Id;
+    i32 Amount = 0;
+    std::vector<std::string> Tags;
 };
 
 // One System-gated skill. It belongs to the class that lists it, and to that class's
@@ -309,15 +343,35 @@ struct SystemSkillRule {
     DeedDef Deed;
 };
 
-// A flat title bonus. Stat, when set, is one of the six primaries. DamagePercent is added
-// to damage dealt against a foe that carries Against. The bonus applies only while the
-// title is equipped. Titles have no rarity and do not evolve. How many can be worn is
-// the class rarity's titleSlots.
-struct TitleBonus {
+// One modifier a title grants while it is worn. StatFlat and StatPercent name a primary.
+// DamageTag's Stat is the foe tag and Amount is the percent. Xp, gold, and drop percents
+// leave Stat empty. Titles have no rarity and do not evolve. How many can be worn is the
+// class rarity's titleSlots. A title lists one or more of these. Gear and statuses can
+// hand the same struct to StackModifiers later.
+enum class ModKind : u8 { StatFlat, StatPercent, DamageTag, XpPercent, GoldPercent, DropPercent };
+
+struct Modifier {
+    ModKind Kind = ModKind::StatFlat;
     std::string Stat;
     i32 Amount = 0;
-    i32 DamagePercent = 0;
-    std::string Against;
+};
+
+// Extra damage the attacker deals when the defender carries Tag. The fight adds these
+// percents the same way a status adds damage dealt.
+struct TagDamage {
+    std::string Tag;
+    i32 Percent = 0;
+};
+
+// The sums of one list of modifiers. Percents are added together, not multiplied.
+// Damage rows with the same tag are one row. Flat and Percent use the six primaries.
+struct ModifierStack {
+    StatBlock Flat;
+    StatBlock Percent;
+    std::vector<TagDamage> Damage;
+    i32 XpPercent = 0;
+    i32 GoldPercent = 0;
+    i32 DropPercent = 0;
 };
 
 struct TitleDef {
@@ -325,7 +379,38 @@ struct TitleDef {
     std::string Name;
     std::string Description;
     DeedDef Deed;
-    TitleBonus Bonus;
+    std::vector<Modifier> Bonus;
+};
+
+// One row of titles.json "system.marks". Kind is a habit id. Tag is the counter tag
+// a deed names. An empty Tag writes no extra tag of its own.
+struct SystemMark {
+    std::string Kind;
+    std::string Tag;
+};
+
+// Words and tunables for the System, from titles.json's system object. A file that
+// omits the object uses these defaults, so an older titles file still loads.
+struct SystemRules {
+    std::string TitleNotice = "[System] Title earned: {name}";
+    std::string SkillNotice = "[System] Skill unlocked: {name}";
+    std::string MeldNotice = "[System] Path opened: {name}";
+    std::string LogLabel = "SYSTEM";
+    std::string LogEmpty = "The System has written nothing.";
+    i32 LogKeep = 32;
+    i32 HeavyAt = 16;
+    i32 ClutchPercent = 25;
+    std::vector<SystemMark> Marks;
+
+    // The tag this habit writes. A kind the table does not name uses the kind itself.
+    [[nodiscard]] std::string TagFor(std::string_view kind) const
+    {
+        for (const SystemMark& mark : Marks) {
+            if (mark.Kind == kind)
+                return mark.Tag;
+        }
+        return std::string(kind);
+    }
 };
 
 // Words for the title sheet in titles.json. EquipAsk, UnequipAsk, EquippedNote, and
@@ -343,13 +428,6 @@ struct TitleLabels {
     std::string UnequippedNote;
     std::string Worn;
     std::string Held;
-};
-
-// Extra damage the attacker deals when the defender carries Tag. The fight adds these
-// percents the same way a status adds damage dealt.
-struct TagDamage {
-    std::string Tag;
-    i32 Percent = 0;
 };
 
 // How an evolution is offered. Guaranteed is the direct track: it opens at EvolveLevel
@@ -607,12 +685,14 @@ struct DialogueNode {
 // title. AnyEquipped is whatever title is worn in the earliest slot. Fallback is the
 // else, and the file puts it last. Worn titles are what another person notices. Owned
 // still sees a title that is not being worn, and that check stays rare.
-enum class TitleSenseWhen : u8 { Equipped, Owned, AnyEquipped, Fallback };
+enum class TitleSenseWhen : u8 { Equipped, Owned, AnyEquipped, Fallback, Deed };
 
 struct TitleSenseLine {
     TitleSenseWhen When = TitleSenseWhen::Fallback;
     std::string TitleId;
     std::string Line;
+    // Set when When is Deed. The same deed a title or a meld can name.
+    DeedDef WhenDeed;
 };
 
 struct TitleSense {

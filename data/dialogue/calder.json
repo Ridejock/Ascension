@@ -12,6 +12,18 @@
           "line": "Beast Hunter. You did not come by/that name in the dry."
         },
         {
+          "titleEquipped": "crusher",
+          "line": "Crusher. The pond does not care/how hard you hit. I do."
+        },
+        {
+          "titleEquipped": "warden",
+          "line": "Warden. A guard, held. The ditch/could use a wall like that."
+        },
+        {
+          "titleEquipped": "mender",
+          "line": "Mender. You closed what the/water opened. Quiet work."
+        },
+        {
           "fallback": true,
           "line": "{title.name}. The water does not/read it. I do."
         }

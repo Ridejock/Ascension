@@ -64,7 +64,29 @@ struct SensePick {
     const TitleFact* Fact = nullptr;
 };
 
-SensePick PickSenseLine(const TitleSenseLine& line, std::span<const TitleFact> facts)
+SystemState FactsState(std::span<const TitleFact> facts)
+{
+    SystemState state;
+    for (const TitleFact& fact : facts) {
+        if (fact.Owned)
+            state.Titles.push_back(fact.Id);
+        if (fact.Equipped)
+            state.Equipped.push_back(fact.Id);
+    }
+    return state;
+}
+
+DeedDef TitleDeed(TitleSenseWhen when, std::string_view id)
+{
+    DeedDef deed;
+    deed.On = DeedOn::Title;
+    deed.Id = std::string(id);
+    deed.Worn = when == TitleSenseWhen::Equipped;
+    return deed;
+}
+
+SensePick PickSenseLine(const TitleSenseLine& line, std::span<const TitleFact> facts,
+                        const SystemState& state, std::string_view classId, i32 level)
 {
     SensePick pick;
     const bool needsName = HasToken(line.Line, "{title.name}");
@@ -76,15 +98,24 @@ SensePick PickSenseLine(const TitleSenseLine& line, std::span<const TitleFact> f
     }
     const TitleFact* fact = nullptr;
     if (line.When == TitleSenseWhen::Equipped || line.When == TitleSenseWhen::Owned) {
+        if (!DeedHolds(state, classId, level, TitleDeed(line.When, line.TitleId)))
+            return pick;
         fact = FactWithId(facts, line.TitleId);
         if (fact == nullptr)
             return pick;
-        if (line.When == TitleSenseWhen::Equipped) {
-            if (!fact->Equipped || fact->Slot < 0)
-                return pick;
-        } else if (!fact->Owned) {
+        // A fact marked equipped with no slot is not being worn. The ledger's
+        // equipped list has no such row; this is a query that never placed it.
+        if (line.When == TitleSenseWhen::Equipped && fact->Slot < 0)
             return pick;
-        }
+    } else if (line.When == TitleSenseWhen::Deed) {
+        if (!DeedHolds(state, classId, level, line.WhenDeed))
+            return pick;
+        if (line.WhenDeed.Op == DeedOp::Count && line.WhenDeed.On == DeedOn::Title)
+            fact = FactWithId(facts, line.WhenDeed.Id);
+        else if (needsFact)
+            fact = ProminentWorn(facts, needsName);
+        if (needsFact && fact == nullptr)
+            return pick;
     } else if (line.When == TitleSenseWhen::AnyEquipped || line.When == TitleSenseWhen::Fallback) {
         fact = ProminentWorn(facts, needsName);
         if (fact == nullptr)
@@ -92,7 +123,7 @@ SensePick PickSenseLine(const TitleSenseLine& line, std::span<const TitleFact> f
     } else {
         return pick;
     }
-    if (fact == nullptr || (needsName && fact->Name.empty()))
+    if (needsName && (fact == nullptr || fact->Name.empty()))
         return pick;
     pick.Match = true;
     pick.Fact = fact;
@@ -281,11 +312,12 @@ void TalkBoxLines(std::string_view line, i32 width, std::vector<std::string>& ou
     }
 }
 
-TitleSenseMatch ResolveTitleSense(const TitleSense& sense, std::span<const TitleFact> facts)
+TitleSenseMatch ResolveTitleSense(const TitleSense& sense, std::span<const TitleFact> facts,
+                                    const SystemState& state, std::string_view classId, i32 level)
 {
     TitleSenseMatch match;
     for (const TitleSenseLine& line : sense.Lines) {
-        const SensePick pick = PickSenseLine(line, facts);
+        const SensePick pick = PickSenseLine(line, facts, state, classId, level);
         if (!pick.Match)
             continue;
         std::string spoken;
@@ -298,6 +330,12 @@ TitleSenseMatch ResolveTitleSense(const TitleSense& sense, std::span<const Title
         return match;
     }
     return match;
+}
+
+TitleSenseMatch ResolveTitleSense(const TitleSense& sense, std::span<const TitleFact> facts)
+{
+    const SystemState state = FactsState(facts);
+    return ResolveTitleSense(sense, facts, state, {}, 1);
 }
 
 } // namespace Ascension

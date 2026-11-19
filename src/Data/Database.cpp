@@ -386,6 +386,7 @@ struct Parsed {
     std::vector<ClassDef> Classes;
     std::vector<TitleDef> Titles;
     TitleLabels Sheet;
+    SystemRules System;
     std::vector<EnemyDef> Enemies;
     std::vector<EncounterDef> Encounters;
     std::vector<ItemDef> Items;
@@ -1576,14 +1577,65 @@ bool ReadPicks(const Parsed& parsed, const Json& entry, ClassDef& klass, std::st
     return true;
 }
 
-bool ReadDeed(const Json& object, DeedDef& deed, std::string& error)
+bool ReadDeed(const Json& object, DeedDef& deed, std::string& error, i32 depth = 0);
+
+bool ReadDeedList(const Json& list, const char* key, std::vector<DeedDef>& parts, std::string& error,
+                  i32 depth)
+{
+    if (!list.is_array() || list.empty()) {
+        error = std::string("'") + key + "' must list a deed";
+        return false;
+    }
+    for (const Json& entry : list) {
+        DeedDef part;
+        if (!ReadDeed(entry, part, error, depth + 1))
+            return false;
+        parts.push_back(std::move(part));
+    }
+    return true;
+}
+
+bool ReadDeed(const Json& object, DeedDef& deed, std::string& error, i32 depth)
 {
     if (!object.is_object()) {
         error = "a deed must be an object";
         return false;
     }
+    if (depth > 8) {
+        error = "a deed is nested too deep";
+        return false;
+    }
+    const bool all = object.contains("all");
+    const bool any = object.contains("any");
+    const bool neg = object.contains("not");
+    if (all || any || neg) {
+        if (static_cast<int>(all) + static_cast<int>(any) + static_cast<int>(neg) != 1) {
+            error = "a deed is all, any, or not";
+            return false;
+        }
+        const char* key = all ? "all" : any ? "any" : "not";
+        std::string unknown;
+        if (!AllowKeys(object, {key}, unknown)) {
+            error = "unknown field " + Quote(unknown);
+            return false;
+        }
+        if (neg) {
+            if (!object["not"].is_object()) {
+                error = "'not' must be a deed";
+                return false;
+            }
+            deed.Op = DeedOp::Not;
+            DeedDef part;
+            if (!ReadDeed(object["not"], part, error, depth + 1))
+                return false;
+            deed.Parts.push_back(std::move(part));
+            return true;
+        }
+        deed.Op = all ? DeedOp::All : DeedOp::Any;
+        return ReadDeedList(object[key], key, deed.Parts, error, depth);
+    }
     std::string unknown;
-    if (!AllowKeys(object, {"on", "id", "tag", "atLeast"}, unknown)) {
+    if (!AllowKeys(object, {"on", "id", "tag", "atLeast", "equipped"}, unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
@@ -1600,8 +1652,14 @@ bool ReadDeed(const Json& object, DeedDef& deed, std::string& error)
         deed.On = DeedOn::Tag;
     else if (on == "level")
         deed.On = DeedOn::Level;
+    else if (on == "mark")
+        deed.On = DeedOn::Mark;
+    else if (on == "class")
+        deed.On = DeedOn::Class;
+    else if (on == "title")
+        deed.On = DeedOn::Title;
     else {
-        error = "'on' must be kill, skill, item, tag, or level";
+        error = "'on' must be kill, skill, item, tag, level, mark, class, or title";
         return false;
     }
     if (!OptionalId(object, "id", deed.Id, error) || !OptionalId(object, "tag", deed.Tag, error))
@@ -1615,6 +1673,30 @@ bool ReadDeed(const Json& object, DeedDef& deed, std::string& error)
         return false;
     }
     deed.AtLeast = 1;
+    if (deed.On == DeedOn::Class || deed.On == DeedOn::Title) {
+        if (!deed.Tag.empty() || object.contains("atLeast")) {
+            error = "this deed has no tag or atLeast";
+            return false;
+        }
+        if (deed.Id.empty()) {
+            error = "the deed needs an id";
+            return false;
+        }
+        if (deed.On == DeedOn::Class) {
+            if (object.contains("equipped")) {
+                error = "a class deed has no equipped";
+                return false;
+            }
+            return true;
+        }
+        if (!OptionalBool(object, "equipped", deed.Worn, error))
+            return false;
+        return true;
+    }
+    if (object.contains("equipped")) {
+        error = "equipped is only set on a title deed";
+        return false;
+    }
     if (!OptionalInt(object, "atLeast", 1, 999999, deed.AtLeast, error))
         return false;
     if (deed.On == DeedOn::Level) {
@@ -1645,54 +1727,202 @@ bool ReadTags(const Json& entry, std::vector<std::string>& tags, std::string& er
     return ReadIdList(entry, "tags", tags, error);
 }
 
-bool ReadTitleBonus(const Json& object, TitleBonus& bonus, std::string& error)
+void PushMark(SystemRules& rules, std::string kind, std::string tag)
+{
+    for (SystemMark& mark : rules.Marks) {
+        if (mark.Kind != kind)
+            continue;
+        mark.Tag = std::move(tag);
+        return;
+    }
+    SystemMark mark;
+    mark.Kind = std::move(kind);
+    mark.Tag = std::move(tag);
+    rules.Marks.push_back(std::move(mark));
+}
+
+SystemRules DefaultSystemRules()
+{
+    SystemRules rules;
+    const char* kinds[] = {"blocked", "healed", "heavy", "status", "fled", "untouched",
+                           "clutch",   "gold",   "step",  "region"};
+    for (const char* kind : kinds)
+        PushMark(rules, kind, kind);
+    return rules;
+}
+
+bool ReadSystem(const Json& object, SystemRules& rules, std::string& error)
 {
     if (!object.is_object()) {
-        error = "'bonus' must be an object";
+        error = "'system' must be an object";
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(object, {"stat", "amount", "damagePercent", "against"}, unknown)) {
+    if (!AllowKeys(object,
+                   {"title", "skill", "meld", "log", "empty", "logKeep", "heavyAt", "clutchPercent",
+                    "marks"},
+                   unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
-    if (!OptionalId(object, "stat", bonus.Stat, error))
+    if (object.contains("title") && !RequireString(object, "title", rules.TitleNotice, error))
         return false;
-    if (!bonus.Stat.empty() && FindStatValue(StatBlock{}, bonus.Stat) == nullptr) {
+    if (object.contains("skill") && !RequireString(object, "skill", rules.SkillNotice, error))
+        return false;
+    if (object.contains("meld") && !RequireString(object, "meld", rules.MeldNotice, error))
+        return false;
+    if (object.contains("log") && !RequireString(object, "log", rules.LogLabel, error))
+        return false;
+    if (object.contains("empty") && !RequireString(object, "empty", rules.LogEmpty, error))
+        return false;
+    if (!OptionalInt(object, "logKeep", 1, 64, rules.LogKeep, error) ||
+        !OptionalInt(object, "heavyAt", 1, 9999, rules.HeavyAt, error) ||
+        !OptionalInt(object, "clutchPercent", 1, 100, rules.ClutchPercent, error))
+        return false;
+    if (!object.contains("marks"))
+        return true;
+    const Json& marks = object["marks"];
+    if (!marks.is_object()) {
+        error = "'marks' must be an object";
+        return false;
+    }
+    for (auto it = marks.begin(); it != marks.end(); ++it) {
+        const std::string kind = it.key();
+        if (!IsId(kind)) {
+            error = "a mark kind must be an id";
+            return false;
+        }
+        if (!it->is_string()) {
+            error = "mark " + Quote(kind) + " must be a tag";
+            return false;
+        }
+        const std::string tag = it->get<std::string>();
+        if (!IsId(tag)) {
+            error = "mark " + Quote(kind) + " must be a tag";
+            return false;
+        }
+        PushMark(rules, kind, tag);
+    }
+    return true;
+}
+
+bool ReadModifierObject(const Json& object, std::vector<Modifier>& mods, std::string& error)
+{
+    if (!object.is_object()) {
+        error = "a bonus entry must be an object";
+        return false;
+    }
+    std::string unknown;
+    if (!AllowKeys(object,
+                   {"stat", "amount", "percent", "damagePercent", "against", "xpPercent",
+                    "goldPercent", "dropPercent"},
+                   unknown)) {
+        error = "unknown field " + Quote(unknown);
+        return false;
+    }
+    std::string stat;
+    std::string against;
+    i32 amount = 0;
+    i32 percent = 0;
+    i32 damage = 0;
+    i32 xp = 0;
+    i32 gold = 0;
+    i32 drop = 0;
+    if (!OptionalId(object, "stat", stat, error) || !OptionalId(object, "against", against, error))
+        return false;
+    if (!stat.empty() && FindStatValue(StatBlock{}, stat) == nullptr) {
         error = "'stat' must be one of the six primaries";
         return false;
     }
-    if (!OptionalInt(object, "amount", 0, 99, bonus.Amount, error) ||
-        !OptionalInt(object, "damagePercent", 0, 500, bonus.DamagePercent, error) ||
-        !OptionalId(object, "against", bonus.Against, error))
-        return false;
-    if (!bonus.Against.empty() && !IsId(bonus.Against)) {
+    if (!against.empty() && !IsId(against)) {
         error = "'against' must be an id";
         return false;
     }
-    const bool stat = !bonus.Stat.empty();
-    const bool versus = bonus.DamagePercent > 0;
-    if (stat && bonus.Amount <= 0) {
-        error = "a stat bonus needs an amount";
+    if (!OptionalInt(object, "amount", 0, 99, amount, error) ||
+        !OptionalInt(object, "percent", -90, 500, percent, error) ||
+        !OptionalInt(object, "damagePercent", 0, 500, damage, error) ||
+        !OptionalInt(object, "xpPercent", -90, 500, xp, error) ||
+        !OptionalInt(object, "goldPercent", -90, 500, gold, error) ||
+        !OptionalInt(object, "dropPercent", -90, 500, drop, error))
         return false;
-    }
-    if (!stat && bonus.Amount > 0) {
+    if (amount > 0 && stat.empty()) {
         error = "'amount' needs a stat";
         return false;
     }
-    if (versus && bonus.Against.empty()) {
+    if (percent != 0 && stat.empty()) {
+        error = "'percent' needs a stat";
+        return false;
+    }
+    if (!stat.empty() && amount <= 0 && percent == 0) {
+        error = "a stat bonus needs an amount or a percent";
+        return false;
+    }
+    if (damage > 0 && against.empty()) {
         error = "damagePercent needs against";
         return false;
     }
-    if (!versus && !bonus.Against.empty()) {
+    if (damage <= 0 && !against.empty()) {
         error = "'against' needs damagePercent";
         return false;
     }
-    if (!stat && !versus) {
-        error = "a bonus needs a stat or damagePercent";
+    const usize before = mods.size();
+    if (amount > 0) {
+        Modifier mod;
+        mod.Kind = ModKind::StatFlat;
+        mod.Stat = stat;
+        mod.Amount = amount;
+        mods.push_back(std::move(mod));
+    }
+    if (percent != 0) {
+        Modifier mod;
+        mod.Kind = ModKind::StatPercent;
+        mod.Stat = stat;
+        mod.Amount = percent;
+        mods.push_back(std::move(mod));
+    }
+    if (damage > 0) {
+        Modifier mod;
+        mod.Kind = ModKind::DamageTag;
+        mod.Stat = against;
+        mod.Amount = damage;
+        mods.push_back(std::move(mod));
+    }
+    auto reward = [&](ModKind kind, i32 value) {
+        if (value == 0)
+            return;
+        Modifier mod;
+        mod.Kind = kind;
+        mod.Amount = value;
+        mods.push_back(std::move(mod));
+    };
+    reward(ModKind::XpPercent, xp);
+    reward(ModKind::GoldPercent, gold);
+    reward(ModKind::DropPercent, drop);
+    if (mods.size() == before) {
+        error = "a bonus needs a stat, damagePercent, or a reward percent";
         return false;
     }
     return true;
+}
+
+bool ReadBonus(const Json& bonus, std::vector<Modifier>& mods, std::string& error)
+{
+    if (bonus.is_array()) {
+        if (bonus.empty()) {
+            error = "'bonus' must list a modifier";
+            return false;
+        }
+        for (const Json& entry : bonus) {
+            if (!ReadModifierObject(entry, mods, error))
+                return false;
+        }
+        return true;
+    }
+    if (!bonus.is_object()) {
+        error = "'bonus' must be an object";
+        return false;
+    }
+    return ReadModifierObject(bonus, mods, error);
 }
 
 bool LoadTitleLabels(const Json& root, TitleLabels& labels, std::string& error)
@@ -1728,6 +1958,14 @@ bool LoadTitleLabels(const Json& root, TitleLabels& labels, std::string& error)
 
 bool LoadTitles(const Json& root, Parsed& parsed, std::string& error)
 {
+    parsed.System = DefaultSystemRules();
+    if (root.contains("system")) {
+        std::string why;
+        if (!ReadSystem(root["system"], parsed.System, why)) {
+            error = why;
+            return false;
+        }
+    }
     if (!LoadTitleLabels(root, parsed.Sheet, error))
         return false;
     const auto list = root.find("titles");
@@ -1767,7 +2005,7 @@ bool LoadTitles(const Json& root, Parsed& parsed, std::string& error)
         const auto bonus = entry.find("bonus");
         if (bonus == entry.end())
             return fail("'bonus' is required");
-        if (!ReadTitleBonus(*bonus, title.Bonus, why))
+        if (!ReadBonus(*bonus, title.Bonus, why))
             return fail(why);
         parsed.Titles.push_back(std::move(title));
     }
@@ -2783,7 +3021,8 @@ bool ReadTitleSenseLine(const Json& entry, const Parsed& parsed, TitleSenseLine&
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(entry, {"line", "titleEquipped", "titleOwned", "anyTitleEquipped", "fallback"},
+    if (!AllowKeys(entry,
+                   {"line", "titleEquipped", "titleOwned", "anyTitleEquipped", "fallback", "when"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -2796,12 +3035,23 @@ bool ReadTitleSenseLine(const Json& entry, const Parsed& parsed, TitleSenseLine&
     const bool owned = entry.contains("titleOwned");
     const bool anyWorn = entry.contains("anyTitleEquipped");
     const bool fallback = entry.contains("fallback");
-    const int conditions =
-        static_cast<int>(equipped) + static_cast<int>(owned) + static_cast<int>(anyWorn) +
-        static_cast<int>(fallback);
+    const bool when = entry.contains("when");
+    const int conditions = static_cast<int>(equipped) + static_cast<int>(owned) +
+                           static_cast<int>(anyWorn) + static_cast<int>(fallback) +
+                           static_cast<int>(when);
     if (conditions != 1) {
-        error = "needs one of titleEquipped, titleOwned, anyTitleEquipped, or fallback";
+        error = "needs one of titleEquipped, titleOwned, anyTitleEquipped, when, or fallback";
         return false;
+    }
+    if (when) {
+        if (!entry["when"].is_object()) {
+            error = "'when' must be a deed";
+            return false;
+        }
+        if (!ReadDeed(entry["when"], line.WhenDeed, error))
+            return false;
+        line.When = TitleSenseWhen::Deed;
+        return true;
     }
     if (equipped || owned) {
         const char* key = equipped ? "titleEquipped" : "titleOwned";
@@ -4265,14 +4515,35 @@ bool CheckUniquePerType(const Parsed& parsed, std::string& error)
     return true;
 }
 
+bool IdKnown(const Parsed& parsed, std::string_view id)
+{
+    return FindId(parsed.Skills, id) != nullptr || FindId(parsed.Statuses, id) != nullptr ||
+           FindId(parsed.Maps, id) != nullptr || FindId(parsed.Items, id) != nullptr ||
+           FindId(parsed.Enemies, id) != nullptr;
+}
+
 bool DeedKnown(const Parsed& parsed, const DeedDef& deed, const std::string& where,
                std::string& error)
 {
-    if (deed.Id.empty())
+    for (const DeedDef& part : deed.Parts) {
+        if (!DeedKnown(parsed, part, where, error))
+            return false;
+    }
+    if (deed.Op != DeedOp::Count || deed.Id.empty())
         return true;
-    const bool missing = (deed.On == DeedOn::Kill && FindId(parsed.Enemies, deed.Id) == nullptr) ||
-                         (deed.On == DeedOn::Skill && FindId(parsed.Skills, deed.Id) == nullptr) ||
-                         (deed.On == DeedOn::Item && FindId(parsed.Items, deed.Id) == nullptr);
+    bool missing = false;
+    if (deed.On == DeedOn::Kill)
+        missing = FindId(parsed.Enemies, deed.Id) == nullptr;
+    else if (deed.On == DeedOn::Skill)
+        missing = FindId(parsed.Skills, deed.Id) == nullptr;
+    else if (deed.On == DeedOn::Item)
+        missing = FindId(parsed.Items, deed.Id) == nullptr;
+    else if (deed.On == DeedOn::Class)
+        missing = FindId(parsed.Classes, deed.Id) == nullptr;
+    else if (deed.On == DeedOn::Title)
+        missing = FindId(parsed.Titles, deed.Id) == nullptr;
+    else if (deed.On == DeedOn::Mark)
+        missing = !IdKnown(parsed, deed.Id);
     if (!missing)
         return true;
     error = where + ": deed id " + Quote(deed.Id) + " does not exist";
@@ -4425,6 +4696,15 @@ bool CrossCheck(const Parsed& parsed, std::string& error)
         const std::string titleWhere = "title " + Quote(title.Id);
         if (!DeedKnown(parsed, title.Deed, titleWhere, error))
             return false;
+    }
+    for (const DialogueDef& talk : parsed.Dialogues) {
+        const std::string talkWhere = "dialogue " + Quote(talk.Id);
+        for (const TitleSenseLine& line : talk.Sense.Lines) {
+            if (line.When != TitleSenseWhen::Deed)
+                continue;
+            if (!DeedKnown(parsed, line.WhenDeed, talkWhere, error))
+                return false;
+        }
     }
     for (const std::string& stocked : parsed.Shop.Stock) {
         if (FindId(parsed.Items, stocked) == nullptr) {
@@ -5755,7 +6035,7 @@ bool ReadAll(const std::vector<std::filesystem::path>& files, Parsed& parsed,
         const bool keysOk = std::string_view(names[i]) == "effects.json"
                                 ? AllowKeys(root, {"better", "effects"}, unknown)
                             : std::string_view(names[i]) == "titles.json"
-                                ? AllowKeys(root, {"sheet", "titles"}, unknown)
+                                ? AllowKeys(root, {"sheet", "titles", "system"}, unknown)
                                 : AllowKeys(root, {allowedTop[i]}, unknown);
         if (!keysOk) {
             error = Err(names[i], {}, "unknown field " + Quote(unknown));
@@ -6002,6 +6282,7 @@ bool Database::Load(DataError* error)
     m_Classes = std::move(parsed.Classes);
     m_Titles = std::move(parsed.Titles);
     m_TitleLabels = std::move(parsed.Sheet);
+    m_System = std::move(parsed.System);
     m_Enemies = std::move(parsed.Enemies);
     m_Encounters = std::move(parsed.Encounters);
     m_Items = std::move(parsed.Items);

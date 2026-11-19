@@ -12,6 +12,18 @@
           "line": "Beast Hunter. Four beasts. Don't/lean the count on my counter."
         },
         {
+          "titleEquipped": "crusher",
+          "line": "Crusher. You walk in swinging like/the counter owes you gold."
+        },
+        {
+          "titleEquipped": "warden",
+          "line": "Warden. A guard that held. Keep/it off my shelves."
+        },
+        {
+          "titleEquipped": "mender",
+          "line": "Mender. You stitch more than you/break. Potions still aren't free."
+        },
+        {
           "fallback": true,
           "line": "{title.name}. Worn titles are loud./{title.description}"
         }

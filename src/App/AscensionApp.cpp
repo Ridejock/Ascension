@@ -736,13 +736,12 @@ void AscensionApp::AwardVictory()
         return;
     m_XpAwarded = true;
     const i32 amount = m_Battle->Experience();
-    const i32 gold = m_Battle->Gold();
-    const bool titleBefore = m_Hero.TitlePending();
+    const i32 gold = ScaleByPercent(m_Battle->Gold(), m_Hero.RewardPercent(ModKind::GoldPercent));
     const i32 freeBefore = m_Hero.FreePool();
     const XpGrant grant = m_Hero.GrantXp(amount);
     m_Inventory.GrantGold(gold);
-    if (amount > 0)
-        Note(std::to_string(amount) + " XP.");
+    if (grant.Amount > 0)
+        Note(std::to_string(grant.Amount) + " XP.");
     if (gold > 0)
         Note(std::to_string(gold) + " gold.");
     std::vector<std::string> killed;
@@ -763,12 +762,6 @@ void AscensionApp::AwardVictory()
                             {280.0f, 200.0f});
     if (m_Hero.FreePool() > freeBefore)
         Note(std::to_string(m_Hero.FreePool()) + " free points.");
-    if (!titleBefore && m_Hero.TitlePending()) {
-        const std::vector<std::string> offers = m_Hero.TitleOffers();
-        const TitleDef* title = offers.empty() ? nullptr : m_Data.FindTitle(offers.front());
-        Note(std::string("The System offers ") +
-             (title != nullptr ? title->Name : "a title") + ".");
-    }
     const PoolCaps fought = FoughtCaps(m_Battle->Player());
     KeepPools(m_Vitals, m_Battle->Player().Hp, m_Battle->Player().Focus, m_Battle->Player().Mana,
               fought);
@@ -804,6 +797,7 @@ void AscensionApp::AwardVictory()
     }
     if (grant.ChoiceOpened || grant.PickOpened)
         TakeAutoPath();
+    m_Hero.NoteVictory(m_Battle->PlayerHurt(), m_Battle->Player().Hp, m_Battle->Player().MaxHp, gold);
     RememberVictory();
     m_Standing = RunStanding::Victory;
     // A choice still open keeps the spawn id in this file. MaybeSettle writes the
@@ -816,14 +810,8 @@ void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
     m_PackPlay.OnAction(GetAudio(), &m_Gallery, m_Data, result.SkillId, result.Damage, false,
                         false, false, {320.0f, 180.0f});
     if (playerActed && result.Accepted && !result.SkillId.empty()) {
-        const bool titleBefore = m_Hero.TitlePending();
-        const bool skillBefore = m_Hero.SystemSkillPending();
         const i32 before = m_Hero.RankOf(result.SkillId);
         const i32 after = m_Hero.NoteUse(result.SkillId);
-        if (!titleBefore && m_Hero.TitlePending())
-            Note("The System offers a title.");
-        if (!skillBefore && m_Hero.SystemSkillPending())
-            Note("The System offers a skill.");
         PushRanks();
         if (after > before) {
             const SkillDef* skill = m_Data.FindSkill(result.SkillId);
@@ -831,10 +819,14 @@ void AscensionApp::FinishAction(const ActionResult& result, bool playerActed)
             Note(name + " reaches rank " + std::to_string(after) + ".");
         }
     }
+    ReadHabits();
     if (result.Result == BattleResult::Victory)
         AwardVictory();
     else if (result.Result == BattleResult::Defeat)
         RememberDefeat();
+    else if (result.Result == BattleResult::Fled)
+        m_Hero.NoteFlee();
+    ShowSystemNotices();
     MaybeSettle();
 }
 
@@ -1495,7 +1487,8 @@ bool AscensionApp::OpenTalk(std::string_view dialogueId)
     m_TalkSenseNode.clear();
     if (m_Hero.IsReady() && !talk->Sense.Lines.empty()) {
         const std::vector<TitleFact> titles = m_Hero.QueryTitles();
-        const TitleSenseMatch heard = ResolveTitleSense(talk->Sense, titles);
+        const TitleSenseMatch heard =
+            ResolveTitleSense(talk->Sense, titles, m_Hero.System(), m_Hero.ClassId(), m_Hero.Level());
         if (heard.Spoken) {
             m_TalkSense = heard.Line;
             m_TalkSenseNode = node->Id;
@@ -2748,6 +2741,10 @@ void AscensionApp::HandleOverland(std::string_view action)
         return;
     }
     if (m_Camp) {
+        if (m_SystemOpen) {
+            HandleSystemLog(action);
+            return;
+        }
         if (m_Titles.Open) {
             HandleTitles(action);
             return;
@@ -2760,6 +2757,7 @@ void AscensionApp::HandleOverland(std::string_view action)
             m_Camp = false;
             m_ShopAsk = ShopAsk::None;
             m_Titles = {};
+            m_SystemOpen = false;
             return;
         }
         HandleCamp(action);
@@ -3370,6 +3368,7 @@ void AscensionApp::HandleAction(std::string_view action)
             m_Camp = false;
             m_ShopAsk = ShopAsk::None;
             m_Titles = {};
+            m_SystemOpen = false;
             return;
         }
         if (OpenTalk(m_Data.GetShop().Dialogue))
@@ -3402,11 +3401,16 @@ void AscensionApp::HandleAction(std::string_view action)
             m_Camp = false;
             m_ShopAsk = ShopAsk::None;
             m_Titles = {};
+            m_SystemOpen = false;
         } else {
             OpenCamp();
         }
         m_Picking = false;
         m_Talk = false;
+        return;
+    }
+    if (m_Camp && m_SystemOpen) {
+        HandleSystemLog(action);
         return;
     }
     if (m_Camp && m_Titles.Open) {
@@ -3420,6 +3424,7 @@ void AscensionApp::HandleAction(std::string_view action)
         }
         m_Camp = false;
         m_Titles = {};
+        m_SystemOpen = false;
         return;
     }
     if (m_Camp) {
@@ -3508,6 +3513,18 @@ void AscensionApp::StepMap(f32 dt)
         SyncPlaces();
     bool spawned = false;
     if (step.Kind == WalkStepKind::Moved || step.Kind == WalkStepKind::Exited) {
+        if (m_Hero.IsReady()) {
+            HabitNote walked;
+            walked.Kind = std::string(kHabitStep);
+            walked.Amount = 1;
+            m_Hero.NoteHabit(walked);
+            HabitNote region;
+            region.Kind = std::string(kHabitRegion);
+            region.Id = std::string(m_Walker.Place().MapId);
+            region.Amount = 1;
+            m_Hero.NoteHabit(region);
+            ShowSystemNotices();
+        }
         ContactQuery contact;
         contact.Tile = m_Walker.Place().Tile;
         if (step.Kind == WalkStepKind::Moved) {
@@ -3849,6 +3866,7 @@ bool AscensionApp::LoadSlot(std::string_view slot, std::string& error)
     AdoptLegacyMap(m_Data, run);
     if (!m_Hero.ImportCareer(run.Career, error) || !m_Inventory.ImportBag(run.Bag, error))
         return false;
+    ShowSystemNotices();
     m_Defeated = run.Defeated;
     m_Found = run.Found;
     m_TalkFlags = run.Flags;
@@ -4921,13 +4939,7 @@ void AscensionApp::DrinkAt(i32 bagIndex)
         std::string why;
         if (!m_Inventory.Take(bagIndex, why))
             Note(why);
-        const bool titleBefore = m_Hero.TitlePending();
-        const bool skillBefore = m_Hero.SystemSkillPending();
         m_Hero.NoteItem(item->Id);
-        if (!titleBefore && m_Hero.TitlePending())
-            Note("The System offers a title.");
-        if (!skillBefore && m_Hero.SystemSkillPending())
-            Note("The System offers a skill.");
     }
     Note(drunk);
     NoteMarked(markedBefore);
@@ -4975,6 +4987,49 @@ void AscensionApp::HandlePicker(std::string_view action)
     DrinkAt(drinks[static_cast<usize>(pick)]);
 }
 
+void AscensionApp::ReadHabits()
+{
+    if (m_Battle == nullptr || !m_Hero.IsReady())
+        return;
+    for (const HabitNote& note : m_Battle->Habits())
+        m_Hero.NoteHabit(note);
+    m_Battle->ClearHabits();
+}
+
+void AscensionApp::ShowSystemNotices()
+{
+    if (!m_Hero.IsReady())
+        return;
+    for (const std::string& line : m_Hero.TakeNotices())
+        Note(line);
+}
+
+void AscensionApp::HandleSystemLog(std::string_view action)
+{
+    const i32 count = static_cast<i32>(m_Hero.SystemLog().size());
+    if (action == kMenu || action == kInteract) {
+        m_Camp = false;
+        m_SystemOpen = false;
+        m_ShopAsk = ShopAsk::None;
+        m_Titles = {};
+        return;
+    }
+    if (action == kCancel) {
+        m_SystemOpen = false;
+        m_SystemRow = 0;
+        return;
+    }
+    if (action == kMoveNorth || action == kCyclePrev) {
+        if (m_SystemRow > 0)
+            --m_SystemRow;
+        return;
+    }
+    if (action == kMoveSouth || action == kCycleNext) {
+        if (count > 0 && m_SystemRow + 1 < count)
+            ++m_SystemRow;
+    }
+}
+
 void AscensionApp::OpenCamp()
 {
     m_Camp = true;
@@ -4982,6 +5037,8 @@ void AscensionApp::OpenCamp()
     m_CampRow = 0;
     m_ShopAsk = ShopAsk::None;
     m_Titles = {};
+    m_SystemOpen = false;
+    m_SystemRow = 0;
     m_Picking = false;
     m_Talk = false;
 }
@@ -5004,6 +5061,7 @@ void AscensionApp::HandleTitles(std::string_view action)
         m_Camp = false;
         m_ShopAsk = ShopAsk::None;
         m_Titles = {};
+        m_SystemOpen = false;
         return;
     }
     if (step != TitleSheetStep::Equip && step != TitleSheetStep::Unequip)
@@ -5049,7 +5107,7 @@ void AscensionApp::ClampCamp()
         m_CampColumn = 1;
     i32 rows = static_cast<i32>(m_Data.GetShop().Stock.size());
     if (m_CampColumn == 0)
-        rows = 4 + m_Inventory.BagSlots() + 1;
+        rows = 4 + m_Inventory.BagSlots() + 2;
     if (rows < 1)
         m_CampRow = 0;
     else if (m_CampRow >= rows)
@@ -5170,10 +5228,20 @@ void AscensionApp::HandleCamp(std::string_view action)
         m_ShopAsk = ShopAsk::Unequip;
         return;
     }
-    if (m_CampColumn == 0 && m_CampRow == 4 + m_Inventory.BagSlots()) {
+    const i32 titleRow = 4 + m_Inventory.BagSlots();
+    if (m_CampColumn == 0 && m_CampRow == titleRow) {
         if (confirm) {
             m_Titles = {};
             m_Titles.Open = true;
+            m_SystemOpen = false;
+        }
+        return;
+    }
+    if (m_CampColumn == 0 && m_CampRow == titleRow + 1) {
+        if (confirm) {
+            m_SystemOpen = true;
+            m_SystemRow = 0;
+            m_Titles = {};
         }
         return;
     }
@@ -5506,12 +5574,27 @@ void AscensionApp::DrawTitles(Emerald::Renderer2D& renderer, f32 width, f32 heig
     }
     if (selected != nullptr && !asking) {
         std::string bonus;
-        if (!selected->Bonus.Stat.empty() && selected->Bonus.Amount != 0) {
-            const StatDef* stat = m_Data.FindStat(selected->Bonus.Stat);
-            bonus = (stat != nullptr ? stat->Name : selected->Bonus.Stat) + " +" +
-                    std::to_string(selected->Bonus.Amount);
-        } else if (selected->Bonus.DamagePercent != 0 && !selected->Bonus.Against.empty()) {
-            bonus = std::to_string(selected->Bonus.DamagePercent) + "%  " + selected->Bonus.Against;
+        for (const Modifier& mod : selected->Bonus) {
+            std::string piece;
+            if (mod.Kind == ModKind::StatFlat || mod.Kind == ModKind::StatPercent) {
+                const StatDef* stat = m_Data.FindStat(mod.Stat);
+                piece = (stat != nullptr ? stat->Name : mod.Stat) + " +" + std::to_string(mod.Amount);
+                if (mod.Kind == ModKind::StatPercent)
+                    piece += "%";
+            } else if (mod.Kind == ModKind::DamageTag) {
+                piece = std::to_string(mod.Amount) + "%  " + mod.Stat;
+            } else if (mod.Kind == ModKind::XpPercent) {
+                piece = "XP +" + std::to_string(mod.Amount) + "%";
+            } else if (mod.Kind == ModKind::GoldPercent) {
+                piece = "GOLD +" + std::to_string(mod.Amount) + "%";
+            } else if (mod.Kind == ModKind::DropPercent) {
+                piece = "DROP +" + std::to_string(mod.Amount) + "%";
+            }
+            if (piece.empty())
+                continue;
+            if (!bonus.empty())
+                bonus += "  ";
+            bonus += piece;
         }
         if (!bonus.empty() && y + detailH <= contentFloor) {
             DrawUiText(renderer, {detailX, y}, FitLine(bonus, style.DetailScale, detailW), dim,
@@ -5550,8 +5633,66 @@ void AscensionApp::DrawTitles(Emerald::Renderer2D& renderer, f32 width, f32 heig
     DrawHints(renderer, hintX, hintTop, width - hintX, hints, true);
 }
 
+void AscensionApp::DrawSystemLog(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    const SystemRules& rules = m_Data.GetSystem();
+    const BattleUi& ui = m_Data.GetBattleUi();
+    const UiStyle& style = ui.Style;
+    const f32 pad = static_cast<f32>(style.PanelPad);
+    const f32 margin = static_cast<f32>(ui.Margin);
+    const f32 top = static_cast<f32>(ui.PanelTop);
+    const f32 hintTop = height - static_cast<f32>(ui.HintFromBottom);
+    const f32 floor = hintTop - static_cast<f32>(style.HintClearance);
+    const f32 titleH = Emerald::DebugTextLineHeight(style.TitleScale);
+    const f32 bodyH = Emerald::DebugTextLineHeight(style.BodyScale);
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 panelW = width - margin * 2.0f;
+    const f32 panelH = floor - top;
+    DrawPanel(renderer, {margin, top}, {panelW > 0.0f ? panelW : 0.0f, panelH > 0.0f ? panelH : 0.0f},
+              Paint(style.Panel), Paint(style.Frame));
+    const f32 textX = margin + pad;
+    const f32 textW = panelW - pad * 2.0f;
+    f32 y = top + pad;
+    if (textW > 0.0f) {
+        DrawUiText(renderer, {textX, y}, FitLine(rules.LogLabel, style.TitleScale, textW),
+                   Paint(style.Frame), style.TitleScale);
+    }
+    y += titleH + static_cast<f32>(style.GroupGap);
+    const std::vector<std::string>& log = m_Hero.SystemLog();
+    if (log.empty()) {
+        if (textW > 0.0f && y + bodyH <= floor)
+            DrawUiText(renderer, {textX, y}, FitLine(rules.LogEmpty, style.BodyScale, textW),
+                       Paint(style.Dim), style.BodyScale);
+    } else {
+        if (m_SystemRow < 0)
+            m_SystemRow = 0;
+        if (m_SystemRow >= static_cast<i32>(log.size()))
+            m_SystemRow = static_cast<i32>(log.size()) - 1;
+        const f32 stride = bodyH + rowGap;
+        for (i32 index = m_SystemRow; index < static_cast<i32>(log.size()); ++index) {
+            if (y + bodyH > floor - pad)
+                break;
+            const bool marked = index == m_SystemRow;
+            DrawUiText(renderer, {textX, y},
+                       FitLine(log[static_cast<usize>(index)], style.BodyScale, textW),
+                       marked ? Paint(style.Highlight) : Paint(style.Ink), style.BodyScale);
+            y += stride;
+        }
+    }
+    std::vector<HintChip> hints;
+    AddHint(hints, kMoveNorth, "");
+    AddHint(hints, kMoveSouth, "MOVE");
+    AddHint(hints, kCancel, "BACK");
+    DrawHints(renderer, static_cast<f32>(ui.HintX), hintTop, width - static_cast<f32>(ui.HintX),
+              hints, true);
+}
+
 void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
+    if (m_SystemOpen) {
+        DrawSystemLog(renderer, width, height);
+        return;
+    }
     if (m_Titles.Open) {
         DrawTitles(renderer, width, height);
         return;
@@ -5651,7 +5792,7 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
                            bagSide ? dim : highlight, style.DetailScale);
 
     const i32 bagSlots = m_Inventory.BagSlots();
-    const i32 leftCount = 4 + bagSlots + 1;
+    const i32 leftCount = 4 + bagSlots + 2;
     bool titlesMarked = false;
     const i32 rightCount = static_cast<i32>(shop.Stock.size());
     const i32 leftFirst = WindowStart(leftCount, bagSide ? m_CampRow : 0, shownRows);
@@ -5694,12 +5835,16 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
                 wornItself = piece != nullptr;
                 bareName = name;
             }
-        } else if (row == leftCount - 1) {
+        } else if (row == leftCount - 2) {
             name = m_Data.GetTitleLabels().Open;
             if (marked) {
                 titlesMarked = true;
                 bareName = name;
             }
+        } else if (row == leftCount - 1) {
+            name = m_Data.GetSystem().LogLabel;
+            if (marked)
+                bareName = name;
         } else {
             const ItemStack& stack = m_Inventory.BagAt(row - 4);
             if (stack.Empty()) {
@@ -5831,7 +5976,13 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     AddHint(hints, kMoveWest, "");
     AddHint(hints, kMoveEast, "BAG OR STOCK");
     const bool titlesRow = bagSide && m_CampRow == 4 + bagSlots;
-    AddHint(hints, kConfirm, titlesRow ? m_Data.GetTitleLabels().Open : "EQUIP OR BUY");
+    const bool logRow = bagSide && m_CampRow == 5 + bagSlots;
+    const char* confirmWord = "EQUIP OR BUY";
+    if (logRow)
+        confirmWord = m_Data.GetSystem().LogLabel.c_str();
+    else if (titlesRow)
+        confirmWord = m_Data.GetTitleLabels().Open.c_str();
+    AddHint(hints, kConfirm, confirmWord);
     AddHint(hints, kContext, "SELL");
     AddHint(hints, kUnequip, "UNEQUIP");
     AddHint(hints, CloseAction(), "CLOSE");
