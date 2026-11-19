@@ -88,6 +88,16 @@ public:
     i32 NoteUse(std::string_view skillId);
     // A foe that fell. Tags come from the enemy row, so a deed can count a family.
     void NoteKill(std::string_view enemyId);
+    void NoteHabit(const HabitNote& note);
+    // A win. hurt is damage taken this fight. hp and maxHp are the pools at the
+    // end. gold is what the purse received, after a gold percent.
+    void NoteVictory(i32 hurt, i32 hp, i32 maxHp, i32 gold);
+    void NoteFlee();
+    // Lines the System has not shown yet. The log keeps them.
+    [[nodiscard]] std::vector<std::string> TakeNotices();
+    [[nodiscard]] const std::vector<std::string>& SystemLog() const { return m_System.Log; }
+    // Equipped titles' xp, gold, or drop percent. Drop is recorded for a later roll.
+    [[nodiscard]] i32 RewardPercent(ModKind kind) const;
     // A consumable that was drunk. Tags come from the item row.
     void NoteItem(std::string_view itemId);
 

@@ -720,8 +720,8 @@ void TestTitleSenseFiles()
 
 void ExpectVillageSense(const DialogueDef* talk, const char* who)
 {
-    Check(talk != nullptr && talk->Sense.Lines.size() == 3, who);
-    if (talk == nullptr || talk->Sense.Lines.size() != 3)
+    Check(talk != nullptr && talk->Sense.Lines.size() >= 6, who);
+    if (talk == nullptr || talk->Sense.Lines.size() < 6)
         return;
     Check(talk->Sense.Lines[0].When == TitleSenseWhen::Equipped &&
               talk->Sense.Lines[0].TitleId == "wolf_cull" &&
@@ -731,9 +731,23 @@ void ExpectVillageSense(const DialogueDef* talk, const char* who)
               talk->Sense.Lines[1].TitleId == "beast_hunter" &&
               talk->Sense.Lines[1].Line.find("Beast Hunter") != std::string::npos,
           who);
-    Check(talk->Sense.Lines[2].When == TitleSenseWhen::Fallback &&
-              talk->Sense.Lines[2].Line.find("{title.name}") != std::string::npos,
+    Check(talk->Sense.Lines.back().When == TitleSenseWhen::Fallback &&
+              talk->Sense.Lines.back().Line.find("{title.name}") != std::string::npos,
           who);
+    bool crusher = false;
+    bool warden = false;
+    bool mender = false;
+    for (const TitleSenseLine& line : talk->Sense.Lines) {
+        if (line.When != TitleSenseWhen::Equipped)
+            continue;
+        if (line.TitleId == "crusher" && line.Line.find("Crusher") != std::string::npos)
+            crusher = true;
+        if (line.TitleId == "warden" && line.Line.find("Warden") != std::string::npos)
+            warden = true;
+        if (line.TitleId == "mender" && line.Line.find("Mender") != std::string::npos)
+            mender = true;
+    }
+    Check(crusher && warden && mender, who);
 }
 
 void TestVillageSense()
@@ -751,8 +765,8 @@ void TestVillageSense()
     ExpectVillageSense(pell, "Pell senses a worn title");
     ExpectVillageSense(bram, "Bram senses a worn title");
     ExpectVillageSense(calder, "Calder senses a worn title");
-    Check(pell != nullptr && pell->Sense.Lines.size() == 3 &&
-              pell->Sense.Lines[2].Line.find("{title.description}") != std::string::npos,
+    Check(pell != nullptr && !pell->Sense.Lines.empty() &&
+              pell->Sense.Lines.back().Line.find("{title.description}") != std::string::npos,
           "Pell's fallback can read the title description");
 
     SystemState none;
@@ -810,6 +824,15 @@ void TestVillageSense()
     Check(bram != nullptr && hunter.Spoken && hunter.TitleId == "beast_hunter" &&
               hunter.Line == bram->Sense.Lines[1].Line,
           "Bram uses the Beast Hunter line from his file");
+    for (i32 n = 0; n < 6; ++n)
+        hero.NoteUse("heavy_blow");
+    Check(hero.AcceptTitle("crusher", why) && hero.UnequipTitle("beast_hunter", why) &&
+              hero.EquipTitle("crusher", why),
+          "Crusher can take the slot");
+    const TitleSenseMatch crusher = Hear(pell->Sense, hero.QueryTitles());
+    Check(crusher.Spoken && crusher.TitleId == "crusher" &&
+              crusher.Line.find("Crusher") != std::string::npos,
+          "Pell remarks when Crusher is worn");
     if (calder != nullptr) {
         World world;
         Check(Enter(*calder, world) && world.Node == "calder_greet",

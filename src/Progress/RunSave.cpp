@@ -187,6 +187,14 @@ void MigrateRunV6(Emerald::SaveData& data)
         data.SetBool("free.legacy", true);
 }
 
+// Version 7 has no System log. The melds already open should not be announced
+// again. The load records them on the first evaluation and then drops the flag.
+void MigrateRunV7(Emerald::SaveData& data)
+{
+    if (!data.Has("system.settled"))
+        data.SetBool("system.settled", true);
+}
+
 // Version 3's position is an encounter-list index. Version 4 stores a map, a tile, and
 // spawn ids. The index waits under legacy.index until the maps are loaded. A finished
 // fight did not carry HP in version 3; drop a leftover health field so it still does not.
@@ -213,6 +221,7 @@ Emerald::SaveSystem Open(const std::filesystem::path& folder)
     system.AddMigration(4, MigrateRunV4);
     system.AddMigration(5, MigrateRunV5);
     system.AddMigration(6, MigrateRunV6);
+    system.AddMigration(7, MigrateRunV7);
     return system;
 }
 
@@ -356,6 +365,7 @@ void WriteFight(const FightSnapshot& fight, Emerald::SaveData& data)
     data.SetInt("fight.foe.count", static_cast<i32>(fight.Foes.size()));
     for (i32 index = 0; index < static_cast<i32>(fight.Foes.size()); ++index)
         WriteUnit(data, Key("fight.foe", index, {}), fight.Foes[static_cast<usize>(index)]);
+    data.SetInt("fight.hurt", fight.PlayerHurt < 0 ? 0 : fight.PlayerHurt);
 }
 
 bool ReadFight(const Emerald::SaveData& data, FightSnapshot& fight, std::string& error)
@@ -406,6 +416,9 @@ bool ReadFight(const Emerald::SaveData& data, FightSnapshot& fight, std::string&
             return false;
         }
     }
+    fight.PlayerHurt = data.GetInt("fight.hurt", 0);
+    if (fight.PlayerHurt < 0)
+        fight.PlayerHurt = 0;
     error.clear();
     return true;
 }
@@ -468,6 +481,14 @@ void Store(const RunState& run, Emerald::SaveData& data)
         data.SetString(Key("granted", index, {}), system.GrantedSkills[static_cast<usize>(index)]);
     data.SetInt("free.floor", system.FreeFloor < 1 ? 1 : system.FreeFloor);
     WriteStats(data, "free", system.FreeSpent);
+    data.SetInt("notice.count", static_cast<i32>(system.Log.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.Log.size()); ++index)
+        data.SetString(Key("notice", index, {}), system.Log[static_cast<usize>(index)]);
+    data.SetInt("meldNoted.count", static_cast<i32>(system.NotedMelds.size()));
+    for (i32 index = 0; index < static_cast<i32>(system.NotedMelds.size()); ++index)
+        data.SetString(Key("meldNoted", index, {}), system.NotedMelds[static_cast<usize>(index)]);
+    if (system.NoticesSettled)
+        data.SetBool("system.settled", true);
 
     data.SetInt("gold", run.Bag.Gold);
     data.SetString("worn.weapon", run.Bag.Weapon);
@@ -569,11 +590,14 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     const i32 titleOffers = data.GetInt("titleOffer.count", 0);
     const i32 skillOffers = data.GetInt("skillOffer.count", 0);
     const i32 granted = data.GetInt("granted.count", 0);
+    const i32 notices = data.GetInt("notice.count", 0);
+    const i32 melds = data.GetInt("meldNoted.count", 0);
     if (!CountOk(skills, error) || !CountOk(picks, error) || !CountOk(steps, error) ||
         !CountOk(sources, error) || !CountOk(bags, error) || !CountOk(foes, error) ||
         !CountOk(found, error) || !CountOk(flags, error) || !CountOk(cleared, error) ||
         !CountOk(wounds, error) || !CountOk(counters, error) || !CountOk(titles, error) ||
-        !CountOk(titleOffers, error) || !CountOk(skillOffers, error) || !CountOk(granted, error))
+        !CountOk(titleOffers, error) || !CountOk(skillOffers, error) || !CountOk(granted, error) ||
+        !CountOk(notices, error) || !CountOk(melds, error))
         return false;
 
     run.Career.Practiced.resize(static_cast<usize>(skills));
@@ -684,6 +708,25 @@ bool Take(const Emerald::SaveData& data, RunState& run, std::string& error)
     system.FreeFloor = data.GetInt("free.floor", 1);
     if (system.FreeFloor < 1)
         system.FreeFloor = 1;
+    system.Log.resize(static_cast<usize>(notices));
+    for (i32 index = 0; index < notices; ++index) {
+        const std::string line = data.GetString(Key("notice", index, {}));
+        if (line.empty()) {
+            error = "the save's system log is damaged";
+            return false;
+        }
+        system.Log[static_cast<usize>(index)] = line;
+    }
+    system.NotedMelds.resize(static_cast<usize>(melds));
+    for (i32 index = 0; index < melds; ++index) {
+        const std::string id = data.GetString(Key("meldNoted", index, {}));
+        if (id.empty()) {
+            error = "the save's system log is damaged";
+            return false;
+        }
+        system.NotedMelds[static_cast<usize>(index)] = id;
+    }
+    system.NoticesSettled = data.GetBool("system.settled", false);
     run.Career.FreeLegacy = data.GetBool("free.legacy", false);
 
     run.Bag.Gold = data.GetInt("gold", 0);

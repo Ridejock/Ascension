@@ -3,6 +3,7 @@
 // No window or GPU.
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -177,7 +178,9 @@ void TestTitleThreshold()
           "the query lists every catalog title");
     TitleFact wolf;
     Check(hero.TitleFactFor("wolf_cull", wolf) && wolf.Owned && !wolf.Equipped && wolf.Slot < 0 &&
-              wolf.Name == "Wolf Cull" && wolf.Bonus.Stat == "strength" && wolf.Bonus.Amount == 1 &&
+              wolf.Name == "Wolf Cull" && !wolf.Bonus.empty() &&
+              wolf.Bonus[0].Kind == ModKind::StatFlat && wolf.Bonus[0].Stat == "strength" &&
+              wolf.Bonus[0].Amount == 1 &&
               !wolf.Description.empty(),
           "the query names an owned title and its bonus");
     Check(!hero.TitleFactFor("no_such_title", wolf), "an unknown title is not a fact");
@@ -414,7 +417,7 @@ void TestDeedRecovery()
     Database data = Sample();
     if (!data.IsLoaded())
         return;
-    Check(RunSave::kVersion == 7, "new deeds stay on save version 7");
+    Check(RunSave::kVersion == 8, "the system log is save version 8");
     Hero host = StartHero(data);
     if (!host.IsReady())
         return;
@@ -638,7 +641,8 @@ void TestReaver()
     run.Career = career;
     Check(saves.Write(run, why), "a crush ledger writes");
     const RunLoad loaded = saves.Read();
-    Check(static_cast<bool>(loaded) && loaded.FileVersion == 7, "the crush ledger is still version 7");
+    Check(static_cast<bool>(loaded) && loaded.FileVersion == RunSave::kVersion,
+          "a new ledger writes the current save version");
     Hero recovered = StartHero(data);
     Check(recovered.ImportCareer(loaded.Run.Career, why), "the crush ledger imports");
     const std::vector<std::string> recoveredPaths = recovered.ChoiceIds();
@@ -744,7 +748,7 @@ void TestTitleEquip()
     }
     TitleFact fact;
     Check(hero.TitleFactFor("wolf_cull", fact) && fact.Owned && fact.Equipped && fact.Slot == 0 &&
-              fact.Name == "Wolf Cull" && fact.Bonus.Amount == 1,
+              fact.Name == "Wolf Cull" && !fact.Bonus.empty() && fact.Bonus[0].Amount == 1,
           "the query reports the worn title, its slot, and its bonus");
     Check(hero.OwnsTitle("beast_hunter"), "Beast Hunter stays owned");
 
@@ -824,6 +828,394 @@ void TestTitleEquip()
           "a stored empty worn list stays empty");
 }
 
+bool HasId(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& have : ids) {
+        if (have == id)
+            return true;
+    }
+    return false;
+}
+
+bool NoticeNames(const std::vector<std::string>& lines, std::string_view name)
+{
+    for (const std::string& line : lines) {
+        if (line.find(name) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
+void TestDeedCompounds()
+{
+    SystemState state;
+    DeedDef crush;
+    crush.On = DeedOn::Skill;
+    crush.Tag = "crush";
+    crush.AtLeast = 2;
+    DeedDef worn;
+    worn.On = DeedOn::Title;
+    worn.Id = "wolf_cull";
+    worn.Worn = true;
+    DeedDef both;
+    both.Op = DeedOp::All;
+    both.Parts.push_back(crush);
+    both.Parts.push_back(worn);
+    Check(!DeedHolds(state, "fighter", 1, both), "an empty ledger meets neither part");
+
+    SystemCounter swings;
+    swings.Key = "skill.tag:crush";
+    swings.Count = 2;
+    state.Counters.push_back(swings);
+    Check(!DeedHolds(state, "fighter", 1, both), "the swings are not enough without the title");
+    state.Titles.push_back("wolf_cull");
+    Check(!DeedHolds(state, "fighter", 1, both), "an owned title is not a worn one");
+    state.Equipped.push_back("wolf_cull");
+    Check(DeedHolds(state, "fighter", 1, both), "all holds when every part holds");
+
+    DeedDef mage;
+    mage.On = DeedOn::Class;
+    mage.Id = "mage";
+    DeedDef either;
+    either.Op = DeedOp::Any;
+    either.Parts.push_back(mage);
+    either.Parts.push_back(crush);
+    Check(DeedHolds(state, "cleric", 1, either), "any holds on the crush part");
+    DeedDef denied;
+    denied.Op = DeedOp::Not;
+    denied.Parts.push_back(mage);
+    Check(DeedHolds(state, "fighter", 1, denied), "not flips a class the hero is not");
+    Check(!DeedHolds(state, "mage", 1, denied), "not rejects the class the hero is");
+
+    DeedDef level;
+    level.On = DeedOn::Level;
+    level.AtLeast = 4;
+    Check(!DeedHolds(state, "fighter", 9, level), "a level deed reads the ledger, not the argument");
+    SystemCounter reached;
+    reached.Key = "level";
+    reached.Count = 4;
+    state.Counters.push_back(reached);
+    Check(DeedHolds(state, "fighter", 1, level), "a stored level still meets a level deed");
+}
+
+void TestHabitCounts()
+{
+    Database data = Sample();
+    if (!data.IsLoaded())
+        return;
+    SystemState state;
+    HabitNote blocked;
+    blocked.Kind = std::string(kHabitBlocked);
+    blocked.Id = "brace";
+    blocked.Amount = 9;
+    blocked.Tags = {"defense", "guard"};
+    NoteHabit(state, data, "fighter", 1, blocked);
+    NoteHabit(state, data, "fighter", 1, blocked);
+    Check(SystemCount(state, SystemEventKind::Mark, "", "blocked") == 2, "each block counts once");
+    Check(SystemCount(state, SystemEventKind::Mark, "", "defense") == 2,
+          "the guard's tags ride the mark");
+    Check(SystemCount(state, SystemEventKind::Mark, "brace", "") == 2, "the skill id is counted");
+
+    HabitNote light;
+    light.Kind = std::string(kHabitDealt);
+    light.Amount = 4;
+    NoteHabit(state, data, "fighter", 1, light);
+    Check(SystemCount(state, SystemEventKind::Mark, "", "heavy") == 0, "a small blow is not heavy");
+    HabitNote heavy;
+    heavy.Kind = std::string(kHabitDealt);
+    heavy.Amount = data.GetSystem().HeavyAt;
+    NoteHabit(state, data, "fighter", 1, heavy);
+    Check(SystemCount(state, SystemEventKind::Mark, "", "heavy") == 1, "a blow at the line is heavy");
+
+    HabitNote gold;
+    gold.Kind = std::string(kHabitGold);
+    gold.Amount = 40;
+    NoteHabit(state, data, "fighter", 1, gold);
+    Check(SystemCount(state, SystemEventKind::Mark, "", "gold") == 40, "gold adds its amount");
+
+    HabitNote region;
+    region.Kind = std::string(kHabitRegion);
+    region.Id = "hub";
+    region.Amount = 1;
+    NoteHabit(state, data, "fighter", 1, region);
+    NoteHabit(state, data, "fighter", 1, region);
+    Check(SystemCount(state, SystemEventKind::Mark, "hub", "") == 1, "a region is counted once");
+    Check(SystemCount(state, SystemEventKind::Mark, "", "region") == 1,
+          "the region tag counts distinct maps");
+
+    HabitNote step;
+    step.Kind = std::string(kHabitStep);
+    step.Amount = 1;
+    NoteHabit(state, data, "fighter", 1, step);
+    NoteHabit(state, data, "fighter", 1, step);
+    Check(SystemCount(state, SystemEventKind::Mark, "", "step") == 2, "steps add");
+}
+
+void TestModifierStack()
+{
+    std::vector<Modifier> mods;
+    Modifier flat;
+    flat.Kind = ModKind::StatFlat;
+    flat.Stat = "strength";
+    flat.Amount = 1;
+    mods.push_back(flat);
+    flat.Amount = 2;
+    mods.push_back(flat);
+    Modifier percent;
+    percent.Kind = ModKind::StatPercent;
+    percent.Stat = "strength";
+    percent.Amount = 10;
+    mods.push_back(percent);
+    Modifier versus;
+    versus.Kind = ModKind::DamageTag;
+    versus.Stat = "humanoid";
+    versus.Amount = 10;
+    mods.push_back(versus);
+    versus.Amount = 5;
+    mods.push_back(versus);
+    Modifier xp;
+    xp.Kind = ModKind::XpPercent;
+    xp.Amount = 10;
+    mods.push_back(xp);
+    Modifier gold;
+    gold.Kind = ModKind::GoldPercent;
+    gold.Amount = 5;
+    mods.push_back(gold);
+    Modifier drop;
+    drop.Kind = ModKind::DropPercent;
+    drop.Amount = 5;
+    mods.push_back(drop);
+
+    const ModifierStack stack = StackModifiers(mods);
+    Check(stack.Flat.Strength == 3 && stack.Percent.Strength == 10, "flats and percents add");
+    Check(stack.Damage.size() == 1 && stack.Damage[0].Tag == "humanoid" && stack.Damage[0].Percent == 15,
+          "damage against one tag is one row");
+    Check(stack.XpPercent == 10 && stack.GoldPercent == 5 && stack.DropPercent == 5,
+          "reward percents add");
+    StatBlock stats;
+    stats.Strength = 10;
+    ApplyTitleModifiers(stats, stack);
+    Check(stats.Strength == 14, "percent of the base, then the flat");
+    Check(ScaleByPercent(60, 0) == 60 && ScaleByPercent(60, 10) == 66, "a reward percent scales");
+
+    Database data = Sample();
+    if (!data.IsLoaded())
+        return;
+    SystemState worn;
+    worn.Titles.push_back("goblin_slayer");
+    worn.Equipped.push_back("goblin_slayer");
+    const std::vector<TagDamage> rows = TitleTagDamage(data, worn);
+    Check(rows.size() == 1 && rows[0].Tag == "humanoid" && rows[0].Percent == 10,
+          "an old damage bonus still stacks as one tag row");
+    worn.Equipped[0] = "wolf_cull";
+    StatBlock sheet;
+    sheet.Strength = 8;
+    ApplyTitleModifiers(sheet, TitleModifiers(data, worn));
+    Check(sheet.Strength == 9, "an old flat bonus is still one strength");
+}
+
+void ReplaceFile(const fs::path& path, std::string_view from, std::string_view to)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    const auto at = text.find(from);
+    Check(at != std::string::npos, "the fixture text is present");
+    if (at == std::string::npos)
+        return;
+    text.replace(at, from.size(), to);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+void TestDeedJson()
+{
+    TempDir dir("ascension-deed-json");
+    std::error_code error;
+    fs::remove_all(dir.Path, error);
+    fs::copy(kSample, dir.Path, fs::copy_options::recursive, error);
+    Check(!error, "the sample data copies");
+    if (error)
+        return;
+    const fs::path titles = dir.Path / "titles.json";
+    ReplaceFile(titles, "\"deed\": { \"on\": \"kill\", \"id\": \"wolf\", \"atLeast\": 1 }",
+                "\"deed\": { \"all\": [ { \"on\": \"kill\", \"id\": \"wolf\", \"atLeast\": 1 }, "
+                "{ \"not\": { \"on\": \"class\", \"id\": \"guardian\" } } ] }");
+    Database data = LoadDir(dir.Path, "a compound deed loads");
+    if (!data.IsLoaded())
+        return;
+    const TitleDef* wolf = data.FindTitle("wolf_cull");
+    Check(wolf != nullptr && wolf->Deed.Op == DeedOp::All && wolf->Deed.Parts.size() == 2,
+          "the wolf deed is all of two parts");
+    SystemState fighter;
+    SystemEvent kill;
+    kill.Kind = SystemEventKind::Kill;
+    kill.Id = "wolf";
+    kill.Amount = 1;
+    DispatchSystem(fighter, data, "fighter", 1, kill);
+    Check(HasId(fighter.TitleOffers, "wolf_cull"), "a fighter who is not a guardian earns it");
+    SystemState guardian;
+    DispatchSystem(guardian, data, "guardian", 1, kill);
+    Check(!HasId(guardian.TitleOffers, "wolf_cull"), "the not keeps a guardian from the title");
+
+    ReplaceFile(titles, "\"all\": [ { \"on\": \"kill\", \"id\": \"wolf\", \"atLeast\": 1 }, "
+                        "{ \"not\": { \"on\": \"class\", \"id\": \"guardian\" } } ]",
+                "\"all\": []");
+    Database rejected(dir.Path);
+    DataError why;
+    Check(!rejected.Load(&why), "an empty all is rejected");
+}
+
+void TestPlaystyleTitles()
+{
+    Database data = Shipped();
+    if (!data.IsLoaded())
+        return;
+    const ClassDef* oathbound = data.FindClass("oathbound");
+    const ClassDef* templar = data.FindClass("templar");
+    Check(oathbound != nullptr && templar != nullptr && oathbound->Offer == EvolutionOffer::Meld &&
+              oathbound->EvolvesFrom == "fighter" && oathbound->Meld.On == DeedOn::Tag &&
+              oathbound->Meld.Tag == "heal" && templar->Offer == EvolutionOffer::Guaranteed &&
+              templar->EvolvesFrom == "cleric",
+          "oathbound is the fighter heal meld, and templar is the cleric's own path");
+    if (oathbound == nullptr || templar == nullptr)
+        return;
+    Check(!oathbound->Skills.empty() && !templar->Skills.empty() &&
+              oathbound->Skills[0].Id != templar->Skills[0].Id,
+          "the two paladin paths do not grant the same skill");
+    Check(SkillTagged(data, "brace", "defense") && SkillTagged(data, "slip", "evade") &&
+              SkillTagged(data, "aegis", "ward"),
+          "guard, evade, and ward are tags on the skills");
+
+    Hero crushed = StartHero(data);
+    if (!crushed.IsReady())
+        return;
+    for (i32 n = 0; n < 5; ++n)
+        crushed.NoteUse("heavy_blow");
+    Check(!HasId(crushed.TitleOffers(), "crusher"), "five heavy blows are short of Crusher");
+    crushed.NoteUse("heavy_blow");
+    Check(HasId(crushed.TitleOffers(), "crusher"), "the sixth heavy blow earns Crusher");
+    const std::vector<std::string> told = crushed.TakeNotices();
+    Check(NoticeNames(told, "Crusher") && NoticeNames(told, "Cleave"),
+          "the System names the title and the skill it unlocked");
+
+    Hero guarded = StartHero(data);
+    for (i32 n = 0; n < 4; ++n)
+        guarded.NoteUse("brace");
+    Check(!HasId(guarded.TitleOffers(), "warden"), "four braces are short of Warden");
+    guarded.NoteUse("brace");
+    Check(HasId(guarded.TitleOffers(), "warden"), "five defense skills earn Warden");
+
+    Hero blocked = StartHero(data);
+    HabitNote stop;
+    stop.Kind = std::string(kHabitBlocked);
+    stop.Amount = 4;
+    stop.Tags = {"defense"};
+    for (i32 n = 0; n < 3; ++n)
+        blocked.NoteHabit(stop);
+    Check(HasId(blocked.TitleOffers(), "warden"), "three blocks earn Warden without the casts");
+
+    Hero mended = StartHero(data);
+    for (i32 n = 0; n < 3; ++n) {
+        mended.NoteUse("second_wind");
+        mended.NoteItem("minor_potion");
+    }
+    Check(HasId(mended.TitleOffers(), "mender"), "heals from a skill and a potion share one count");
+    std::string why;
+    const i32 will = mended.Attributes().Will;
+    Check(mended.AcceptTitle("mender", why) && mended.EquipTitle("mender", why) &&
+              mended.Attributes().Will == will + 1,
+          "wearing Mender adds one will");
+
+    Hero clean = StartHero(data);
+    clean.NoteVictory(0, 20, 40, 3);
+    Check(HasId(clean.TitleOffers(), "unscathed"), "a fight that dealt no damage earns Unscathed");
+    Check(SystemCount(clean.System(), SystemEventKind::Mark, "", "gold") == 3,
+          "the victory's gold is counted");
+    Check(!HasId(clean.TitleOffers(), "runner"), "a win is not a flee");
+    Hero left = StartHero(data);
+    left.NoteFlee();
+    left.NoteFlee();
+    Check(!HasId(left.TitleOffers(), "runner"), "two retreats are short of Runner");
+    left.NoteFlee();
+    Check(HasId(left.TitleOffers(), "runner"), "the third retreat earns Runner");
+
+    Hero host = StartHero(data);
+    host.GrantXp(60);
+    for (i32 n = 0; n < 8; ++n)
+        host.NoteUse("second_wind");
+    const std::vector<std::string> paths = host.ChoiceIds();
+    Check(HasId(paths, "oathbound"), "eight heals still open oathbound");
+    Check(NoticeNames(host.TakeNotices(), "Oathbound"), "the System names the meld");
+}
+
+void TestLogSave()
+{
+    Database data = Shipped();
+    if (!data.IsLoaded())
+        return;
+    TempDir older("ascension-system-v7");
+    Emerald::SaveData file;
+    file.SetString("class", "fighter");
+    file.SetInt("xp", 0);
+    file.SetInt("counter.count", 1);
+    file.SetString("counter.0.key", "skill.tag:crush");
+    file.SetInt("counter.0.count", 6);
+    Emerald::SaveSystem version(older.Path, 7);
+    Check(version.Save("run", file, "v7"), "a version 7 ledger writes");
+    RunSave oldSaves(older.Path);
+    const RunLoad old = oldSaves.Read();
+    Check(static_cast<bool>(old) && old.FileVersion == 7 && old.Run.Career.System.NoticesSettled &&
+              old.Run.Career.System.Log.empty(),
+          "version 7 migrates with an empty log and a settled flag");
+    Hero hero = StartHero(data);
+    if (!hero.IsReady())
+        return;
+    std::string why;
+    Check(hero.ImportCareer(old.Run.Career, why), "the version 7 ledger imports");
+    Check(HasId(hero.TitleOffers(), "crusher"), "six stored crush swings earn Crusher on load");
+    Check(NoticeNames(hero.TakeNotices(), "Crusher"), "the migrated ledger still announces the title");
+    Check(!hero.System().NoticesSettled, "the settled flag is spent on the first evaluation");
+
+    TempDir dir("ascension-system-log");
+    RunSave saves(dir.Path);
+    CareerRecord career;
+    hero.ExportCareer(career);
+    RunState run;
+    run.Career = career;
+    Check(saves.Write(run, why), "the log writes");
+    const RunLoad again = saves.Read();
+    Check(static_cast<bool>(again) && again.FileVersion == 8 &&
+              NoticeNames(again.Run.Career.System.Log, "Crusher"),
+          "version 8 keeps the System log");
+}
+
+void TestGuardBlock()
+{
+    Database data = Shipped();
+    if (!data.IsLoaded())
+        return;
+    Battle fight(data, std::make_unique<AgilityRoundModel>());
+    std::string why;
+    Check(fight.Start("fighter", 1, "wolf", why), "a wolf fight starts");
+    if (fight.Result() == BattleResult::Ongoing && fight.Actor() == CombatantSide::Enemy) {
+        fight.EnemyAct();
+        fight.ClearHabits();
+    }
+    if (fight.Actor() != CombatantSide::Player || fight.Result() != BattleResult::Ongoing)
+        return;
+    const ActionResult brace = fight.UseSkill("brace");
+    Check(brace.Accepted && fight.Habits().empty(), "raising a guard is not yet a block");
+    if (fight.Actor() == CombatantSide::Enemy && fight.Result() == BattleResult::Ongoing)
+        fight.EnemyAct();
+    bool blocked = false;
+    for (const HabitNote& note : fight.Habits()) {
+        if (note.Kind == std::string(kHabitBlocked) && note.Amount > 0)
+            blocked = true;
+    }
+    Check(blocked, "a guard that stops the next blow is a blocked habit");
+}
+
 } // namespace
 
 int main()
@@ -839,6 +1231,13 @@ int main()
     TestSaveLedger();
     TestTitleSheet();
     TestTitleEquip();
+    TestDeedCompounds();
+    TestHabitCounts();
+    TestModifierStack();
+    TestDeedJson();
+    TestPlaystyleTitles();
+    TestLogSave();
+    TestGuardBlock();
     if (g_Failures == 0)
         std::printf("All system checks passed.\n");
     else

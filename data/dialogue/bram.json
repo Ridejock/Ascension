@@ -12,6 +12,18 @@
           "line": "Beast Hunter. The hollow knows/a hunter when it smells one."
         },
         {
+          "titleEquipped": "crusher",
+          "line": "Crusher. The hollow heard the/heavy ones. So did I."
+        },
+        {
+          "titleEquipped": "warden",
+          "line": "Warden. You set a guard and/kept it. The pit noticed."
+        },
+        {
+          "titleEquipped": "mender",
+          "line": "Mender. The ash does not close/a wound. You did."
+        },
+        {
           "fallback": true,
           "line": "The System marks what you wear./{title.name}."
         }

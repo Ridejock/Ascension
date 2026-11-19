@@ -742,6 +742,10 @@ bool Battle::StartFight(std::string_view classId, i32 level, std::string_view en
     m_BaseCount = 0;
     m_Started = false;
     m_Result = BattleResult::Ongoing;
+    m_PlayerHurt = 0;
+    m_Habits.clear();
+    m_GuardSkill.clear();
+    m_GuardTags.clear();
     m_FleeAllowed = false;
     m_UpkeepDone = false;
     m_TurnCount = 0;
@@ -1291,6 +1295,12 @@ Battle::HitLanded Battle::LandHit(CombatantState& attacker, CombatantState& defe
         if (attacker.Hp < 0)
             attacker.Hp = 0;
     }
+    if (&defender == &m_Player) {
+        if (blocked > 0)
+            RememberHabit(kHabitBlocked, m_GuardSkill, blocked, m_GuardTags);
+        m_GuardSkill.clear();
+        m_GuardTags.clear();
+    }
     if (blocked > 0)
         RunTrigger(defender, EffectTrigger::OnBlock);
     defender.GuardPercent = 0;
@@ -1303,11 +1313,28 @@ Battle::HitLanded Battle::LandHit(CombatantState& attacker, CombatantState& defe
     if (defender.Hp < 0)
         defender.Hp = 0;
     landed.Taken = taken;
+    if (&defender == &m_Player && taken > 0)
+        m_PlayerHurt += taken;
+    if (&attacker == &m_Player && landed.Reflected > 0)
+        m_PlayerHurt += landed.Reflected;
     if (taken > 0)
         RunTrigger(defender, EffectTrigger::OnDamaged);
     if (landed.Reflected > 0)
         RunTrigger(attacker, EffectTrigger::OnDamaged);
     return landed;
+}
+
+void Battle::RememberHabit(std::string_view kind, std::string id, i32 amount,
+                           const std::vector<std::string>& tags)
+{
+    if (kind.empty() || amount <= 0)
+        return;
+    HabitNote note;
+    note.Kind = std::string(kind);
+    note.Id = std::move(id);
+    note.Amount = amount;
+    note.Tags = tags;
+    m_Habits.push_back(std::move(note));
 }
 
 i32 Battle::NoteSkillUse(CombatantState& who, const std::string& skillId)
@@ -1390,6 +1417,8 @@ Battle::TurnOpen Battle::PrepareTurn(CombatantState& user)
         user.Hp -= tick.Bleed;
         if (user.Hp < 0)
             user.Hp = 0;
+        if (&user == &m_Player)
+            m_PlayerHurt += tick.Bleed;
         m_Opening = user.Name + " bleeds for " + std::to_string(tick.Bleed) + ".";
     }
     FinishIfDead();
@@ -1506,6 +1535,9 @@ ActionResult Battle::UseItem(const ItemDef& item)
     result.Accepted = true;
     result.SkillId = item.Id;
     const i32 healthGained = m_Player.Hp - healthBefore;
+    m_Habits.clear();
+    if (healthGained > 0)
+        RememberHabit(kHabitHealed, item.Id, healthGained, item.Tags);
     const i32 focusGained = m_Player.Focus - focusBefore;
     result.Healing = healthGained;
     result.Text = m_Player.Name + " uses " + item.Name;
@@ -1600,6 +1632,7 @@ FightSnapshot Battle::ExportFight()
     shot.UpkeepDone = m_UpkeepDone;
     m_Turns->Capture(shot.Order, shot.OrderIndex);
     shot.Player = SnapOf(m_Player);
+    shot.PlayerHurt = m_PlayerHurt;
     shot.Foes.reserve(m_Enemies.size());
     for (const CombatantState& foe : m_Enemies)
         shot.Foes.push_back(SnapOf(foe));
@@ -1648,6 +1681,7 @@ bool Battle::ImportFight(const FightSnapshot& shot, std::string& error)
     m_RandomCursor = shot.RandomCursor < 0 ? 0 : shot.RandomCursor;
     m_UpkeepDone = shot.UpkeepDone;
     m_TurnCount = shot.TurnCount < 0 ? 0 : shot.TurnCount;
+    m_PlayerHurt = shot.PlayerHurt < 0 ? 0 : shot.PlayerHurt;
     m_Opening.clear();
     m_Turns->Place(shot.Order, shot.OrderIndex);
     FinishIfDead();
@@ -1835,6 +1869,7 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
         user.Mana -= skill.FocusCost;
     else
         user.Focus -= skill.FocusCost;
+    m_Habits.clear();
     ActionResult result;
     result.Accepted = true;
     result.SkillId = skill.Id;
@@ -1933,6 +1968,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 if (percent != 0)
                     raw = ScalePercent(raw, 100 + percent);
                 const HitLanded landed = LandHit(user, foe, raw);
+                if (hero && !aim.Player && landed.Taken > 0)
+                    RememberHabit(kHabitDealt, skill.Id, landed.Taken, skill.Tags);
                 taken += landed.Taken;
                 reflected += landed.Reflected;
                 blows[slot].Taken += landed.Taken;
@@ -1945,6 +1982,10 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
             user.GuardPercent = effect.Amount.value_or(0);
             user.ReflectPercent = 0;
             user.ReflectFlat = 0;
+            if (hero) {
+                m_GuardSkill = skill.Id;
+                m_GuardTags = skill.Tags;
+            }
             guardAmount = user.GuardPercent;
             sawGuard = true;
             sawReflect = false;
@@ -1976,8 +2017,11 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 const i32 gained = RestoreHp(user, amount);
                 result.Healing += gained;
                 sawHeal = true;
-                if (gained > 0)
+                if (gained > 0) {
                     NoteHeal(extra, gained);
+                    if (hero)
+                        RememberHabit(kHabitHealed, skill.Id, gained, skill.Tags);
+                }
             } else {
                 sawAimedHeal = true;
                 std::vector<AimRef> aims;
@@ -1986,6 +2030,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     CombatantState& who = Aimed(aim);
                     const i32 gained = RestoreHp(who, amount);
                     result.Healing += gained;
+                    if (hero && &who == &m_Player && gained > 0)
+                        RememberHabit(kHabitHealed, skill.Id, gained, skill.Tags);
                     if (gained <= 0)
                         continue;
                     extra += " Heals ";
@@ -2019,6 +2065,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                     for (const AimRef& aim : aims) {
                         if (!Afflict(Aimed(aim), *inflicted))
                             continue;
+                        if (hero)
+                            RememberHabit(kHabitStatus, inflicted->Id, 1, {});
                         NoteStatus(extra, skill.Name, inflicted->Name);
                     }
                 }
@@ -2062,6 +2110,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                                 extra += " shrugs off the stun.";
                                 continue;
                             }
+                            if (hero)
+                                RememberHabit(kHabitStatus, stun->Id, 1, {});
                             extra += " ";
                             extra += foe.Name;
                             extra += " is stunned.";
@@ -2083,6 +2133,8 @@ ActionResult Battle::Resolve(CombatantState& user, const SkillDef& skill)
                 for (const AimRef& aim : aims) {
                     if (!Afflict(Aimed(aim), *inflicted))
                         continue;
+                    if (hero)
+                        RememberHabit(kHabitStatus, inflicted->Id, 1, {});
                     NoteStatus(extra, skill.Name, inflicted->Name);
                 }
             }

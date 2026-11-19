@@ -23,6 +23,8 @@ const char* KindPrefix(SystemEventKind kind)
         return "item";
     if (kind == SystemEventKind::LevelUp)
         return "level";
+    if (kind == SystemEventKind::Mark)
+        return "mark";
     return "kill";
 }
 
@@ -105,31 +107,37 @@ void RaiseLevel(SystemState& state, i32 level)
         counter->Count = level;
 }
 
-bool DeedMet(const SystemState& state, const DeedDef& deed)
+std::string FillNotice(std::string_view pattern, std::string_view name)
 {
-    i32 have = 0;
-    if (deed.On == DeedOn::Level) {
-        have = ReadCount(state, "level");
-    } else if (deed.On == DeedOn::Tag) {
-        have = ReadCount(state, SharedTagKey(deed.Tag));
-    } else {
-        SystemEventKind kind = SystemEventKind::Kill;
-        if (deed.On == DeedOn::Skill)
-            kind = SystemEventKind::SkillUse;
-        else if (deed.On == DeedOn::Item)
-            kind = SystemEventKind::ItemUse;
-        if (!deed.Tag.empty())
-            have = ReadCount(state, KindTagKey(kind, deed.Tag));
-        else
-            have = ReadCount(state, IdKey(kind, deed.Id));
-        // A deed that names both an id and a tag needs each count to reach the threshold.
-        if (!deed.Tag.empty() && !deed.Id.empty()) {
-            const i32 byId = ReadCount(state, IdKey(kind, deed.Id));
-            if (byId < have)
-                have = byId;
-        }
+    std::string out(pattern);
+    const std::string_view token = "{name}";
+    for (;;) {
+        const usize at = out.find(token);
+        if (at == std::string::npos)
+            return out;
+        out.replace(at, token.size(), name);
     }
-    return have >= deed.AtLeast;
+}
+
+void PushNotice(SystemState& state, i32 keep, std::string text)
+{
+    if (text.empty())
+        return;
+    state.Pending.push_back(text);
+    state.Log.push_back(std::move(text));
+    if (keep < 1)
+        keep = 1;
+    while (static_cast<i32>(state.Log.size()) > keep)
+        state.Log.erase(state.Log.begin());
+}
+
+bool TagListed(const std::vector<std::string>& tags, std::string_view tag)
+{
+    for (const std::string& have : tags) {
+        if (have == tag)
+            return true;
+    }
+    return false;
 }
 
 const ClassDef* ParentOf(const Database& data, const ClassDef& klass)
@@ -221,6 +229,59 @@ void FillTitleFact(const SystemState& state, TitleFact& fact)
     }
 }
 
+void Announce(SystemState& state, const Database& data, std::string_view classId, i32 level,
+             const std::vector<std::string>& titlesBefore, const std::vector<std::string>& skillsBefore)
+{
+    const SystemRules& rules = data.GetSystem();
+    for (const std::string& id : state.TitleOffers) {
+        if (Listed(titlesBefore, id))
+            continue;
+        const TitleDef* title = data.FindTitle(id);
+        const std::string name = title != nullptr ? title->Name : id;
+        PushNotice(state, rules.LogKeep, FillNotice(rules.TitleNotice, name));
+    }
+    for (const std::string& offerId : state.SkillOffers) {
+        if (Listed(skillsBefore, offerId))
+            continue;
+        const SystemSkillRule* rule = RuleOnChain(data, classId, offerId);
+        std::string name = offerId;
+        if (rule != nullptr) {
+            if (const SkillDef* skill = data.FindSkill(rule->Skill))
+                name = skill->Name;
+            else
+                name = rule->Skill;
+        }
+        PushNotice(state, rules.LogKeep, FillNotice(rules.SkillNotice, name));
+    }
+
+    const ClassDef* klass = data.FindClass(classId);
+    if (klass == nullptr || klass->IsEvolution()) {
+        state.NoticesSettled = false;
+        return;
+    }
+    std::vector<std::string> open;
+    for (const ClassDef* evolution : data.EvolutionsOf(classId)) {
+        if (evolution == nullptr || evolution->Offer != EvolutionOffer::Meld)
+            continue;
+        if (!EvolutionOffered(state, *evolution, level))
+            continue;
+        open.push_back(evolution->Id);
+    }
+    if (state.NoticesSettled) {
+        state.NotedMelds = std::move(open);
+        state.NoticesSettled = false;
+        return;
+    }
+    for (const std::string& id : open) {
+        if (Listed(state.NotedMelds, id))
+            continue;
+        state.NotedMelds.push_back(id);
+        const ClassDef* evolution = data.FindClass(id);
+        const std::string name = evolution != nullptr ? evolution->Name : id;
+        PushNotice(state, rules.LogKeep, FillNotice(rules.MeldNotice, name));
+    }
+}
+
 } // namespace
 
 void DispatchSystem(SystemState& state, const Database& data, std::string_view classId, i32 level,
@@ -250,7 +311,8 @@ void DispatchSystem(SystemState& state, const Database& data, std::string_view c
 
 void EvaluateSystem(SystemState& state, const Database& data, std::string_view classId, i32 level)
 {
-    (void)level;
+    const std::vector<std::string> titlesBefore = state.TitleOffers;
+    const std::vector<std::string> skillsBefore = state.SkillOffers;
     std::vector<std::string> titles;
     for (const std::string& id : state.TitleOffers) {
         if (data.FindTitle(id) != nullptr)
@@ -260,7 +322,7 @@ void EvaluateSystem(SystemState& state, const Database& data, std::string_view c
     for (const TitleDef& title : data.GetTitles()) {
         if (Listed(state.Titles, title.Id) || Listed(state.TitleOffers, title.Id))
             continue;
-        if (DeedMet(state, title.Deed))
+        if (DeedHolds(state, classId, level, title.Deed))
             state.TitleOffers.push_back(title.Id);
     }
 
@@ -283,9 +345,10 @@ void EvaluateSystem(SystemState& state, const Database& data, std::string_view c
             continue;
         if (ChainGrants(data, classId, rule->Skill))
             continue;
-        if (DeedMet(state, rule->Deed))
+        if (DeedHolds(state, classId, level, rule->Deed))
             state.SkillOffers.push_back(rule->Id);
     }
+    Announce(state, data, classId, level, titlesBefore, skillsBefore);
 }
 
 i32 SystemCount(const SystemState& state, SystemEventKind kind, std::string_view id,
@@ -350,7 +413,7 @@ bool EvolutionOffered(const SystemState& state, const ClassDef& evolution, i32 l
         return false;
     if (evolution.Offer == EvolutionOffer::Guaranteed)
         return true;
-    return DeedMet(state, evolution.Meld);
+    return DeedHolds(state, evolution.EvolvesFrom, level, evolution.Meld);
 }
 
 i32 TitleSlotCount(const Database& data, std::string_view classId)
@@ -379,32 +442,153 @@ void ClampEquippedTitles(SystemState& state, const Database& data, std::string_v
     state.Equipped = std::move(kept);
 }
 
-StatBlock TitleStatBonus(const Database& data, const SystemState& state)
+ModifierStack StackModifiers(std::span<const Modifier> mods)
 {
-    StatBlock bonus;
+    ModifierStack stack;
+    for (const Modifier& mod : mods) {
+        if (mod.Kind == ModKind::StatFlat) {
+            if (mod.Stat.empty() || mod.Amount == 0)
+                continue;
+            stack.Flat.Set(mod.Stat, stack.Flat.Get(mod.Stat) + mod.Amount);
+        } else if (mod.Kind == ModKind::StatPercent) {
+            if (mod.Stat.empty() || mod.Amount == 0)
+                continue;
+            stack.Percent.Set(mod.Stat, stack.Percent.Get(mod.Stat) + mod.Amount);
+        } else if (mod.Kind == ModKind::DamageTag) {
+            if (mod.Stat.empty() || mod.Amount == 0)
+                continue;
+            bool found = false;
+            for (TagDamage& row : stack.Damage) {
+                if (row.Tag != mod.Stat)
+                    continue;
+                row.Percent += mod.Amount;
+                found = true;
+                break;
+            }
+            if (!found) {
+                TagDamage row;
+                row.Tag = mod.Stat;
+                row.Percent = mod.Amount;
+                stack.Damage.push_back(std::move(row));
+            }
+        } else if (mod.Kind == ModKind::XpPercent) {
+            stack.XpPercent += mod.Amount;
+        } else if (mod.Kind == ModKind::GoldPercent) {
+            stack.GoldPercent += mod.Amount;
+        } else if (mod.Kind == ModKind::DropPercent) {
+            stack.DropPercent += mod.Amount;
+        }
+    }
+    return stack;
+}
+
+void ApplyTitleModifiers(StatBlock& stats, const ModifierStack& stack)
+{
+    for (const std::string_view id : kStatIds) {
+        i32 value = stats.Get(id);
+        const i32 percent = stack.Percent.Get(id);
+        if (percent != 0 && value > 0) {
+            const i64 scaled = static_cast<i64>(value) * (100 + percent);
+            value = static_cast<i32>(scaled / 100);
+            if (value < 0)
+                value = 0;
+        }
+        value += stack.Flat.Get(id);
+        if (value < 0)
+            value = 0;
+        if (value > 999999)
+            value = 999999;
+        stats.Set(id, value);
+    }
+}
+
+i32 ScaleByPercent(i32 amount, i32 percent)
+{
+    if (amount <= 0 || percent == 0)
+        return amount < 0 ? 0 : amount;
+    i64 scaled = static_cast<i64>(amount) * (100 + percent) / 100;
+    if (scaled > 999999)
+        scaled = 999999;
+    if (scaled < 0)
+        scaled = 0;
+    return static_cast<i32>(scaled);
+}
+
+ModifierStack TitleModifiers(const Database& data, const SystemState& state)
+{
+    std::vector<Modifier> mods;
     for (const std::string& id : state.Equipped) {
         const TitleDef* title = data.FindTitle(id);
-        if (title == nullptr || title->Bonus.Stat.empty() || title->Bonus.Amount == 0)
+        if (title == nullptr)
             continue;
-        const i32 have = bonus.Get(title->Bonus.Stat);
-        bonus.Set(title->Bonus.Stat, have + title->Bonus.Amount);
+        for (const Modifier& mod : title->Bonus)
+            mods.push_back(mod);
     }
-    return bonus;
+    return StackModifiers(mods);
+}
+
+StatBlock TitleStatBonus(const Database& data, const SystemState& state)
+{
+    return TitleModifiers(data, state).Flat;
 }
 
 std::vector<TagDamage> TitleTagDamage(const Database& data, const SystemState& state)
 {
-    std::vector<TagDamage> rows;
-    for (const std::string& id : state.Equipped) {
-        const TitleDef* title = data.FindTitle(id);
-        if (title == nullptr || title->Bonus.DamagePercent == 0 || title->Bonus.Against.empty())
-            continue;
-        TagDamage row;
-        row.Tag = title->Bonus.Against;
-        row.Percent = title->Bonus.DamagePercent;
-        rows.push_back(std::move(row));
+    return TitleModifiers(data, state).Damage;
+}
+
+namespace {
+
+void AddTag(std::vector<std::string>& tags, std::string_view tag)
+{
+    if (tag.empty() || TagListed(tags, tag))
+        return;
+    tags.emplace_back(tag);
+}
+
+} // namespace
+
+void NoteHabit(SystemState& state, const Database& data, std::string_view classId, i32 level,
+               const HabitNote& note)
+{
+    if (note.Kind.empty() || note.Amount <= 0)
+        return;
+    const SystemRules& rules = data.GetSystem();
+    SystemEvent event;
+    event.Kind = SystemEventKind::Mark;
+    event.Amount = 1;
+    if (note.Kind == kHabitDealt) {
+        if (note.Amount < rules.HeavyAt)
+            return;
+        event.Tags.push_back(rules.TagFor(kHabitHeavy));
+        DispatchSystem(state, data, classId, level, event);
+        return;
     }
-    return rows;
+    if (note.Kind == kHabitRegion) {
+        if (note.Id.empty() || SystemCount(state, SystemEventKind::Mark, note.Id, "") > 0)
+            return;
+        event.Id = note.Id;
+        event.Tags.push_back(rules.TagFor(kHabitRegion));
+        DispatchSystem(state, data, classId, level, event);
+        return;
+    }
+    if (note.Kind == kHabitGold) {
+        event.Amount = note.Amount;
+        event.Tags.push_back(rules.TagFor(kHabitGold));
+        DispatchSystem(state, data, classId, level, event);
+        return;
+    }
+    event.Id = note.Id;
+    event.Tags = note.Tags;
+    AddTag(event.Tags, rules.TagFor(note.Kind));
+    DispatchSystem(state, data, classId, level, event);
+}
+
+std::vector<std::string> DrainNotices(SystemState& state)
+{
+    std::vector<std::string> lines = std::move(state.Pending);
+    state.Pending.clear();
+    return lines;
 }
 
 std::vector<TitleFact> QueryTitles(const Database& data, const SystemState& state)

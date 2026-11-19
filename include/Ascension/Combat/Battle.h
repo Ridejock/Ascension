@@ -213,6 +213,8 @@ struct FightSnapshot {
     i32 OrderIndex = 0;
     CombatantSnapshot Player;
     std::vector<CombatantSnapshot> Foes;
+    // Damage the player has taken this fight. A file that omits it starts at 0.
+    i32 PlayerHurt = 0;
 };
 
 // Pools a fight starts from. Hp is clamped to 0..MaxHp. 0 is a defeat before anyone
@@ -250,6 +252,11 @@ public:
     bool ApplyData(std::string& error);
 
     [[nodiscard]] const CombatantState& Player() const { return m_Player; }
+    // Habits the last accepted action observed. Cleared by the caller, or by the
+    // next action. PlayerHurt is the damage this fight has landed on the hero.
+    [[nodiscard]] std::span<const HabitNote> Habits() const { return m_Habits; }
+    void ClearHabits() { m_Habits.clear(); }
+    [[nodiscard]] i32 PlayerHurt() const { return m_PlayerHurt; }
     // The selected enemy. After the fight starts this is one of Enemies().
     [[nodiscard]] const CombatantState& Enemy() const;
     [[nodiscard]] std::span<const CombatantState> Enemies() const { return m_Enemies; }
@@ -437,6 +444,8 @@ private:
     i32 NoteSkillUse(CombatantState& who, const std::string& skillId);
     void GrantFocus(CombatantState& who, i32 amount) const;
     void GrantMana(CombatantState& who, i32 amount) const;
+    void RememberHabit(std::string_view kind, std::string id, i32 amount,
+                       const std::vector<std::string>& tags);
     [[nodiscard]] bool SpendsMana(const SkillDef& skill) const;
     [[nodiscard]] bool CanPay(const CombatantState& who, const SkillDef& skill) const;
     // ApplyStatus unless a status `who` has up resists it. False when it was resisted.
@@ -473,6 +482,11 @@ private:
     StatBlock m_BaseStats;
     bool m_HasBaseStats = false;
     BattleResult m_Result = BattleResult::Ongoing;
+    i32 m_PlayerHurt = 0;
+    std::vector<HabitNote> m_Habits;
+    // The skill that raised the player's guard, kept until that guard is spent.
+    std::string m_GuardSkill;
+    std::vector<std::string> m_GuardTags;
     bool m_FleeAllowed = false;
     bool m_Started = false;
     bool m_UpkeepDone = false;

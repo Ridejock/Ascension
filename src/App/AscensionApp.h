@@ -98,8 +98,12 @@ private:
     void ClampCamp();
     void HandleCamp(std::string_view action);
     void HandleTitles(std::string_view action);
+    void HandleSystemLog(std::string_view action);
+    void ReadHabits();
+    void ShowSystemNotices();
     void DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height);
     void DrawTitles(Emerald::Renderer2D& renderer, f32 width, f32 height);
+    void DrawSystemLog(Emerald::Renderer2D& renderer, f32 width, f32 height);
     void DrawFight(Emerald::Renderer2D& renderer, f32 width, f32 height);
     // One line on the battle and shop screens. Further lines wait, and Confirm skips the wait.
     void ClearPresented();
@@ -274,6 +278,8 @@ private:
     bool m_Camp = false;
     i32 m_CampColumn = 0;
     i32 m_CampRow = 0;
+    bool m_SystemOpen = false;
+    i32 m_SystemRow = 0;
     bool m_Talk = false;
     i32 m_TalkRow = 0;
     std::string m_TalkId;
