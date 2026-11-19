@@ -75,5 +75,11 @@ struct TitleSenseMatch {
 
 [[nodiscard]] TitleSenseMatch ResolveTitleSense(const TitleSense& sense,
                                                 std::span<const TitleFact> facts);
+// `state` is the ledger. A when-deed can name a count, a class, or a title. The
+// fact that fills {title.name} still comes from `facts`.
+[[nodiscard]] TitleSenseMatch ResolveTitleSense(const TitleSense& sense,
+                                                std::span<const TitleFact> facts,
+                                                const SystemState& state, std::string_view classId,
+                                                i32 level);
 
 } // namespace Ascension

@@ -5,15 +5,35 @@
       "lines": [
         {
           "titleEquipped": "wolf_cull",
-          "line": "Wolf Cull. The ash does not hide/what the System counted."
+          "line": "One wolf, and the ash does/not hide the count."
         },
         {
           "titleEquipped": "beast_hunter",
-          "line": "Beast Hunter. The hollow knows/a hunter when it smells one."
+          "line": "The hollow knows a hunter/when it smells one."
         },
         {
-          "fallback": true,
-          "line": "The System marks what you wear./{title.name}."
+          "titleEquipped": "crusher",
+          "line": "The hollow heard the/heavy ones. So did I."
+        },
+        {
+          "titleEquipped": "warden",
+          "line": "You set a guard and/kept it. The pit noticed."
+        },
+        {
+          "titleEquipped": "mender",
+          "line": "The ash does not close/a wound. You did."
+        },
+        {
+          "titleEquipped": "unscathed",
+          "line": "You came out of the hollow/with none of it on you."
+        },
+        {
+          "titleEquipped": "runner",
+          "line": "You left before the pit/was quiet. The path is still there."
+        },
+        {
+          "anyTitleEquipped": true,
+          "line": "The fire has noticed what/you are wearing."
         }
       ]
     },

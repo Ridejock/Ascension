@@ -1,4 +1,26 @@
 {
+  "system": {
+    "title": "[System] Title earned: {name}",
+    "skill": "[System] Skill unlocked: {name}",
+    "meld": "[System] Path opened: {name}",
+    "log": "SYSTEM",
+    "empty": "The System has written nothing.",
+    "logKeep": 32,
+    "heavyAt": 16,
+    "clutchPercent": 25,
+    "marks": {
+      "blocked": "blocked",
+      "healed": "healed",
+      "heavy": "heavy",
+      "status": "status",
+      "fled": "fled",
+      "untouched": "untouched",
+      "clutch": "clutch",
+      "gold": "gold",
+      "step": "step",
+      "region": "region"
+    }
+  },
   "sheet": {
     "equipped": "EQUIPPED",
     "owned": "OWNED",
@@ -55,6 +77,46 @@
       "description": "After a hundred goblins, blows bite harder against humanoids.",
       "deed": { "on": "kill", "tag": "goblin", "atLeast": 100 },
       "bonus": { "damagePercent": 10, "against": "humanoid" }
+    },
+    {
+      "id": "crusher",
+      "name": "Crusher",
+      "description": "The System counted the heavy hits. Strength +1.",
+      "deed": { "on": "skill", "tag": "crush", "atLeast": 6 },
+      "bonus": { "stat": "strength", "amount": 1 }
+    },
+    {
+      "id": "warden",
+      "name": "Warden",
+      "description": "The System counted a guard that held. Defense +1.",
+      "deed": {
+        "any": [
+          { "on": "skill", "tag": "defense", "atLeast": 5 },
+          { "on": "mark", "tag": "blocked", "atLeast": 3 }
+        ]
+      },
+      "bonus": { "stat": "defense", "amount": 1 }
+    },
+    {
+      "id": "mender",
+      "name": "Mender",
+      "description": "The System counted the mending. Will +1.",
+      "deed": { "on": "tag", "tag": "heal", "atLeast": 6 },
+      "bonus": { "stat": "will", "amount": 1 }
+    },
+    {
+      "id": "unscathed",
+      "name": "Unscathed",
+      "description": "The System counted a fight that left no mark. Agility +1.",
+      "deed": { "on": "mark", "tag": "untouched", "atLeast": 1 },
+      "bonus": { "stat": "agility", "amount": 1 }
+    },
+    {
+      "id": "runner",
+      "name": "Runner",
+      "description": "The System counted the times you left. Stamina +1.",
+      "deed": { "on": "mark", "tag": "fled", "atLeast": 3 },
+      "bonus": { "stat": "stamina", "amount": 1 }
     }
   ]
 }

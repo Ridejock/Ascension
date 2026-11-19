@@ -730,12 +730,12 @@ void TestOldSaveLoads()
     file.SetString("class", "fighter");
     file.SetInt("xp", 12);
     Emerald::SaveSystem version(older.Path, RunSave::kVersion);
-    Check(version.Save("run", file, "old"), "a version 7 file without a meter is written");
+    Check(version.Save("run", file, "old"), "a current-version file without a meter is written");
     RunSave oldSaves(older.Path);
     const RunLoad old = oldSaves.Read();
     Check(static_cast<bool>(old) && old.Run.DangerValue == 0 && old.Run.DangerGrace == 0 &&
               old.Run.DangerRoad && old.Run.DangerRng == 1 && !old.Run.Wild && old.Run.Career.Xp == 12,
-          "an older version 7 file loads with an empty meter");
+          "a file that omits the meter loads empty");
 }
 
 } // namespace

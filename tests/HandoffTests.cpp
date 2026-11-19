@@ -641,7 +641,7 @@ void TestPackFootprintReturn()
 
 void TestFleeKeepsTheWound()
 {
-    Check(RunSave::kVersion == 7, "the save version records the System ledger");
+    Check(RunSave::kVersion == 8, "the save version records the System log");
     RunState run;
     RememberOutcome(run, BattleResult::Fled, 3, 1, 0);
     Check(run.Standing == RunStanding::None && run.ResourcesKnown && run.Hp == 3 &&
