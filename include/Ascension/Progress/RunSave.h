@@ -276,8 +276,10 @@ public:
     // Version 8. The System log (notice.count, notice.N) and the meld ids already
     // announced (meldNoted.count, meldNoted.N) are stored. A version 7 file has
     // neither. The migration sets system.settled so the first evaluation records
-    // melds that are already open and does not announce them. fight.hurt, the
-    // damage a saved fight has already dealt the hero, is optional on this version.
+    // melds that are already open and does not announce them. fight.hurt is the
+    // damage a saved fight has already dealt the hero. A file that stores it,
+    // including zero, keeps that number. A known fight that omits the key is
+    // loaded as already hurt, so the win cannot count as untouched.
     // Version 7. The System ledger (counters, titles, skill offers, granted skills, and
     // spent free points) is stored, plus free.floor. A version 6 file has none of those
     // keys. The migration marks it free.legacy so the load settles free points at the

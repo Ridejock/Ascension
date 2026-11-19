@@ -213,7 +213,8 @@ struct FightSnapshot {
     i32 OrderIndex = 0;
     CombatantSnapshot Player;
     std::vector<CombatantSnapshot> Foes;
-    // Damage the player has taken this fight. A file that omits it starts at 0.
+    // Damage the player has taken this fight. A saved fight that omits the key
+    // has no record of that damage, so the load treats it as already hurt.
     i32 PlayerHurt = 0;
 };
 

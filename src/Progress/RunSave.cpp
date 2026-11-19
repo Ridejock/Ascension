@@ -416,9 +416,15 @@ bool ReadFight(const Emerald::SaveData& data, FightSnapshot& fight, std::string&
             return false;
         }
     }
-    fight.PlayerHurt = data.GetInt("fight.hurt", 0);
-    if (fight.PlayerHurt < 0)
-        fight.PlayerHurt = 0;
+    // A known fight with no hurt key was saved before the count existed. There is
+    // no way to know the hero was untouched, so the win must not count as one.
+    if (!data.Has("fight.hurt")) {
+        fight.PlayerHurt = 1;
+    } else {
+        fight.PlayerHurt = data.GetInt("fight.hurt", 0);
+        if (fight.PlayerHurt < 0)
+            fight.PlayerHurt = 0;
+    }
     error.clear();
     return true;
 }
