@@ -101,4 +101,22 @@ struct TalkSpeaker {
 [[nodiscard]] std::filesystem::path ResolveTalkPortrait(const TalkSpeaker& speaker,
                                                         const ArtPack& pack);
 
+// Where the dialogue box puts its portrait and its type, in pixels from the
+// panel's top-left. `frame` is the skinned panel's border, or 0 for the flat
+// frame. Content is one panelPad inside that border, which is the interior
+// padding the fight and the shop already keep. The label is centered in the
+// line under that pad, so a font shorter than the line does not sit on the
+// border. Body text follows the line by `lineGap`.
+struct TalkBox {
+    f32 ContentX = 0;
+    f32 TextX = 0;
+    f32 SlotY = 0;
+    f32 LabelY = 0;
+    f32 BodyY = 0;
+    f32 Portrait = 0;
+};
+
+[[nodiscard]] TalkBox PlaceTalkBox(f32 panelPad, f32 lineGap, f32 rowGap, f32 lineH, f32 frame,
+                                   bool portrait, f32 portraitSize, f32 textH);
+
 } // namespace Ascension

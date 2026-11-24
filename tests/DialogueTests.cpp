@@ -1021,6 +1021,59 @@ void TestSpeakers()
     fs::remove_all(dir, removeError);
 }
 
+void TestTalkBox()
+{
+    const f32 pad = 22.0f;
+    const f32 lineGap = 12.0f;
+    const f32 rowGap = 12.0f;
+    const f32 lineH = 18.0f;
+    const f32 portrait = 96.0f;
+
+    const TalkBox bare = PlaceTalkBox(pad, lineGap, rowGap, lineH, 0.0f, false, portrait, lineH);
+    Check(bare.Portrait == 0.0f && bare.ContentX == pad && bare.TextX == pad,
+          "a speaker with no portrait keeps the line at the panel pad");
+    Check(bare.SlotY == pad && bare.LabelY == pad,
+          "a flat panel puts the label on the same pad the shop header uses");
+    Check(bare.BodyY == pad + lineH + lineGap, "the body follows the label by one line and the gap");
+
+    const TalkBox faced = PlaceTalkBox(pad, lineGap, rowGap, lineH, 0.0f, true, portrait, lineH);
+    Check(faced.ContentX == pad && faced.Portrait == portrait &&
+              faced.TextX == pad + portrait + rowGap,
+          "a portrait shifts the line by the box and the row gap");
+    Check(faced.LabelY == pad, "a portrait does not move the label down");
+
+    const f32 frame = 20.0f;
+    const TalkBox boxed = PlaceTalkBox(pad, lineGap, rowGap, lineH, frame, false, portrait, lineH);
+    Check(boxed.TextX == frame + pad && boxed.LabelY == frame + pad && boxed.SlotY == frame + pad,
+          "type is one panel pad inside the frame");
+    Check(boxed.TextX - frame == pad && boxed.LabelY - frame == pad,
+          "the pad stays open panel, past the border");
+    Check(boxed.TextX > bare.TextX && boxed.LabelY > bare.LabelY,
+          "a skinned frame pushes the line off the border");
+    Check(boxed.BodyY == boxed.LabelY + lineH + lineGap, "the body stays one line under the label");
+
+    const TalkBox boxedFace =
+        PlaceTalkBox(pad, lineGap, rowGap, lineH, frame, true, portrait, lineH);
+    Check(boxedFace.ContentX == frame + pad &&
+              boxedFace.TextX == boxedFace.ContentX + portrait + rowGap,
+          "a portrait beside a frame still starts inside the border");
+    Check(boxedFace.TextX != boxed.TextX, "the portrait column is not the text column");
+
+    const f32 fontH = 8.0f;
+    const TalkBox shortFont =
+        PlaceTalkBox(pad, lineGap, rowGap, lineH, frame, false, portrait, fontH);
+    const f32 drop = (lineH - fontH) * 0.5f;
+    Check(shortFont.LabelY == frame + pad + drop && shortFont.SlotY == frame + pad,
+          "a shorter font is centered in the line");
+    Check(shortFont.LabelY > frame && shortFont.BodyY == shortFont.SlotY + lineH + lineGap,
+          "the label stays off the top border and the body keeps the line grid");
+
+    const TalkBox messy = PlaceTalkBox(-4.0f, -1.0f, -2.0f, 10.0f, -3.0f, true, -8.0f, 40.0f);
+    Check(messy.ContentX == 0.0f && messy.TextX == 0.0f && messy.Portrait == 0.0f &&
+              messy.LabelY == 0.0f && messy.BodyY == 10.0f,
+          "a bad size does not push the box off the panel");
+}
+
 void TestShipped()
 {
     Database data(kShipped);
@@ -1054,6 +1107,7 @@ int main()
     TestVillageSense();
     TestSenseDoesNotNameTitles();
     TestSpeakers();
+    TestTalkBox();
     TestShipped();
     TestCalder();
     TestBram();

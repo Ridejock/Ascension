@@ -311,6 +311,41 @@ std::filesystem::path ResolveTalkPortrait(const TalkSpeaker& speaker, const ArtP
     return art.Picture.File;
 }
 
+TalkBox PlaceTalkBox(f32 panelPad, f32 lineGap, f32 rowGap, f32 lineH, f32 frame, bool portrait,
+                     f32 portraitSize, f32 textH)
+{
+    if (panelPad < 0.0f)
+        panelPad = 0.0f;
+    if (lineGap < 0.0f)
+        lineGap = 0.0f;
+    if (rowGap < 0.0f)
+        rowGap = 0.0f;
+    if (lineH < 0.0f)
+        lineH = 0.0f;
+    if (frame < 0.0f)
+        frame = 0.0f;
+    if (!portrait || portraitSize < 0.0f)
+        portraitSize = 0.0f;
+    if (textH < 0.0f)
+        textH = 0.0f;
+    if (textH > lineH)
+        textH = lineH;
+
+    // The border is drawn inside the panel edge. Measuring the pad from the
+    // inner edge keeps that pad as open panel, on a flat frame and on a skin.
+    const f32 inset = frame + panelPad;
+    TalkBox box;
+    box.ContentX = inset;
+    box.Portrait = portrait ? portraitSize : 0.0f;
+    box.TextX = inset;
+    if (box.Portrait > 0.0f)
+        box.TextX = inset + box.Portrait + rowGap;
+    box.SlotY = inset;
+    box.LabelY = inset + (lineH - textH) * 0.5f;
+    box.BodyY = inset + lineH + lineGap;
+    return box;
+}
+
 void TalkBoxLines(std::string_view line, i32 width, std::vector<std::string>& out)
 {
     out.clear();
