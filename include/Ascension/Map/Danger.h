@@ -110,11 +110,14 @@ inline constexpr std::string_view kDefaultCueJoin = " - ";
 
 // The numbers from danger.json. Cap is full. GraceSteps is how many steps
 // after a fight, and after leaving a 0-rated tile, add danger and do not roll.
+// PauseText is the word joined to the hint while a meter above 0 is frozen
+// on a 0-rated tile. Empty leaves that line blank.
 struct DangerRules {
     i32 Cap = 100;
     i32 GraceSteps = 3;
     DangerCurve Curve = DangerCurve::Square;
     std::string CueJoin = std::string(kDefaultCueJoin);
+    std::string PauseText;
     std::vector<DangerRating> Ratings;
     std::vector<DangerTable> Tables;
     std::vector<DangerHint> Hints;
@@ -123,7 +126,8 @@ struct DangerRules {
 
 // Value is 0..Cap. Grace is steps that still cannot roll. OnRoad is true
 // when the last committed step stood on a 0-rated tile, or no step has
-// been taken yet. The step that leaves that state arms grace.
+// been taken yet. The step that leaves that state arms grace. OnRoad with
+// Value above 0 is the paused meter: the value is held, not cleared.
 struct DangerMeter {
     i32 Value = 0;
     i32 Grace = 0;
@@ -136,9 +140,11 @@ struct DangerRng {
 };
 
 // What one committed step did to the meter. Fight is the roll, not yet
-// a battle: the caller still has to find a table.
+// a battle: the caller still has to find a table. Paused is a 0-rated
+// step that kept a meter above 0. An empty meter on that tile is not paused.
 struct DangerStep {
     bool Fight = false;
+    bool Paused = false;
     i32 Value = 0;
     i32 Grace = 0;
     i32 Rating = 0;
@@ -157,9 +163,11 @@ struct DangerStep {
 // The hint with the greatest At that is still <= value, or null.
 [[nodiscard]] const DangerHint* DangerHintFor(const DangerRules& rules, i32 value);
 
-// The line under the pools. Empty on a 0-rated tile, at 0, and when nothing
-// matches. A terrain hint replaces the generic hint. The tracks word and a
-// live howl are joined with CueJoin. No sound.
+// The line under the pools. Empty at 0, and when nothing matches. On a
+// 0-rated tile with a held meter, the generic hint is joined with PauseText
+// and the tracks, terrain hint, and howl stay off. On rated ground a terrain
+// hint replaces the generic hint. The tracks word and a live howl are joined
+// with CueJoin. No sound.
 [[nodiscard]] std::string DangerCueLine(const DangerRules& rules, const DangerSignsState& state,
                                         i32 value, std::string_view mapId, std::string_view tileId);
 
@@ -183,9 +191,11 @@ void SettleDangerSigns(DangerSignsState& state, const DangerRules& rules, i32 va
 // Drops a live howl and the memory of which howls already played.
 void ClearDangerSigns(DangerSignsState& state);
 
-// Adds `rating` and maybe rolls. A rating of 0 never fights and does not
-// change Value. `roll` is folded into [0, cap). Grace, including the steps
-// just after leaving a 0-rated tile, adds danger and does not roll.
+// Adds `rating` and maybe rolls. A rating of 0 freezes the meter: Value
+// stays, Grace stays, and the roll is not taken. Paused is set when that
+// frozen meter is above 0. `roll` is folded into [0, cap). Grace, including
+// the steps just after leaving a 0-rated tile, adds danger and does not roll.
+// The first of those steps adds only `rating`.
 [[nodiscard]] DangerStep AdvanceDanger(DangerMeter& meter, const DangerRules& rules, i32 rating,
                                        u32 roll);
 

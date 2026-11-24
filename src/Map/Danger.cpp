@@ -240,8 +240,21 @@ void DecayHowls(DangerSignsState& state)
 std::string DangerCueLine(const DangerRules& rules, const DangerSignsState& state, i32 value,
                           std::string_view mapId, std::string_view tileId)
 {
-    if (value < 1 || DangerRatingOf(rules, tileId) < 1)
+    if (value < 1)
         return {};
+    const std::string_view join =
+        rules.CueJoin.empty() ? kDefaultCueJoin : std::string_view(rules.CueJoin);
+    // A road, a floor, a dungeon stone. The held band stays on screen with
+    // the pause word. Tracks and howls belong to the wild tile.
+    if (DangerRatingOf(rules, tileId) < 1) {
+        if (rules.PauseText.empty())
+            return {};
+        std::string line;
+        if (const DangerHint* word = DangerHintFor(rules, value))
+            AppendCue(line, join, word->Text);
+        AppendCue(line, join, rules.PauseText);
+        return line;
+    }
     std::string hint;
     if (const DangerSign* terrain = BestSign(rules, DangerSignKind::Hint, value, mapId, tileId))
         hint = terrain->Text;
@@ -253,8 +266,6 @@ std::string DangerCueLine(const DangerRules& rules, const DangerSignsState& stat
     std::string howl;
     if (const DangerSign* cry = LiveHowl(rules, state, value, mapId, tileId))
         howl = cry->Text;
-    const std::string_view join =
-        rules.CueJoin.empty() ? kDefaultCueJoin : std::string_view(rules.CueJoin);
     std::string line;
     AppendCue(line, join, hint);
     AppendCue(line, join, tracks);
@@ -359,12 +370,14 @@ DangerStep AdvanceDanger(DangerMeter& meter, const DangerRules& rules, i32 ratin
     if (meter.Grace < 0)
         meter.Grace = 0;
 
-    // A road, a floor, a dungeon stone: the meter does not grow and the
-    // roll is not taken, even when the meter is already full.
+    // A road, a floor, a dungeon stone: freeze the meter. Value and grace
+    // stay, and the roll is not taken, even when the meter is already full.
+    // Paused is the held meter. An empty one stays blank.
     if (rating == 0) {
         meter.OnRoad = true;
         step.Value = meter.Value;
         step.Grace = meter.Grace;
+        step.Paused = meter.Value > 0;
         return step;
     }
 

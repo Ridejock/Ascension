@@ -78,8 +78,9 @@ void TestRoadNeverRolls()
     meter.Grace = 0;
     meter.OnRoad = false;
     const DangerStep step = AdvanceDanger(meter, rules, 0, 0);
-    Check(!step.Fight && step.Value == rules.Cap && meter.OnRoad,
-          "a road step never fights, even with a full meter and a zero roll");
+    Check(!step.Fight && step.Paused && step.Value == rules.Cap && meter.OnRoad &&
+              meter.Value == rules.Cap,
+          "a road step freezes a full meter and does not roll");
 }
 
 void TestDangerAddsByTerrain()
@@ -122,10 +123,12 @@ void TestResetAndGrace()
 
     DangerMeter walking;
     const DangerStep road = AdvanceDanger(walking, rules, 0, 0);
-    Check(!road.Fight && walking.OnRoad, "a zero rating stays on the road");
+    Check(!road.Fight && !road.Paused && walking.OnRoad && walking.Value == 0,
+          "an empty road is not paused");
     const DangerStep left = AdvanceDanger(walking, rules, 8, 0);
-    Check(!left.Fight && !walking.OnRoad && walking.Grace == rules.GraceSteps - 1,
-          "leaving the road starts the same grace");
+    Check(!left.Fight && !left.Paused && !walking.OnRoad && walking.Value == 8 &&
+              walking.Grace == rules.GraceSteps - 1,
+          "leaving an empty road starts grace and adds only that step");
 }
 
 void TestCurves()
@@ -215,6 +218,7 @@ void TestSigns()
     rules.Ratings.push_back({"forest", 8});
     rules.Hints.push_back({1, "uneasy"});
     rules.Hints.push_back({25, "wary"});
+    rules.PauseText = "paused";
 
     DangerSign prints = MakeSign(DangerSignKind::Tracks, "prints", 8, "forest", "prints");
     prints.HasColor = true;
@@ -247,7 +251,10 @@ void TestSigns()
     Check(DangerCueLine(rules, state, 0, "overland", "forest").empty(), "zero has no cue line");
     CollectDangerMarks(rules, 0, "overland", "forest", 3, 4, marks);
     Check(marks.empty(), "zero draws no tracks");
-    Check(DangerCueLine(rules, state, 50, "overland", "path").empty(), "a road shows no cue");
+    Check(DangerCueLine(rules, state, 50, "overland", "path") == "wary - paused",
+          "a road shows the held meter as paused");
+    Check(DangerCueLine(rules, state, 0, "overland", "path").empty(),
+          "an empty meter on the road stays blank");
     CollectDangerMarks(rules, 50, "overland", "path", 1, 1, marks);
     Check(marks.empty(), "a road draws no tracks");
 
@@ -285,7 +292,8 @@ void TestSigns()
 
     DangerSignsState again;
     AdvanceDangerSigns(again, rules, 40, "hub", "forest");
-    Check(DangerCueLine(rules, again, 40, "hub", "path").empty(), "a road hides a live howl");
+    Check(DangerCueLine(rules, again, 40, "hub", "path") == "wary - paused",
+          "a road shows the held meter, not the live howl");
     AdvanceDangerSigns(again, rules, 40, "hub", "path");
     AdvanceDangerSigns(again, rules, 40, "hub", "forest");
     Check(DangerCueLine(rules, again, 40, "hub", "forest") == "wary - tracks",
@@ -406,7 +414,8 @@ void TestShippedDanger()
               wary != nullptr && wary->Text == "wary" && threatened != nullptr &&
               threatened->Text == "threatened",
           "the hints are uneasy, wary, then threatened");
-    Check(rules.CueJoin == " - ", "the cue line joins with a spaced hyphen");
+    Check(rules.CueJoin == " - " && rules.PauseText == "paused",
+          "the cue line joins with a spaced hyphen and names the pause");
 
     const DangerSign* meadowPrints = nullptr;
     const DangerSign* meadowTracks = nullptr;
@@ -493,8 +502,17 @@ void TestShippedDanger()
           "the shipped forest opens with prints");
     Check(DangerCueLine(rules, quiet, 18, "overland", "barrow_ground") == "uneasy - scuffs",
           "the shipped barrow ground opens with scuffs");
-    Check(DangerCueLine(rules, quiet, 80, "overland", "path").empty(),
-          "the shipped road still shows nothing");
+    Check(DangerCueLine(rules, quiet, 80, "overland", "path") == "threatened - paused",
+          "a held meter on the road reads as paused");
+    Check(DangerCueLine(rules, quiet, 24, "overland", "path") == "uneasy - paused",
+          "the pause line keeps the band the meter had reached");
+    Check(DangerCueLine(rules, quiet, 80, "sluice", "floor") == "threatened - paused",
+          "a safe floor holds the same paused line");
+    Check(DangerCueLine(rules, quiet, 0, "overland", "path").empty(),
+          "a clear meter on the road stays blank");
+    std::vector<DangerMarkSpot> roadMarks;
+    CollectDangerMarks(rules, 80, "overland", "path", 1, 1, roadMarks);
+    Check(roadMarks.empty(), "the shipped road draws no tracks while the meter is held");
 }
 
 void TestRejectedDanger()
@@ -551,8 +569,13 @@ void TestRejectedDanger()
         Check(data.Load(&loadError), "a tile with no rating still loads");
         Check(data.IsLoaded() && DangerRatingOf(data.GetDanger(), "wall") == 0,
               "an unlisted tile rates 0 and never rolls");
-        Check(data.GetDanger().Signs.empty() && data.GetDanger().CueJoin == kDefaultCueJoin,
-              "a file with no signs keeps the default join");
+        Check(data.GetDanger().Signs.empty() && data.GetDanger().CueJoin == kDefaultCueJoin &&
+                  data.GetDanger().PauseText.empty(),
+              "a file with no signs keeps the default join and no pause word");
+        DangerSignsState quiet;
+        Check(data.IsLoaded() &&
+                  DangerCueLine(data.GetDanger(), quiet, 10, "hub", "floor").empty(),
+              "a file with no pause word leaves the safe line blank");
     }
     {
         TempCopy copy;
@@ -700,6 +723,137 @@ void TestRejectedDanger()
         Check(!load(copy.Path, loadError), "a sign with an unknown map fails");
         CheckHas(loadError.Message, "no_such", "the missing sign map is named");
     }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"paused\": \"paused\", \"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [] } }\n");
+        Database data(copy.Path);
+        DataError loadError;
+        Check(data.Load(&loadError), "a pause word loads");
+        Check(data.IsLoaded() && data.GetDanger().PauseText == "paused",
+              "the pause word is kept");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"paused\": \"\", \"ratings\": [ { \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], \"tables\": [] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "an empty pause word fails");
+        CheckHas(loadError.Message, "paused", "the pause word is named");
+    }
+    {
+        TempCopy copy;
+        WriteFile(copy.Path / "danger.json",
+                  "{ \"danger\": { \"cap\": 100, \"graceSteps\": 0, \"curve\": \"linear\", "
+                  "\"paused\": \"this pause word is too long\", \"ratings\": [ "
+                  "{ \"tile\": \"floor\", \"rating\": 0 }, "
+                  "{ \"tile\": \"wall\", \"rating\": 0 } ], "
+                  "\"tables\": [] } }\n");
+        DataError loadError;
+        Check(!load(copy.Path, loadError), "a long pause word fails");
+        CheckHas(loadError.Message, "paused", "the long pause word is named");
+    }
+}
+
+void TestRoadHoldsMeter()
+{
+    DangerRules rules = SampleRules();
+    rules.PauseText = "paused";
+    rules.Ratings.push_back({"path", 0});
+    rules.Ratings.push_back({"floor", 0});
+    rules.Ratings.push_back({"forest", 8});
+    rules.Hints.push_back({1, "uneasy"});
+    rules.Hints.push_back({25, "wary"});
+    rules.Hints.push_back({70, "threatened"});
+    DangerSign prints = MakeSign(DangerSignKind::Tracks, "prints", 8, "forest", "prints");
+    prints.HasColor = true;
+    prints.Red = 1;
+    prints.Marks.push_back({6, 80, 12});
+    DangerSign howl = MakeSign(DangerSignKind::Howl, "howl", 40, "forest", "a howl");
+    howl.Steps = 2;
+    rules.Signs.push_back(prints);
+    rules.Signs.push_back(howl);
+
+    DangerMeter meter;
+    meter.OnRoad = false;
+    meter.Grace = 0;
+    for (i32 step = 0; step < 5; ++step) {
+        const DangerStep built = AdvanceDanger(meter, rules, 8, 99);
+        Check(!built.Fight && !built.Paused && built.Value == 8 * (step + 1),
+              "off-road steps add the tile and do not pause");
+    }
+    Check(meter.Value == 40, "five forest steps reach 40");
+
+    DangerSignsState signs;
+    AdvanceDangerSigns(signs, rules, meter.Value, "overland", "forest");
+    Check(DangerCueLine(rules, signs, meter.Value, "overland", "forest") ==
+              "wary - prints - a howl",
+          "the wild line is the band, the tracks, and the howl");
+
+    const i32 held = meter.Value;
+    const DangerStep onto = AdvanceDanger(meter, rules, 0, 0);
+    AdvanceDangerSigns(signs, rules, meter.Value, "overland", "path");
+    Check(!onto.Fight && onto.Paused && onto.Value == held && meter.Value == held && meter.OnRoad &&
+              meter.Grace == 0,
+          "stepping onto the road freezes the meter and reports paused");
+    Check(DangerCueLine(rules, signs, meter.Value, "overland", "path") == "wary - paused",
+          "the road line is the held band plus paused");
+    Check(DangerCueLine(rules, signs, meter.Value, "sluice", "floor") == "wary - paused",
+          "a safe floor uses the same paused line");
+    std::vector<DangerMarkSpot> marks;
+    CollectDangerMarks(rules, meter.Value, "overland", "path", 2, 3, marks);
+    Check(marks.empty(), "the road draws no tracks");
+
+    for (i32 step = 0; step < 3; ++step) {
+        const DangerStep walk = AdvanceDanger(meter, rules, 0, 0);
+        AdvanceDangerSigns(signs, rules, meter.Value, "overland", "path");
+        Check(!walk.Fight && walk.Paused && walk.Value == held && meter.Value == held &&
+                  meter.Grace == 0,
+              "walking the road keeps the value and stays paused");
+    }
+    Check(DangerCueLine(rules, signs, meter.Value, "overland", "path") == "wary - paused",
+          "the pause line stays while the hero walks the road");
+
+    const DangerStep back = AdvanceDanger(meter, rules, 8, 0);
+    AdvanceDangerSigns(signs, rules, meter.Value, "overland", "forest");
+    Check(!back.Fight && !back.Paused && back.Value == held + 8 && meter.Value == held + 8,
+          "the first step off the road adds only that tile");
+    Check(meter.Grace == rules.GraceSteps - 1,
+          "leaving the road arms grace, so that step does not fight");
+    Check(DangerCueLine(rules, signs, meter.Value, "overland", "forest") == "wary - prints",
+          "tracks return at the resumed band");
+    std::vector<DangerMarkSpot> returned;
+    CollectDangerMarks(rules, meter.Value, "overland", "forest", 4, 5, returned);
+    Check(returned.size() == 1 && returned[0].Size == 12,
+          "the same prints are back, not a new mark");
+
+    const i32 resumed = meter.Value;
+    const DangerStep next = AdvanceDanger(meter, rules, 8, 0);
+    Check(!next.Fight && next.Value == resumed + 8 && next.Value != rules.Cap,
+          "the next step adds the tile again, and nothing more");
+
+    ResetDanger(meter, rules);
+    ClearDangerSigns(signs);
+    Check(meter.Value == 0 && meter.Grace == rules.GraceSteps && !meter.OnRoad,
+          "a fight clears the held risk and starts grace");
+    Check(DangerCueLine(rules, signs, meter.Value, "overland", "forest").empty(),
+          "a fight clears the cue on the ground where it happened");
+    DangerMeter side = meter;
+    const DangerStep cleared = AdvanceDanger(side, rules, 0, 0);
+    Check(!cleared.Fight && !cleared.Paused && cleared.Value == 0 && side.OnRoad,
+          "after a fight the road is empty, not a paused meter");
+    Check(DangerCueLine(rules, signs, side.Value, "overland", "path").empty(),
+          "a cleared meter on the road stays blank");
+    const DangerStep rebuilt = AdvanceDanger(meter, rules, 8, 0);
+    Check(!rebuilt.Fight && !rebuilt.Paused && rebuilt.Value == 8,
+          "the trip after a fight builds from zero");
+    AdvanceDangerSigns(signs, rules, meter.Value, "overland", "forest");
+    Check(DangerCueLine(rules, signs, meter.Value, "overland", "forest") == "uneasy - prints",
+          "signs after a fight follow the new meter, not the old one");
 }
 
 void TestOldSaveLoads()
@@ -736,6 +890,37 @@ void TestOldSaveLoads()
     Check(static_cast<bool>(old) && old.Run.DangerValue == 0 && old.Run.DangerGrace == 0 &&
               old.Run.DangerRoad && old.Run.DangerRng == 1 && !old.Run.Wild && old.Run.Career.Xp == 12,
           "a file that omits the meter loads empty");
+    DangerMeter empty;
+    empty.Value = old.Run.DangerValue;
+    empty.Grace = old.Run.DangerGrace;
+    empty.OnRoad = old.Run.DangerRoad;
+    const DangerStep blank = AdvanceDanger(empty, SampleRules(), 0, 0);
+    Check(static_cast<bool>(old) && !blank.Paused && blank.Value == 0,
+          "an older file with no meter is empty, not paused");
+
+    TempDir heldDir("ascension-danger-held");
+    RunState heldRun;
+    heldRun.Career.ClassId = "fighter";
+    heldRun.DangerValue = 36;
+    heldRun.DangerGrace = 0;
+    heldRun.DangerRoad = true;
+    heldRun.DangerRng = 4;
+    RunSave heldSaves(heldDir.Path);
+    Check(heldSaves.Write(heldRun, why), "a paused meter save writes");
+    const RunLoad held = heldSaves.Read();
+    Check(static_cast<bool>(held) && held.Run.DangerValue == 36 && held.Run.DangerGrace == 0 &&
+              held.Run.DangerRoad && held.Run.DangerRng == 4,
+          "the held meter round-trips on the existing keys");
+    DangerMeter paused;
+    paused.Value = held.Run.DangerValue;
+    paused.Grace = held.Run.DangerGrace;
+    paused.OnRoad = held.Run.DangerRoad;
+    const DangerStep still = AdvanceDanger(paused, SampleRules(), 0, 0);
+    Check(static_cast<bool>(held) && still.Paused && still.Value == 36 && !still.Fight,
+          "a loaded road meter stays paused without a new save key");
+    const DangerStep resumed = AdvanceDanger(paused, SampleRules(), 8, 0);
+    Check(static_cast<bool>(held) && !resumed.Fight && !resumed.Paused && resumed.Value == 44,
+          "leaving the saved road resumes from the held value");
 }
 
 } // namespace
@@ -745,6 +930,7 @@ int main()
     TestRoadNeverRolls();
     TestDangerAddsByTerrain();
     TestResetAndGrace();
+    TestRoadHoldsMeter();
     TestCurves();
     TestTables();
     TestRollSequence();

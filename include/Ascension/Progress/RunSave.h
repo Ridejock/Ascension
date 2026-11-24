@@ -290,8 +290,9 @@ public:
     // a slot is open. A file that stores the count, including zero, keeps that list.
     // The off-road meter (danger, danger.grace, danger.road, danger.rng) and a wild
     // fight (wild, wild.x, wild.y) are optional too. A file that omits them loads
-    // with an empty meter. Version 6
-    // is the six primaries, and the carried pools are HP, focus, and mana. A version 5
+    // with an empty meter. Paused is danger above 0 while danger.road is set. It is
+    // not its own key. Version 6 is the six primaries, and the carried pools are HP,
+    // focus, and mana. A version 5
     // file keeps its class and name. A custom build's vitality becomes stamina and its
     // focus attribute becomes will; intellect is 0 until spent. A missing mana key is
     // filled to the new max on load, not stored as zero. Version 5 is the named hero.
