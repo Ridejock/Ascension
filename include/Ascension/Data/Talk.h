@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
@@ -81,5 +82,23 @@ struct TitleSenseMatch {
                                                 std::span<const TitleFact> facts,
                                                 const SystemState& state, std::string_view classId,
                                                 i32 level);
+
+class ArtPack;
+
+// The label and portrait id the dialogue box draws for this speaker. Both come
+// from that speaker's own file. Portrait is empty when the file sets none, and
+// it is not filled from another speaker.
+struct TalkSpeaker {
+    std::string_view Label;
+    std::string_view Portrait;
+};
+
+[[nodiscard]] TalkSpeaker TalkSpeakerOf(const DialogueDef& talk);
+
+// The pack file for `speaker.Portrait`, or an empty path. Empty when this speaker
+// has no portrait, the pack was not loaded, or the pack does not list that id.
+// The lookup uses only that id.
+[[nodiscard]] std::filesystem::path ResolveTalkPortrait(const TalkSpeaker& speaker,
+                                                        const ArtPack& pack);
 
 } // namespace Ascension

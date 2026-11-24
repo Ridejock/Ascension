@@ -2651,6 +2651,7 @@ const char* kUiLabels[] = {
 void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
 {
     for (const DialogueDef& talk : data.GetDialogues()) {
+        ConsiderGlyphs(talk.Id, talk.Name, missing);
         for (const DialogueNode& node : talk.Nodes) {
             ConsiderGlyphs(node.Id, node.Line, missing);
             for (const DialogueChoice& choice : node.Choices)

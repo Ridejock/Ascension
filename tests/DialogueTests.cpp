@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "Ascension/Data/ArtPack.h"
 #include "Ascension/Data/Database.h"
 #include "Ascension/Data/Talk.h"
 #include "Ascension/Progress/Hero.h"
@@ -46,6 +47,31 @@ void WriteFile(const fs::path& path, std::string_view text)
 {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << text;
+}
+
+const unsigned char kPortraitPng[] = {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+    0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+    0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8,
+    0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+    0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+
+void WritePng(const fs::path& path)
+{
+    std::error_code error;
+    fs::create_directories(path.parent_path(), error);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(kPortraitPng),
+              static_cast<std::streamsize>(sizeof(kPortraitPng)));
+}
+
+bool SamePortrait(const fs::path& got, const fs::path& expected)
+{
+    if (got.empty())
+        return false;
+    std::error_code error;
+    const fs::path canonical = fs::weakly_canonical(expected, error);
+    return got == expected || (!error && got == canonical);
 }
 
 void ReplaceInFile(const fs::path& path, std::string_view from, std::string_view to)
@@ -302,6 +328,7 @@ void TestSets()
               "{\n"
               "  \"dialogue\": {\n"
               "    \"id\": \"setter\",\n"
+              "    \"name\": \"Setter\",\n"
               "    \"nodes\": [\n"
               "      { \"id\": \"hi\", \"line\": \"Hello.\", \"sets\": [\"met\"], \"choices\": [\n"
               "        { \"text\": \"Yes.\", \"next\": \"bye\", \"sets\": [\"agreed\"] }\n"
@@ -360,6 +387,32 @@ void TestValidation()
                       "\"requires\": [\"found.alphas_fang\"], \"sets\": [\"found.alphas_fang\"]");
         Reject(copy.Path, "dialogue/pell.json", "unknown flag syntax",
                "sets cannot write a list member");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "dialogue" / "pell.json", "\"name\": \"Pell Harrow\",\n", "");
+        Reject(copy.Path, "dialogue/pell.json", "'name' is required", "a talk needs its own name");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "dialogue" / "pell.json", "\"portrait\": \"pell\"",
+                      "\"portrait\": \"\"");
+        Reject(copy.Path, "dialogue/pell.json", "'portrait' must not be empty",
+               "an empty portrait is rejected");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "dialogue" / "pell.json", "\"portrait\": \"pell\"",
+                      "\"portrait\": \"Pell Harrow\"");
+        Reject(copy.Path, "dialogue/pell.json", "'portrait' must be letters",
+               "a portrait id has to be an id");
+    }
+    {
+        TempCopy copy;
+        ReplaceInFile(copy.Path / "dialogue" / "pell.json", "\"name\": \"Pell Harrow\"",
+                      "\"name\": \"{keeper}\"");
+        Reject(copy.Path, "dialogue/pell.json", "must not use a placeholder",
+               "a speaker name cannot be a placeholder");
     }
 }
 
@@ -878,6 +931,96 @@ void TestVillageSense()
     }
 }
 
+void TestSpeakers()
+{
+    Database data(kShipped);
+    DataError error;
+    Check(data.Load(&error), "shipped data loads speaker names");
+    if (!error.Message.empty())
+        std::printf("    %s\n", error.Message.c_str());
+    const DialogueDef* pell = data.FindDialogue("pell");
+    const DialogueDef* bram = data.FindDialogue("bram");
+    const DialogueDef* calder = data.FindDialogue("calder");
+    Check(pell != nullptr && bram != nullptr && calder != nullptr, "pell, bram, and calder all load");
+    if (pell == nullptr || bram == nullptr || calder == nullptr)
+        return;
+
+    const TalkSpeaker pellFace = TalkSpeakerOf(*pell);
+    const TalkSpeaker bramFace = TalkSpeakerOf(*bram);
+    const TalkSpeaker calderFace = TalkSpeakerOf(*calder);
+    Check(pellFace.Label == "Pell Harrow" && pellFace.Label == pell->Name,
+          "Pell's label is his own name");
+    Check(pellFace.Portrait == "pell" && pellFace.Portrait == pell->Portrait,
+          "Pell's portrait id is his own");
+    Check(bramFace.Label == "Bram" && bramFace.Label != pellFace.Label &&
+              bramFace.Label != data.GetShop().Keeper,
+          "Bram's label is his own name");
+    Check(bramFace.Portrait.empty(), "Bram has no portrait configured");
+    Check(calderFace.Label == "Calder" && calderFace.Label != pellFace.Label &&
+              calderFace.Label != bramFace.Label && calderFace.Label != data.GetShop().Keeper,
+          "Calder's label is his own name");
+    Check(calderFace.Portrait.empty(), "Calder has no portrait configured");
+    Check(bramFace.Portrait != pellFace.Portrait && calderFace.Portrait != pellFace.Portrait,
+          "Bram and Calder do not use Pell's portrait id");
+
+    const fs::path dir = fs::temp_directory_path() / "ascension-dialogue-portraits";
+    std::error_code removeError;
+    fs::remove_all(dir, removeError);
+    fs::create_directories(dir / "npcs");
+    WritePng(dir / "npcs" / "pell_portrait.png");
+    WritePng(dir / "npcs" / "bram_portrait.png");
+    const fs::path pellFile = dir / "npcs" / "pell_portrait.png";
+    const fs::path bramFile = dir / "npcs" / "bram_portrait.png";
+    WriteFile(dir / "manifest.json",
+              "{\n"
+              "  \"npcs\": [\n"
+              "    { \"id\": \"pell\", \"portrait\": \"npcs/pell_portrait.png\" },\n"
+              "    { \"id\": \"bram\", \"portrait\": \"npcs/bram_portrait.png\" }\n"
+              "  ]\n"
+              "}\n");
+
+    ArtPack both;
+    DataError packError;
+    Check(both.Load(dir, data, &packError), "a pack with two portraits loads");
+    if (!packError.Message.empty())
+        std::printf("    %s\n", packError.Message.c_str());
+    const fs::path pellArt = ResolveTalkPortrait(pellFace, both);
+    const fs::path bramArt = ResolveTalkPortrait(bramFace, both);
+    const fs::path calderArt = ResolveTalkPortrait(calderFace, both);
+    Check(SamePortrait(pellArt, pellFile), "Pell resolves his own portrait file");
+    Check(bramArt.empty() && calderArt.empty(), "a speaker with no portrait resolves no file");
+    Check(!SamePortrait(bramArt, pellFile) && !SamePortrait(calderArt, pellFile) &&
+              !SamePortrait(bramArt, bramFile),
+          "Bram and Calder never resolve Pell's portrait, or a picture they did not name");
+
+    DialogueDef bramOwn = *bram;
+    bramOwn.Portrait = "bram";
+    const fs::path bramOwnArt = ResolveTalkPortrait(TalkSpeakerOf(bramOwn), both);
+    Check(SamePortrait(bramOwnArt, bramFile) && !SamePortrait(bramOwnArt, pellFile),
+          "a speaker who names a portrait resolves that file");
+
+    WriteFile(dir / "manifest.json",
+              "{\n"
+              "  \"npcs\": [ { \"id\": \"pell\", \"portrait\": \"npcs/pell_portrait.png\" } ]\n"
+              "}\n");
+    ArtPack pellOnly;
+    packError = {};
+    Check(pellOnly.Load(dir, data, &packError), "a pack with only Pell's portrait loads");
+    if (!packError.Message.empty())
+        std::printf("    %s\n", packError.Message.c_str());
+    const fs::path onlyPell = ResolveTalkPortrait(pellFace, pellOnly);
+    const fs::path bramMissing = ResolveTalkPortrait(TalkSpeakerOf(bramOwn), pellOnly);
+    const fs::path bramNone = ResolveTalkPortrait(bramFace, pellOnly);
+    const fs::path calderNone = ResolveTalkPortrait(calderFace, pellOnly);
+    Check(SamePortrait(onlyPell, pellFile), "Pell still resolves when he is the only portrait");
+    Check(bramMissing.empty() && bramNone.empty() && calderNone.empty(),
+          "a missing portrait is omitted instead of Pell's");
+    Check(!SamePortrait(bramMissing, pellFile) && !SamePortrait(bramNone, pellFile) &&
+              !SamePortrait(calderNone, pellFile),
+          "no other speaker resolves Pell's portrait file");
+    fs::remove_all(dir, removeError);
+}
+
 void TestShipped()
 {
     Database data(kShipped);
@@ -910,6 +1053,7 @@ int main()
     TestTitleSenseFiles();
     TestVillageSense();
     TestSenseDoesNotNameTitles();
+    TestSpeakers();
     TestShipped();
     TestCalder();
     TestBram();

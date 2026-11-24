@@ -699,10 +699,14 @@ struct TitleSense {
     std::vector<TitleSenseLine> Lines;
 };
 
-// One NPC file under data/dialogue/. Id matches the file name. Sense, when it has
+// One NPC file under data/dialogue/. Id matches the file name. Name is the label
+// the dialogue box draws for this speaker. Portrait is the art-pack id drawn
+// beside that label. Empty means the box draws no portrait. Sense, when it has
 // lines, is the remark this NPC makes about a title. It does not pick the start node.
 struct DialogueDef {
     std::string Id;
+    std::string Name;
+    std::string Portrait;
     TitleSense Sense;
     std::vector<DialogueNode> Nodes;
 

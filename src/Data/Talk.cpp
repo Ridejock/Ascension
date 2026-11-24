@@ -1,5 +1,7 @@
 #include "Ascension/Data/Talk.h"
 
+#include "Ascension/Data/ArtPack.h"
+
 namespace Ascension {
 
 namespace {
@@ -289,6 +291,24 @@ bool TalkChoose(const DialogueDef& talk, std::string& nodeId, std::vector<std::s
     move.NodeId = next->Id;
     nodeId = next->Id;
     return true;
+}
+
+TalkSpeaker TalkSpeakerOf(const DialogueDef& talk)
+{
+    TalkSpeaker speaker;
+    speaker.Label = talk.Name;
+    speaker.Portrait = talk.Portrait;
+    return speaker;
+}
+
+std::filesystem::path ResolveTalkPortrait(const TalkSpeaker& speaker, const ArtPack& pack)
+{
+    if (speaker.Portrait.empty())
+        return {};
+    const ResolvedArt art = pack.Find(ArtSlot::NpcPortrait, speaker.Portrait);
+    if (art.Origin != ArtOrigin::Pack || art.Picture.File.empty())
+        return {};
+    return art.Picture.File;
 }
 
 void TalkBoxLines(std::string_view line, i32 width, std::vector<std::string>& out)
