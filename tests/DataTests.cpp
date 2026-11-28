@@ -2656,6 +2656,22 @@ void ConsiderCatalog(const Database& data, std::vector<MissingGlyph>& missing)
             for (const DialogueChoice& choice : node.Choices)
                 ConsiderGlyphs(node.Id, choice.Text, missing);
         }
+        for (const TitleSenseLine& line : talk.Sense.Lines) {
+            // The braces are replaced before the box draws. The spoken words are the
+            // title's own name and description, which the sheet already draws.
+            std::string shown = line.Line;
+            const char* tokens[] = {"{title.name}", "{title.description}"};
+            for (const char* token : tokens) {
+                const std::string key(token);
+                for (;;) {
+                    const auto at = shown.find(key);
+                    if (at == std::string::npos)
+                        break;
+                    shown.erase(at, key.size());
+                }
+            }
+            ConsiderGlyphs(talk.Id, shown, missing);
+        }
     }
     for (const ItemDef& item : data.GetItems()) {
         ConsiderGlyphs(item.Id, item.Name, missing);

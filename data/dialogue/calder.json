@@ -1,6 +1,22 @@
 {
   "dialogue": {
     "id": "calder",
+    "titleSense": {
+      "lines": [
+        {
+          "titleEquipped": "wolf_cull",
+          "line": "Wolf Cull. The pond heard that count."
+        },
+        {
+          "titleEquipped": "beast_hunter",
+          "line": "Beast Hunter. You did not come by/that name in the dry."
+        },
+        {
+          "fallback": true,
+          "line": "{title.name}. The water does not/read it. I do."
+        }
+      ]
+    },
     "nodes": [
       {
         "id": "calder_after",

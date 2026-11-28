@@ -1,6 +1,22 @@
 {
   "dialogue": {
     "id": "pell",
+    "titleSense": {
+      "lines": [
+        {
+          "titleEquipped": "wolf_cull",
+          "line": "Wolf Cull. The System counted that wolf/where I can see it."
+        },
+        {
+          "titleEquipped": "beast_hunter",
+          "line": "Beast Hunter. Four beasts. Don't/lean the count on my counter."
+        },
+        {
+          "fallback": true,
+          "line": "{title.name}. Worn titles are loud./{title.description}"
+        }
+      ]
+    },
     "nodes": [
       {
         "id": "pell_greet_b",

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Ascension/Data/Types.h"
+#include "Ascension/Progress/System.h"
 
 namespace Ascension {
 
@@ -60,5 +61,19 @@ void TalkApplySets(std::span<const std::string> sets, std::vector<std::string>& 
 
 // Splits `line` on '/' and wraps each piece to `width` characters.
 void TalkBoxLines(std::string_view line, i32 width, std::vector<std::string>& out);
+
+// The remark `sense` speaks for `facts`, or silence. `facts` is a query result
+// (QueryTitles, or the fact FindTitleFact wrote). The first line whose condition
+// holds wins. {title.name} and {title.description} are filled from that fact.
+// An id that is not in `facts` does not match, and the id is never written into
+// the line. A fact with an empty name cannot fill {title.name}.
+struct TitleSenseMatch {
+    bool Spoken = false;
+    std::string Line;
+    std::string TitleId;
+};
+
+[[nodiscard]] TitleSenseMatch ResolveTitleSense(const TitleSense& sense,
+                                                std::span<const TitleFact> facts);
 
 } // namespace Ascension
