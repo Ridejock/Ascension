@@ -6044,19 +6044,33 @@ void AscensionApp::DrawTalk(Emerald::Renderer2D& renderer, f32 width, f32 height
     const f32 lineGap = static_cast<f32>(style.LineGap);
     DrawPanel(renderer, {margin, top}, {width - margin * 2.0f, height - top * 2.0f},
               Paint(style.Panel), edge);
-    // The portrait box stays 96. It sits in the panel pad, and the line starts beside it.
+    // A speaker with a portrait draws a 96 box inside the frame, and the line starts
+    // beside it. A speaker with none keeps the line at that same interior pad.
     constexpr f32 kPortrait = 96.0f;
     const Emerald::Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
-    const f32 contentX = margin + pad;
-    f32 textX = contentX;
-    if (!m_Gallery.IsEmpty() &&
-        DrawArt(renderer, &m_Gallery, ArtSlot::NpcPortrait, m_TalkId, {contentX, top + pad},
-                {kPortrait, kPortrait}, white))
-        textX = contentX + kPortrait + static_cast<f32>(style.RowGap);
+    f32 frame = 0.0f;
+    if (const ArtGallery::Skin* skin = m_Gallery.FindSkin("panel")) {
+        if (skin->Border > 0)
+            frame = static_cast<f32>(skin->Border);
+    }
+    f32 textH = lineH;
+    if (const Emerald::Font* font = m_Gallery.FindFont(scale >= 4 ? "ui" : "body")) {
+        if (font->GetLineHeight() > 0.0f)
+            textH = font->GetLineHeight();
+    }
+    const TalkSpeaker speaker = TalkSpeakerOf(*talk);
+    const std::filesystem::path portrait = ResolveTalkPortrait(speaker, m_Gallery.GetPack());
+    const TalkBox box = PlaceTalkBox(pad, lineGap, static_cast<f32>(style.RowGap), lineH, frame,
+                                     !portrait.empty(), kPortrait, textH);
+    const f32 contentX = margin + box.ContentX;
+    f32 textX = margin + box.TextX;
+    if (box.Portrait > 0.0f &&
+        !DrawArt(renderer, &m_Gallery, ArtSlot::NpcPortrait, speaker.Portrait,
+                 {contentX, top + box.SlotY}, {box.Portrait, box.Portrait}, white))
+        textX = contentX;
     const f32 textWrap = width - textX - contentX;
-    f32 y = top + pad;
-    DrawUiText(renderer, {textX, y}, Upper(m_Data.GetShop().Keeper), edge, scale);
-    y += lineH + lineGap;
+    DrawUiText(renderer, {textX, top + box.LabelY}, Upper(speaker.Label), edge, scale);
+    f32 y = top + box.BodyY;
     const f32 bodyFloor = visible.empty() ? textFloor : textFloor - lineH * 2.0f;
     for (const std::string& line : senseLines) {
         if (y + lineH > bodyFloor)

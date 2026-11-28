@@ -3138,7 +3138,7 @@ bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed,
         return false;
     }
     std::string unknown;
-    if (!AllowKeys(*body, {"id", "titleSense", "nodes"}, unknown)) {
+    if (!AllowKeys(*body, {"id", "name", "portrait", "titleSense", "nodes"}, unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
     }
@@ -3155,6 +3155,19 @@ bool LoadDialogueFile(const Json& root, const std::string& stem, Parsed& parsed,
     }
     if (FindId(parsed.Dialogues, talk.Id) != nullptr) {
         error = "there is another dialogue with this id";
+        return false;
+    }
+    if (!RequireString(*body, "name", talk.Name, error))
+        return false;
+    std::string nameWhy;
+    if (!PlainTalkText(talk.Name, nameWhy)) {
+        error = "name " + nameWhy;
+        return false;
+    }
+    if (!OptionalString(*body, "portrait", talk.Portrait, error))
+        return false;
+    if (!talk.Portrait.empty() && !IsId(talk.Portrait)) {
+        error = "'portrait' must be letters, digits and _, starting with a letter";
         return false;
     }
     if (!ReadTitleSense(*body, parsed, talk.Sense, error))

@@ -1,6 +1,8 @@
 {
   "dialogue": {
     "id": "pell",
+    "name": "Pell Harrow",
+    "portrait": "pell",
     "nodes": [
       {
         "id": "pell_greet_b",
