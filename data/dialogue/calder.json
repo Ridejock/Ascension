@@ -5,15 +5,35 @@
       "lines": [
         {
           "titleEquipped": "wolf_cull",
-          "line": "Wolf Cull. The pond heard that count."
+          "line": "The pond heard a wolf/in that count."
         },
         {
           "titleEquipped": "beast_hunter",
-          "line": "Beast Hunter. You did not come by/that name in the dry."
+          "line": "Four beasts. You did not/come by that in the dry."
         },
         {
-          "fallback": true,
-          "line": "{title.name}. The water does not/read it. I do."
+          "titleEquipped": "crusher",
+          "line": "The pond does not care/how hard you hit. I do."
+        },
+        {
+          "titleEquipped": "warden",
+          "line": "A guard, held. The ditch/could use a wall like that."
+        },
+        {
+          "titleEquipped": "mender",
+          "line": "You closed what the/water opened. Quiet work."
+        },
+        {
+          "titleEquipped": "unscathed",
+          "line": "The water left nothing on you./It usually does."
+        },
+        {
+          "titleEquipped": "runner",
+          "line": "You stepped out of the ditch/before it was done."
+        },
+        {
+          "anyTitleEquipped": true,
+          "line": "The water has noticed what/you brought down here."
         }
       ]
     },

@@ -14,6 +14,7 @@
     {
       "id": "brace",
       "name": "Brace",
+      "tags": ["guard", "defense"],
       "description": "Set your guard and weather the next hit.",
       "kind": "active",
       "target": "self",
@@ -101,6 +102,7 @@
     {
       "id": "shield_wall",
       "name": "Shield Wall",
+      "tags": ["guard", "defense"],
       "description": "Interpose your shield and blunt the blow.",
       "kind": "active",
       "target": "self",
@@ -112,6 +114,7 @@
     {
       "id": "riposte",
       "name": "Riposte",
+      "tags": ["guard", "defense"],
       "description": "Guard {ward.amount} percent of the next hit and send {back.percent} percent of what it stops back, plus a blow that scales with {back.scaling}.",
       "kind": "active",
       "target": "self",
@@ -450,7 +453,7 @@
     {
       "id": "rally",
       "name": "Rally",
-      "tags": ["heal"],
+      "tags": ["heal", "guard", "defense"],
       "description": "Set your guard and catch your breath in one motion.",
       "kind": "active",
       "target": "self",
@@ -488,6 +491,7 @@
     {
       "id": "aegis",
       "name": "Aegis",
+      "tags": ["ward", "defense"],
       "description": "A {school} ward. The next hit loses {ward.amount} percent.",
       "kind": "active",
       "target": "self",
@@ -554,6 +558,7 @@
     {
       "id": "slip",
       "name": "Slip",
+      "tags": ["evade", "defense"],
       "description": "Step out of the next blow. It loses {ward.amount} percent.",
       "kind": "active",
       "target": "self",
@@ -658,6 +663,7 @@
     {
       "id": "sanctuary",
       "name": "Sanctuary",
+      "tags": ["guard", "ward", "defense"],
       "description": "A {school} guard. The next hit loses {ward.amount} percent.",
       "kind": "active",
       "target": "self",

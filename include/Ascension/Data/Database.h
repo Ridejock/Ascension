@@ -83,6 +83,8 @@ public:
     [[nodiscard]] std::span<const TitleDef> GetTitles() const { return m_Titles; }
     // Column names and the equip questions. titles.json's sheet object.
     [[nodiscard]] const TitleLabels& GetTitleLabels() const { return m_TitleLabels; }
+    // Notice lines, habit tags, and the heavy-hit and low-health thresholds.
+    [[nodiscard]] const SystemRules& GetSystem() const { return m_System; }
     [[nodiscard]] std::span<const EnemyDef> GetEnemies() const { return m_Enemies; }
     [[nodiscard]] std::span<const EncounterDef> GetEncounters() const { return m_Encounters; }
     [[nodiscard]] std::span<const ItemDef> GetItems() const { return m_Items; }
@@ -195,6 +197,7 @@ private:
     std::vector<ClassDef> m_Classes;
     std::vector<TitleDef> m_Titles;
     TitleLabels m_TitleLabels;
+    SystemRules m_System;
     std::vector<EnemyDef> m_Enemies;
     std::vector<EncounterDef> m_Encounters;
     std::vector<ItemDef> m_Items;

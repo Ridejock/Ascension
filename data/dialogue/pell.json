@@ -5,15 +5,35 @@
       "lines": [
         {
           "titleEquipped": "wolf_cull",
-          "line": "Wolf Cull. The System counted that wolf/where I can see it."
+          "line": "That wolf is still on you./I can see the count from here."
         },
         {
           "titleEquipped": "beast_hunter",
-          "line": "Beast Hunter. Four beasts. Don't/lean the count on my counter."
+          "line": "Four beasts. Don't lean the/count on my counter."
         },
         {
-          "fallback": true,
-          "line": "{title.name}. Worn titles are loud./{title.description}"
+          "titleEquipped": "crusher",
+          "line": "You walk in swinging like/the counter owes you gold."
+        },
+        {
+          "titleEquipped": "warden",
+          "line": "A guard that held. Keep/it off my shelves."
+        },
+        {
+          "titleEquipped": "mender",
+          "line": "You stitch more than you/break. Potions still aren't free."
+        },
+        {
+          "titleEquipped": "unscathed",
+          "line": "Not a scratch. The hills/usually leave one."
+        },
+        {
+          "titleEquipped": "runner",
+          "line": "You found the way out again./The door still works."
+        },
+        {
+          "anyTitleEquipped": true,
+          "line": "Something the System wrote/is loud in my shop."
         }
       ]
     },

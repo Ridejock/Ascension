@@ -591,8 +591,67 @@ StatBlock Hero::Attributes() const
         stats += source.Points;
     stats += m_System.FreeSpent;
     if (m_Data != nullptr)
-        stats += TitleStatBonus(*m_Data, m_System);
+        ApplyTitleModifiers(stats, TitleModifiers(*m_Data, m_System));
     return stats;
+}
+
+i32 Hero::RewardPercent(ModKind kind) const
+{
+    if (m_Data == nullptr)
+        return 0;
+    const ModifierStack stack = TitleModifiers(*m_Data, m_System);
+    if (kind == ModKind::XpPercent)
+        return stack.XpPercent;
+    if (kind == ModKind::GoldPercent)
+        return stack.GoldPercent;
+    if (kind == ModKind::DropPercent)
+        return stack.DropPercent;
+    return 0;
+}
+
+void Hero::NoteHabit(const HabitNote& note)
+{
+    if (m_Data == nullptr)
+        return;
+    Ascension::NoteHabit(m_System, *m_Data, m_ClassId, Level(), note);
+}
+
+void Hero::NoteVictory(i32 hurt, i32 hp, i32 maxHp, i32 gold)
+{
+    if (m_Data == nullptr)
+        return;
+    if (hurt <= 0) {
+        HabitNote clean;
+        clean.Kind = std::string(kHabitUntouched);
+        clean.Amount = 1;
+        NoteHabit(clean);
+    }
+    const i32 clutch = m_Data->GetSystem().ClutchPercent;
+    if (hp > 0 && maxHp > 0 && static_cast<i64>(hp) * 100 <= static_cast<i64>(maxHp) * clutch) {
+        HabitNote low;
+        low.Kind = std::string(kHabitClutch);
+        low.Amount = 1;
+        NoteHabit(low);
+    }
+    if (gold > 0) {
+        HabitNote purse;
+        purse.Kind = std::string(kHabitGold);
+        purse.Amount = gold;
+        NoteHabit(purse);
+    }
+}
+
+void Hero::NoteFlee()
+{
+    HabitNote left;
+    left.Kind = std::string(kHabitFled);
+    left.Amount = 1;
+    NoteHabit(left);
+}
+
+std::vector<std::string> Hero::TakeNotices()
+{
+    return DrainNotices(m_System);
 }
 
 const char* Hero::NextFightBlock() const
@@ -631,9 +690,10 @@ XpGrant Hero::GrantXp(i32 amount)
     }
     const bool pending = ChoicePending();
     const bool picking = PickPending();
-    const i64 sum = static_cast<i64>(m_Xp) + amount;
+    const i32 granted = ScaleByPercent(amount, RewardPercent(ModKind::XpPercent));
+    const i64 sum = static_cast<i64>(m_Xp) + granted;
     m_Xp = sum > kXpCap ? kXpCap : static_cast<i32>(sum);
-    grant.Amount = amount;
+    grant.Amount = granted;
     grant.LevelAfter = Level();
     if (grant.LevelAfter > grant.LevelBefore) {
         SystemEvent event;
