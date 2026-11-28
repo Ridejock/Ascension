@@ -692,6 +692,7 @@ void TestTitleSenseFiles()
         "{\n"
         "  \"dialogue\": {\n"
         "    \"id\": \"sense\",\n"
+        "    \"name\": \"Sense\",\n"
         "    \"titleSense\": {\n"
         "      \"lines\": [\n"
         "        { \"titleEquipped\": \"wolf_cull\", \"line\": \"Wolf.\" },\n"
