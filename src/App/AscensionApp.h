@@ -75,8 +75,9 @@ private:
     // An ongoing wild fight, or a wild win that is still choosing. The spawn
     // list does not have this fight.
     void OpenResumedWild();
-    // The HUD line for the meter, already uppercased. The hint, the tracks
-    // word, and a live howl. Empty on the road, at 0, and when nothing matches.
+    // The HUD line for the meter, already uppercased. On rated ground: the
+    // hint, the tracks word, and a live howl. On a safe tile with a held
+    // meter: the hint plus the paused word. Empty at 0.
     [[nodiscard]] std::string DangerWord() const;
     void GatherDangerMarks(std::vector<DangerMarkSpot>& out) const;
     // A loss fills both pools and marks a hub return. Gold is not touched.
@@ -337,7 +338,8 @@ private:
     };
     MapEngagement m_MapFight;
     MapMemory m_MapMemory;
-    // Builds while the hero walks off a 0-rated tile. A fight sets it back.
+    // Builds while the hero walks off a 0-rated tile. A safe tile freezes it.
+    // A fight sets it back to 0.
     DangerMeter m_Danger;
     DangerRng m_DangerRng;
     // Howls still on screen, and which howls already played this filling.

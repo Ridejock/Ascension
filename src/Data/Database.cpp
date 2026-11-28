@@ -4939,7 +4939,8 @@ bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
     }
     std::string unknown;
     if (!AllowKeys(*body,
-                   {"cap", "graceSteps", "curve", "cueJoin", "ratings", "tables", "hints", "signs"},
+                   {"cap", "graceSteps", "curve", "cueJoin", "paused", "ratings", "tables", "hints",
+                    "signs"},
                    unknown)) {
         error = "unknown field " + Quote(unknown);
         return false;
@@ -4969,6 +4970,12 @@ bool LoadDanger(const Json& root, Parsed& parsed, std::string& error)
             return false;
         }
         rules.CueJoin = std::move(join);
+    }
+    if (!OptionalString(*body, "paused", rules.PauseText, error))
+        return false;
+    if (rules.PauseText.size() > 24) {
+        error = "'paused' must be 24 characters or fewer";
+        return false;
     }
 
     const auto ratings = body->find("ratings");

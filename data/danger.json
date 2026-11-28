@@ -4,6 +4,7 @@
     "graceSteps": 3,
     "curve": "square",
     "cueJoin": " - ",
+    "paused": "paused",
     "ratings": [
       { "tile": "floor", "rating": 0 },
       { "tile": "wall", "rating": 0 },
