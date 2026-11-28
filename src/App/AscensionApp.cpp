@@ -1509,12 +1509,8 @@ void AscensionApp::RunTalkAction(std::string_view action)
 {
     m_Talk = false;
     m_TalkRow = 0;
-    if (action == "shop_open") {
-        m_Camp = true;
-        m_CampColumn = 0;
-        m_CampRow = 0;
-        m_Picking = false;
-    }
+    if (action == "shop_open")
+        OpenCamp();
 }
 
 void AscensionApp::HandleTalk(std::string_view action)
@@ -1597,11 +1593,7 @@ bool AscensionApp::UseMapPoint()
         return false;
     if (point->Kind == MapPointKind::Talk)
         return OpenTalk(point->Dialogue);
-    m_Camp = true;
-    m_CampColumn = 0;
-    m_CampRow = 0;
-    m_Picking = false;
-    m_Talk = false;
+    OpenCamp();
     return true;
 }
 
@@ -2740,6 +2732,10 @@ void AscensionApp::HandleOverland(std::string_view action)
         return;
     }
     if (m_Camp) {
+        if (m_Titles.Open) {
+            HandleTitles(action);
+            return;
+        }
         if (action == kCancel && m_ShopAsk != ShopAsk::None) {
             m_ShopAsk = ShopAsk::None;
             return;
@@ -2747,6 +2743,7 @@ void AscensionApp::HandleOverland(std::string_view action)
         if (action == kInteract || action == kCancel || action == kMenu) {
             m_Camp = false;
             m_ShopAsk = ShopAsk::None;
+            m_Titles = {};
             return;
         }
         HandleCamp(action);
@@ -2758,11 +2755,7 @@ void AscensionApp::HandleOverland(std::string_view action)
         return;
     }
     if (action == kMenu) {
-        m_Camp = true;
-        m_CampColumn = 0;
-        m_CampRow = 0;
-        m_ShopAsk = ShopAsk::None;
-        m_Picking = false;
+        OpenCamp();
         return;
     }
     if (action == kContext) {
@@ -3359,15 +3352,13 @@ void AscensionApp::HandleAction(std::string_view action)
         }
         if (m_Camp) {
             m_Camp = false;
+            m_ShopAsk = ShopAsk::None;
+            m_Titles = {};
             return;
         }
         if (OpenTalk(m_Data.GetShop().Dialogue))
             return;
-        m_Camp = true;
-        m_CampColumn = 0;
-        m_CampRow = 0;
-        m_ShopAsk = ShopAsk::None;
-        m_Picking = false;
+        OpenCamp();
         return;
     }
     if (action == kMenu) {
@@ -3391,14 +3382,19 @@ void AscensionApp::HandleAction(std::string_view action)
         }
         if (Choosing() && !m_Camp)
             return;
-        m_Camp = !m_Camp;
         if (m_Camp) {
-            m_CampColumn = 0;
-            m_CampRow = 0;
+            m_Camp = false;
             m_ShopAsk = ShopAsk::None;
+            m_Titles = {};
+        } else {
+            OpenCamp();
         }
         m_Picking = false;
         m_Talk = false;
+        return;
+    }
+    if (m_Camp && m_Titles.Open) {
+        HandleTitles(action);
         return;
     }
     if (action == kCancel && m_Camp) {
@@ -3407,6 +3403,7 @@ void AscensionApp::HandleAction(std::string_view action)
             return;
         }
         m_Camp = false;
+        m_Titles = {};
         return;
     }
     if (m_Camp) {
@@ -4962,6 +4959,72 @@ void AscensionApp::HandlePicker(std::string_view action)
     DrinkAt(drinks[static_cast<usize>(pick)]);
 }
 
+void AscensionApp::OpenCamp()
+{
+    m_Camp = true;
+    m_CampColumn = 0;
+    m_CampRow = 0;
+    m_ShopAsk = ShopAsk::None;
+    m_Titles = {};
+    m_Picking = false;
+    m_Talk = false;
+}
+
+void AscensionApp::HandleTitles(std::string_view action)
+{
+    const i32 slots = m_Hero.TitleSlots();
+    const std::vector<TitleFact> facts = m_Hero.QueryTitles();
+    i32 equipped = 0;
+    i32 owned = 0;
+    for (const TitleFact& fact : facts) {
+        if (fact.Equipped)
+            ++equipped;
+        else if (fact.Owned)
+            ++owned;
+    }
+    const i32 row = m_Titles.Row;
+    const TitleSheetStep step = ApplyTitleSheet(m_Titles, action, slots, equipped, owned);
+    if (step == TitleSheetStep::Close) {
+        m_Camp = false;
+        m_ShopAsk = ShopAsk::None;
+        m_Titles = {};
+        return;
+    }
+    if (step != TitleSheetStep::Equip && step != TitleSheetStep::Unequip)
+        return;
+    std::string id;
+    if (step == TitleSheetStep::Unequip) {
+        for (const TitleFact& fact : facts) {
+            if (fact.Equipped && fact.Slot == row)
+                id = fact.Id;
+        }
+    } else {
+        i32 index = 0;
+        for (const TitleFact& fact : facts) {
+            if (!fact.Owned || fact.Equipped)
+                continue;
+            if (index == row)
+                id = fact.Id;
+            ++index;
+        }
+    }
+    if (id.empty())
+        return;
+    std::string name = id;
+    for (const TitleFact& fact : facts) {
+        if (fact.Id == id && !fact.Name.empty())
+            name = fact.Name;
+    }
+    std::string why;
+    const bool wear = step == TitleSheetStep::Equip;
+    if (wear ? !m_Hero.EquipTitle(id, why) : !m_Hero.UnequipTitle(id, why)) {
+        Note(why);
+        return;
+    }
+    const TitleLabels& labels = m_Data.GetTitleLabels();
+    Note(TitleLine(wear ? labels.EquippedNote : labels.UnequippedNote, name));
+}
+
 void AscensionApp::ClampCamp()
 {
     if (m_CampColumn < 0)
@@ -4970,7 +5033,7 @@ void AscensionApp::ClampCamp()
         m_CampColumn = 1;
     i32 rows = static_cast<i32>(m_Data.GetShop().Stock.size());
     if (m_CampColumn == 0)
-        rows = 4 + m_Inventory.BagSlots();
+        rows = 4 + m_Inventory.BagSlots() + 1;
     if (rows < 1)
         m_CampRow = 0;
     else if (m_CampRow >= rows)
@@ -5089,6 +5152,13 @@ void AscensionApp::HandleCamp(std::string_view action)
     if (m_CampColumn == 0 && m_CampRow >= 0 && m_CampRow < 4 &&
         (confirm || action == kUnequip || action == kContext)) {
         m_ShopAsk = ShopAsk::Unequip;
+        return;
+    }
+    if (m_CampColumn == 0 && m_CampRow == 4 + m_Inventory.BagSlots()) {
+        if (confirm) {
+            m_Titles = {};
+            m_Titles.Open = true;
+        }
         return;
     }
     if (m_CampColumn != 0 || m_CampRow < 4)
@@ -5245,8 +5315,231 @@ void AscensionApp::EnsureIcons()
     m_Accents = GetAssets().Load<Emerald::Texture>(accent, options);
 }
 
+void AscensionApp::DrawTitles(Emerald::Renderer2D& renderer, f32 width, f32 height)
+{
+    const i32 slots = m_Hero.TitleSlots();
+    const std::vector<TitleFact> facts = m_Hero.QueryTitles();
+    std::vector<const TitleFact*> worn;
+    std::vector<const TitleFact*> held;
+    worn.resize(static_cast<usize>(slots > 0 ? slots : 0), nullptr);
+    for (const TitleFact& fact : facts) {
+        if (fact.Equipped && fact.Slot >= 0 && fact.Slot < slots)
+            worn[static_cast<usize>(fact.Slot)] = &fact;
+        else if (fact.Owned && !fact.Equipped)
+            held.push_back(&fact);
+    }
+    const i32 owned = static_cast<i32>(held.size());
+    ClampTitleSheet(m_Titles, slots, owned);
+    const TitleLabels& labels = m_Data.GetTitleLabels();
+    const bool asking = m_Titles.Ask != TitleAsk::None;
+    const bool wornSide = m_Titles.Column == 0;
+
+    const BattleUi& battleUi = m_Data.GetBattleUi();
+    const ShopUi& shopUi = m_Data.GetShopUi();
+    const UiStyle& style = battleUi.Style;
+    const Emerald::Vec4 ink = Paint(style.Ink);
+    const Emerald::Vec4 dim = Paint(style.Dim);
+    const Emerald::Vec4 frameColor = Paint(style.Frame);
+    const Emerald::Vec4 panel = Paint(style.Panel);
+    const Emerald::Vec4 highlight = Paint(style.Highlight);
+    const f32 margin = static_cast<f32>(battleUi.Margin);
+    const f32 top = static_cast<f32>(battleUi.PanelTop);
+    const f32 split = static_cast<f32>(battleUi.SplitGap);
+    const f32 inset = static_cast<f32>(battleUi.BottomInset);
+    const f32 pad = static_cast<f32>(style.PanelPad);
+    const f32 lineGap = static_cast<f32>(style.LineGap);
+    const f32 rowGap = static_cast<f32>(style.RowGap);
+    const f32 groupGap = static_cast<f32>(style.GroupGap);
+    const f32 columnGap = static_cast<f32>(shopUi.ColumnGap);
+    const f32 titleH = Emerald::DebugTextLineHeight(style.TitleScale);
+    const f32 bodyH = Emerald::DebugTextLineHeight(style.BodyScale);
+    const f32 detailH = Emerald::DebugTextLineHeight(style.DetailScale);
+    const f32 hintX = static_cast<f32>(battleUi.HintX);
+    const f32 hintTop = height - static_cast<f32>(battleUi.HintFromBottom);
+    f32 textFloor = hintTop - static_cast<f32>(style.HintClearance);
+    f32 promptY = 0.0f;
+    if (asking) {
+        const PromptMetrics metrics = MeasurePrompts(m_Data.GetPrompts());
+        const f32 promptH = metrics.Icon > 0.0f ? metrics.Icon
+                                                : Emerald::DebugTextLineHeight(metrics.TextScale);
+        promptY = hintTop - static_cast<f32>(style.HintClearance) - promptH;
+        textFloor = promptY - static_cast<f32>(style.HintClearance);
+    }
+    const f32 detailBottom = height - inset;
+    if (textFloor > detailBottom - pad)
+        textFloor = detailBottom - pad;
+
+    const f32 headerH = pad + titleH + pad;
+    const f32 rowH = bodyH;
+    const f32 heading = detailH + lineGap;
+    i32 shownRows = shopUi.ListRows < 1 ? 1 : shopUi.ListRows;
+    const f32 listTop = top + headerH + split;
+    const f32 messageH = Emerald::DebugTextLineHeight(style.MessageScale);
+    const f32 messageBlock = m_Shown.empty() ? 0.0f : lineGap + messageH;
+    const f32 need = pad + bodyH + lineGap + bodyH + lineGap + detailH + messageBlock;
+    f32 listH = pad * 2.0f + heading + static_cast<f32>(shownRows) * rowH +
+                static_cast<f32>(shownRows > 1 ? shownRows - 1 : 0) * rowGap;
+    while (shownRows > 3 && listTop + listH + split + need > textFloor) {
+        --shownRows;
+        listH = pad * 2.0f + heading + static_cast<f32>(shownRows) * rowH +
+                static_cast<f32>(shownRows > 1 ? shownRows - 1 : 0) * rowGap;
+    }
+    const f32 detailTop = listTop + listH + split;
+    const f32 span = width - margin * 2.0f;
+    const f32 colW = (span - columnGap) * 0.5f;
+    DrawPanel(renderer, {margin, top}, {span, headerH}, panel, frameColor);
+    DrawPanel(renderer, {margin, listTop}, {colW, listH}, panel, frameColor);
+    DrawPanel(renderer, {margin + colW + columnGap, listTop}, {colW, listH}, panel, frameColor);
+    const f32 detailPanelH = detailBottom - detailTop;
+    if (detailPanelH > 0.0f)
+        DrawPanel(renderer, {margin, detailTop}, {span, detailPanelH}, panel, frameColor);
+
+    const std::string count = std::to_string(m_Hero.EquippedTitles().size()) + "/" +
+                              std::to_string(slots);
+    const f32 countW = Emerald::MeasureDebugText(count, style.BodyScale).x;
+    const f32 countX = margin + span - pad - countW;
+    const f32 countY = top + pad + (titleH - bodyH) * 0.5f;
+    DrawUiText(renderer, {countX, countY}, count, highlight, style.BodyScale);
+    const f32 nameRoom = countX - groupGap - (margin + pad);
+    DrawUiText(renderer, {margin + pad, top + pad},
+               FitLine(labels.Open, style.TitleScale, nameRoom), frameColor, style.TitleScale);
+
+    const f32 headY = listTop + pad;
+    const std::string wornHead = labels.Equipped;
+    const std::string heldHead = labels.Owned;
+    DrawUiText(renderer, {margin + pad, headY}, FitLine(wornHead, style.DetailScale, colW - pad * 2.0f),
+               wornSide ? highlight : dim, style.DetailScale);
+    DrawUiText(renderer, {margin + colW + columnGap + pad, headY},
+               FitLine(heldHead, style.DetailScale, colW - pad * 2.0f), wornSide ? dim : highlight,
+               style.DetailScale);
+
+    const i32 leftCount = slots > 0 ? slots : 0;
+    const i32 rightCount = owned > 0 ? owned : 1;
+    const i32 leftFirst = WindowStart(leftCount, wornSide ? m_Titles.Row : 0, shownRows);
+    const i32 rightFirst = WindowStart(rightCount, wornSide ? 0 : m_Titles.Row, shownRows);
+    const f32 rowTop = headY + heading;
+    const f32 stride = rowH + rowGap;
+    IconArt art;
+
+    const TitleFact* selected = nullptr;
+    bool emptySlot = false;
+    for (i32 index = 0; index < shownRows; ++index) {
+        const i32 row = leftFirst + index;
+        if (row >= leftCount)
+            break;
+        const bool marked = wornSide && row == m_Titles.Row;
+        const TitleFact* fact = worn[static_cast<usize>(row)];
+        const std::string name = fact != nullptr ? (fact->Name.empty() ? fact->Id : fact->Name)
+                                                  : labels.Empty;
+        if (marked) {
+            selected = fact;
+            emptySlot = fact == nullptr;
+        }
+        const Emerald::Vec4 rowInk = wornSide ? ink : dim;
+        DrawShopRow(renderer, art, {margin + pad, rowTop + static_cast<f32>(index) * stride},
+                    colW - pad * 2.0f, rowH, rowGap, style.BodyScale, marked, highlight, panel, rowInk,
+                    nullptr, rowInk, {}, name);
+    }
+    for (i32 index = 0; index < shownRows; ++index) {
+        const i32 row = rightFirst + index;
+        if (row >= rightCount)
+            break;
+        const bool marked = !wornSide && row == m_Titles.Row;
+        const TitleFact* fact = row < owned ? held[static_cast<usize>(row)] : nullptr;
+        const std::string name =
+            fact != nullptr ? (fact->Name.empty() ? fact->Id : fact->Name) : labels.None;
+        if (marked)
+            selected = fact;
+        const Emerald::Vec4 rowInk = wornSide ? dim : ink;
+        DrawShopRow(renderer, art,
+                    {margin + colW + columnGap + pad, rowTop + static_cast<f32>(index) * stride},
+                    colW - pad * 2.0f, rowH, rowGap, style.BodyScale, marked, highlight, panel, rowInk,
+                    nullptr, rowInk, {}, name);
+    }
+
+    f32 y = detailTop + pad;
+    const f32 detailX = margin + pad;
+    const f32 detailW = span - pad * 2.0f;
+    f32 contentFloor = textFloor;
+    if (!m_Shown.empty() && contentFloor - lineGap - messageH > y)
+        contentFloor -= lineGap + messageH;
+    const std::string bare = selected != nullptr ? (selected->Name.empty() ? selected->Id : selected->Name)
+                                                  : std::string{};
+    std::string headline = bare;
+    if (asking) {
+        const std::string thing = bare.empty() ? std::string(labels.None) : bare;
+        headline = TitleLine(m_Titles.Ask == TitleAsk::Equip ? labels.EquipAsk : labels.UnequipAsk,
+                             thing);
+    } else if (headline.empty()) {
+        headline = emptySlot ? labels.Empty : labels.None;
+    }
+    if (y + bodyH <= contentFloor) {
+        DrawUiText(renderer, {detailX, y}, FitLine(headline, style.BodyScale, detailW),
+                   asking ? highlight : ink, style.BodyScale);
+        y += bodyH + lineGap;
+    }
+    if (selected != nullptr && !asking && y + bodyH <= contentFloor) {
+        const std::string state = selected->Equipped ? labels.Worn : labels.Held;
+        DrawUiText(renderer, {detailX, y}, FitLine(state, style.BodyScale, detailW), ink,
+                   style.BodyScale);
+        y += bodyH + lineGap;
+    } else if (!asking && y + detailH <= contentFloor) {
+        DrawUiText(renderer, {detailX, y}, FitLine(labels.Hint, style.DetailScale, detailW), dim,
+                   style.DetailScale);
+        y += detailH + lineGap;
+    }
+    if (selected != nullptr && !asking) {
+        std::string bonus;
+        if (!selected->Bonus.Stat.empty() && selected->Bonus.Amount != 0) {
+            const StatDef* stat = m_Data.FindStat(selected->Bonus.Stat);
+            bonus = (stat != nullptr ? stat->Name : selected->Bonus.Stat) + " +" +
+                    std::to_string(selected->Bonus.Amount);
+        } else if (selected->Bonus.DamagePercent != 0 && !selected->Bonus.Against.empty()) {
+            bonus = std::to_string(selected->Bonus.DamagePercent) + "%  " + selected->Bonus.Against;
+        }
+        if (!bonus.empty() && y + detailH <= contentFloor) {
+            DrawUiText(renderer, {detailX, y}, FitLine(bonus, style.DetailScale, detailW), dim,
+                       style.DetailScale);
+            y += detailH + lineGap;
+        }
+        const f32 remain = contentFloor - y;
+        if (!selected->Description.empty() && remain >= detailH) {
+            const std::string shown =
+                WrapClip(selected->Description, style.DetailScale, detailW, remain);
+            if (!shown.empty())
+                DrawUiText(renderer, {detailX, y}, shown, dim, style.DetailScale, detailW);
+        }
+    }
+    if (!m_Shown.empty()) {
+        const f32 messageY = textFloor - messageH;
+        if (messageY >= detailTop + pad)
+            DrawUiText(renderer, {detailX, messageY}, FitLine(m_Shown, style.MessageScale, detailW),
+                       ink, style.MessageScale);
+    }
+    if (asking && !m_Pause.Open) {
+        std::vector<HintChip> ask;
+        AddHint(ask, kConfirm, "CONFIRM");
+        AddHint(ask, kCancel, "CANCEL");
+        DrawHints(renderer, hintX, promptY, width - hintX, ask, false);
+    }
+    std::vector<HintChip> hints;
+    AddHint(hints, kMoveNorth, "");
+    AddHint(hints, kMoveSouth, "MOVE");
+    AddHint(hints, kMoveWest, "");
+    AddHint(hints, kMoveEast, labels.Equipped + " OR " + labels.Owned);
+    AddHint(hints, kConfirm, "EQUIP");
+    AddHint(hints, kUnequip, "UNEQUIP");
+    AddHint(hints, kCancel, "BACK");
+    RetargetPauseHints(hints);
+    DrawHints(renderer, hintX, hintTop, width - hintX, hints, true);
+}
+
 void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height)
 {
+    if (m_Titles.Open) {
+        DrawTitles(renderer, width, height);
+        return;
+    }
     EnsureIcons();
     ClampCamp();
     const BattleUi& battleUi = m_Data.GetBattleUi();
@@ -5342,7 +5635,8 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
                            bagSide ? dim : highlight, style.DetailScale);
 
     const i32 bagSlots = m_Inventory.BagSlots();
-    const i32 leftCount = 4 + bagSlots;
+    const i32 leftCount = 4 + bagSlots + 1;
+    bool titlesMarked = false;
     const i32 rightCount = static_cast<i32>(shop.Stock.size());
     const i32 leftFirst = WindowStart(leftCount, bagSide ? m_CampRow : 0, shownRows);
     const i32 rightFirst = WindowStart(rightCount, bagSide ? 0 : m_CampRow, shownRows);
@@ -5382,6 +5676,12 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
             if (marked) {
                 selected = piece;
                 wornItself = piece != nullptr;
+                bareName = name;
+            }
+        } else if (row == leftCount - 1) {
+            name = m_Data.GetTitleLabels().Open;
+            if (marked) {
+                titlesMarked = true;
                 bareName = name;
             }
         } else {
@@ -5475,6 +5775,12 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
         y += bodyH + lineGap;
         showedPrice = true;
     }
+    if (titlesMarked && !asking && y + detailH <= contentFloor) {
+        DrawUiText(renderer, {detailX, y},
+                   FitLine(m_Data.GetTitleLabels().Hint, style.DetailScale, detailW), dim,
+                   style.DetailScale);
+        y += detailH + lineGap;
+    }
     if (selected != nullptr && showedPrice) {
         const std::string delta = GearDelta(m_Data, m_Inventory, *selected, wornItself);
         if (!delta.empty() && y + detailH <= contentFloor) {
@@ -5508,7 +5814,8 @@ void AscensionApp::DrawCamp(Emerald::Renderer2D& renderer, f32 width, f32 height
     AddHint(hints, kMoveSouth, "MOVE");
     AddHint(hints, kMoveWest, "");
     AddHint(hints, kMoveEast, "BAG OR STOCK");
-    AddHint(hints, kConfirm, "EQUIP OR BUY");
+    const bool titlesRow = bagSide && m_CampRow == 4 + bagSlots;
+    AddHint(hints, kConfirm, titlesRow ? m_Data.GetTitleLabels().Open : "EQUIP OR BUY");
     AddHint(hints, kContext, "SELL");
     AddHint(hints, kUnequip, "UNEQUIP");
     AddHint(hints, CloseAction(), "CLOSE");

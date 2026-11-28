@@ -10,6 +10,7 @@
 #include "Ascension/Combat/Battle.h"
 #include "Ascension/Progress/Hero.h"
 #include "Ascension/Progress/RunSave.h"
+#include "Ascension/Progress/TitleSheet.h"
 #include "Check.h"
 #include "Emerald/Save/Save.h"
 
@@ -151,11 +152,13 @@ void TestTitleThreshold()
 
     std::string why;
     Check(AcceptTitle(state, data, "goblin_slayer", why) && state.Titles.size() == 1 &&
-              state.TitleOffers.empty(),
-          "accepting the title takes the offer");
+              state.TitleOffers.empty() && state.Equipped.empty(),
+          "accepting the title takes the offer and does not wear it");
+    Check(TitleTagDamage(data, state).empty(), "an owned title does not change damage");
+    state.Equipped.push_back("goblin_slayer");
     const std::vector<TagDamage> damage = TitleTagDamage(data, state);
     Check(damage.size() == 1 && damage[0].Tag == "humanoid" && damage[0].Percent == 10,
-          "Goblin Slayer is 10 percent against humanoids");
+          "an equipped Goblin Slayer is 10 percent against humanoids");
     Check(!AcceptTitle(state, data, "goblin_slayer", why), "the title is not offered again");
 
     Hero hero = StartHero(data);
@@ -167,7 +170,17 @@ void TestTitleThreshold()
               hero.TitleOffers()[0] == "wolf_cull",
           "one wolf kill offers Wolf Cull");
     Check(hero.AcceptTitle("wolf_cull", why), "Wolf Cull can be accepted");
-    Check(hero.Attributes().Strength == before + 1, "Wolf Cull adds one strength");
+    Check(hero.Attributes().Strength == before && !hero.TitleEquipped("wolf_cull"),
+          "owning Wolf Cull does not add strength");
+    Check(!hero.EquipTitle("wolf_cull", why), "a class with no rarity has no title slot");
+    Check(hero.QueryTitles().size() == data.GetTitles().size(),
+          "the query lists every catalog title");
+    TitleFact wolf;
+    Check(hero.TitleFactFor("wolf_cull", wolf) && wolf.Owned && !wolf.Equipped && wolf.Slot < 0 &&
+              wolf.Name == "Wolf Cull" && wolf.Bonus.Stat == "strength" && wolf.Bonus.Amount == 1 &&
+              !wolf.Description.empty(),
+          "the query names an owned title and its bonus");
+    Check(!hero.TitleFactFor("no_such_title", wolf), "an unknown title is not a fact");
 }
 
 void TestFreePoints()
@@ -179,6 +192,20 @@ void TestFreePoints()
               RarityFreePoints(data, "rare") == 3 && RarityFreePoints(data, "") == 0 &&
               RarityFreePoints(data, "missing") == 0,
           "free points are the rarity row, and a missing rarity is zero");
+    const RarityDef* commonRarity = data.FindRarity("common");
+    const RarityDef* uncommonRarity = data.FindRarity("uncommon");
+    const RarityDef* rareRarity = data.FindRarity("rare");
+    const RarityDef* epicRarity = data.FindRarity("epic");
+    const RarityDef* legendaryRarity = data.FindRarity("legendary");
+    const RarityDef* mythicRarity = data.FindRarity("mythic");
+    Check(commonRarity != nullptr && uncommonRarity != nullptr && rareRarity != nullptr &&
+              epicRarity != nullptr && legendaryRarity != nullptr && mythicRarity != nullptr &&
+              commonRarity->TitleSlots == 1 && uncommonRarity->TitleSlots == 2 &&
+              rareRarity->TitleSlots == 3 && epicRarity->TitleSlots == 3 &&
+              legendaryRarity->TitleSlots == 4 && mythicRarity->TitleSlots == 4,
+          "title slots are the rarity row");
+    Check(TitleSlotCount(data, "fighter") == 0 && TitleSlotCount(data, "missing") == 0,
+          "a class with no rarity, and a missing class, wear no titles");
 
     ClassDef common;
     common.Rarity = "common";
@@ -302,9 +329,10 @@ void TestSaveLedger()
     Hero again = StartHero(data);
     Check(again.ImportCareer(loaded.Run.Career, why), "the ledger imports");
     Check(again.System().Titles.size() == 1 && again.System().Titles[0] == "wolf_cull" &&
+              again.System().Equipped.empty() && !loaded.Run.Career.EquippedLegacy &&
               !again.TitlePending() &&
               SystemCount(again.System(), SystemEventKind::Kill, "wolf", "") == 1,
-          "the accepted title and the wolf count survive");
+          "the owned title, the empty worn list, and the wolf count survive");
 
     TempDir legacy("ascension-system-v6");
     Emerald::SaveData older;
@@ -564,8 +592,11 @@ void TestReaver()
     bear.NoteKill("bear");
     Check(bear.TitleOffers().size() == 1 && bear.TitleOffers()[0] == "bear_cull",
           "the bear opens Bear Cull and not Beast Hunter");
-    Check(bear.AcceptTitle("bear_cull", why) && bear.Attributes().Stamina == stamina + 1,
-          "Bear Cull adds one stamina");
+    Check(bear.AcceptTitle("bear_cull", why) && bear.Attributes().Stamina == stamina,
+          "Bear Cull is owned and not yet worn");
+    Check(bear.TitleSlots() >= 1 && bear.EquipTitle("bear_cull", why) &&
+              bear.Attributes().Stamina == stamina + 1,
+          "equipping Bear Cull adds one stamina");
 
     Hero barrow = StartHero(data);
     barrow.NoteKill("tomb_moth");
@@ -577,14 +608,19 @@ void TestReaver()
     Check(barrow.TitleOffers().size() == 1 && barrow.TitleOffers()[0] == "tombwalker",
           "the sentry is the third humanoid and not Varn");
     const i32 defense = barrow.Attributes().Defense;
-    Check(barrow.AcceptTitle("tombwalker", why) && barrow.Attributes().Defense == defense + 1,
-          "Tombwalker adds one defense");
-    const i32 will = barrow.Attributes().Will;
+    Check(barrow.AcceptTitle("tombwalker", why) && barrow.Attributes().Defense == defense,
+          "Tombwalker is owned and not yet worn");
+    Check(barrow.EquipTitle("tombwalker", why) && barrow.Attributes().Defense == defense + 1,
+          "equipping Tombwalker adds one defense");
     barrow.NoteKill("oathkeeper_varn");
     Check(barrow.TitleOffers().size() == 1 && barrow.TitleOffers()[0] == "oaths_end",
           "Varn opens Oath's End on its own kill");
-    Check(barrow.AcceptTitle("oaths_end", why) && barrow.Attributes().Will == will + 1,
-          "Oath's End adds one will");
+    Check(barrow.AcceptTitle("oaths_end", why), "Oath's End can be accepted");
+    if (static_cast<i32>(barrow.EquippedTitles().size()) >= barrow.TitleSlots())
+        Check(barrow.UnequipTitle("tombwalker", why), "a full bar makes a slot");
+    const i32 will = barrow.Attributes().Will;
+    Check(barrow.EquipTitle("oaths_end", why) && barrow.Attributes().Will == will + 1,
+          "equipping Oath's End adds one will");
 
     Hero old = StartHero(data);
     old.GrantXp(60);
@@ -612,6 +648,182 @@ void TestReaver()
           "stored crush uses offer cleave and reaver on load");
 }
 
+void TestTitleSheet()
+{
+    TitleSheet sheet;
+    sheet.Open = true;
+    Check(ApplyTitleSheet(sheet, kMoveEast, 1, 0, 1) == TitleSheetStep::None && sheet.Column == 1 &&
+              sheet.Row == 0,
+          "east moves from the worn slots to the owned titles");
+    Check(ApplyTitleSheet(sheet, kConfirm, 1, 0, 1) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::Equip,
+          "confirm on an owned title arms equip");
+    Check(ApplyTitleSheet(sheet, kCancel, 1, 0, 1) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::None,
+          "cancel leaves the ask and stays on the sheet");
+    Check(ApplyTitleSheet(sheet, kConfirm, 1, 0, 1) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::Equip,
+          "confirm arms the equip again");
+    Check(ApplyTitleSheet(sheet, kConfirm, 1, 0, 1) == TitleSheetStep::Equip &&
+              sheet.Ask == TitleAsk::None && sheet.Open,
+          "the second confirm equips the marked owned title");
+    Check(ApplyTitleSheet(sheet, kMoveWest, 1, 1, 0) == TitleSheetStep::None && sheet.Column == 0,
+          "west returns to the worn slots");
+    Check(ApplyTitleSheet(sheet, kUnequip, 1, 1, 0) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::Unequip,
+          "unequip arms take-off on a filled slot");
+    Check(ApplyTitleSheet(sheet, kConfirm, 1, 1, 0) == TitleSheetStep::Unequip,
+          "the second confirm takes the title off");
+    sheet.Open = true;
+    sheet.Column = 0;
+    sheet.Row = 1;
+    Check(ApplyTitleSheet(sheet, kConfirm, 2, 1, 0) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::None,
+          "an empty slot does not arm take-off");
+    sheet.Open = true;
+    sheet.Column = 1;
+    sheet.Row = 0;
+    sheet.Ask = TitleAsk::None;
+    Check(ApplyTitleSheet(sheet, kConfirm, 1, 1, 1) == TitleSheetStep::None &&
+              sheet.Ask == TitleAsk::None,
+          "a full bar does not arm equip");
+    Check(ApplyTitleSheet(sheet, kCancel, 2, 1, 0) == TitleSheetStep::Back && !sheet.Open,
+          "cancel from the sheet returns to camp");
+    sheet.Open = true;
+    Check(ApplyTitleSheet(sheet, kMenu, 1, 0, 0) == TitleSheetStep::Close && !sheet.Open,
+          "menu closes camp from the sheet");
+    Check(TitleLine("Equip {name}?", "Wolf Cull") == "Equip Wolf Cull?",
+          "the equip question takes the title name");
+}
+
+void TestTitleEquip()
+{
+    Database data = Shipped();
+    if (!data.IsLoaded())
+        return;
+    const RarityDef* common = data.FindRarity("common");
+    const RarityDef* uncommon = data.FindRarity("uncommon");
+    Check(common != nullptr && uncommon != nullptr && common->TitleSlots >= 1 &&
+              TitleSlotCount(data, "fighter") == common->TitleSlots &&
+              TitleSlotCount(data, "berserker") == uncommon->TitleSlots &&
+              TitleSlotCount(data, "missing") == 0,
+          "a class wears as many titles as its rarity row");
+    Check(!data.GetTitleLabels().Open.empty() && !data.GetTitleLabels().EquipAsk.empty() &&
+              !data.GetTitleLabels().UnequipAsk.empty(),
+          "the title sheet words load from titles.json");
+
+    Hero hero = StartHero(data);
+    if (!hero.IsReady())
+        return;
+    const i32 strength = hero.Attributes().Strength;
+    const i32 agility = hero.Attributes().Agility;
+    for (i32 n = 0; n < 4; ++n)
+        hero.NoteKill("wolf");
+    std::string why;
+    Check(hero.AcceptTitle("wolf_cull", why) && hero.AcceptTitle("beast_hunter", why),
+          "Wolf Cull and Beast Hunter can be owned");
+    Check(hero.Attributes().Strength == strength && hero.Attributes().Agility == agility,
+          "owned titles do not change the sheet");
+    Check(hero.EquipTitle("wolf_cull", why) && hero.TitleEquipped("wolf_cull") &&
+              hero.Attributes().Strength == strength + 1,
+          "equipping Wolf Cull adds one strength");
+    const bool both = hero.EquipTitle("beast_hunter", why);
+    if (hero.TitleSlots() >= 2) {
+        Check(both && hero.Attributes().Agility == agility + 1,
+              "a second slot wears Beast Hunter");
+    } else {
+        Check(!both && hero.Attributes().Agility == agility && !hero.TitleEquipped("beast_hunter"),
+              "a full bar refuses another title");
+        Check(hero.UnequipTitle("wolf_cull", why) && hero.Attributes().Strength == strength,
+              "taking Wolf Cull off returns the strength");
+        Check(hero.EquipTitle("beast_hunter", why) && hero.Attributes().Agility == agility + 1 &&
+                  !hero.TitleEquipped("wolf_cull"),
+              "the open slot can wear Beast Hunter instead");
+        Check(hero.UnequipTitle("beast_hunter", why) && hero.EquipTitle("wolf_cull", why),
+              "Wolf Cull goes back on so the later clamp keeps it");
+    }
+    TitleFact fact;
+    Check(hero.TitleFactFor("wolf_cull", fact) && fact.Owned && fact.Equipped && fact.Slot == 0 &&
+              fact.Name == "Wolf Cull" && fact.Bonus.Amount == 1,
+          "the query reports the worn title, its slot, and its bonus");
+    Check(hero.OwnsTitle("beast_hunter"), "Beast Hunter stays owned");
+
+    hero.GrantXp(60);
+    Check(hero.Level() == 5 && hero.Choose("berserker", why), "berserker can be chosen");
+    const i32 wider = hero.TitleSlots();
+    Check(wider == uncommon->TitleSlots, "the new class uses its own rarity's slots");
+    if (!hero.TitleEquipped("beast_hunter") &&
+        static_cast<i32>(hero.EquippedTitles().size()) < wider)
+        Check(hero.EquipTitle("beast_hunter", why), "a new slot can wear Beast Hunter");
+    const i32 wornBefore = static_cast<i32>(hero.EquippedTitles().size());
+    Check(hero.AdoptStarter("fighter", why), "the build can return to fighter");
+    Check(static_cast<i32>(hero.EquippedTitles().size()) <= hero.TitleSlots() &&
+              hero.OwnsTitle("wolf_cull") && hero.OwnsTitle("beast_hunter"),
+          "a smaller bar takes off the newest titles and keeps them owned");
+    if (wider > hero.TitleSlots()) {
+        Check(static_cast<i32>(hero.EquippedTitles().size()) < wornBefore &&
+                  hero.TitleEquipped("wolf_cull"),
+              "the titles worn first stay when the bar shrinks");
+    }
+    const i32 settled = hero.Attributes().Strength;
+    if (hero.TitleEquipped("wolf_cull")) {
+        Check(hero.UnequipTitle("wolf_cull", why) && hero.Attributes().Strength == settled - 1,
+              "taking Wolf Cull off after a class change removes its strength");
+    } else {
+        Check(hero.EquipTitle("wolf_cull", why) && hero.Attributes().Strength == settled + 1,
+              "equipping Wolf Cull after a class change adds its strength");
+    }
+
+    TempDir kept("ascension-title-equip");
+    RunSave saves(kept.Path);
+    RunState run;
+    hero.ExportCareer(run.Career);
+    Check(saves.Write(run, why), "the worn titles write");
+    const RunLoad loaded = saves.Read();
+    Check(static_cast<bool>(loaded) && !loaded.Run.Career.EquippedLegacy &&
+              loaded.Run.Career.System.Equipped == hero.EquippedTitles(),
+          "the worn list round-trips, and a written file is not a legacy equip");
+    Hero again = StartHero(data);
+    Check(again.ImportCareer(loaded.Run.Career, why) &&
+              again.EquippedTitles() == hero.EquippedTitles() &&
+              again.Attributes().Strength == hero.Attributes().Strength,
+          "a loaded run wears the same titles");
+
+    TempDir legacy("ascension-title-legacy");
+    Emerald::SaveData older;
+    older.SetString("class", "fighter");
+    older.SetInt("title.count", 1);
+    older.SetString("title.0", "wolf_cull");
+    Emerald::SaveSystem version7(legacy.Path, 7);
+    Check(version7.Save("run", older, "v7"), "a version 7 file with no worn list is written");
+    RunSave migrated(legacy.Path);
+    const RunLoad old = migrated.Read();
+    Check(static_cast<bool>(old) && old.FileVersion == 7 && old.Run.Career.EquippedLegacy &&
+              old.Run.Career.System.Equipped.empty() && old.Run.Career.System.Titles.size() == 1,
+          "a missing worn list is marked and not invented in the file");
+    Hero fromOld = StartHero(data);
+    const i32 bare = fromOld.Attributes().Strength;
+    Check(fromOld.ImportCareer(old.Run.Career, why), "the legacy career imports");
+    Check(fromOld.OwnsTitle("wolf_cull") && fromOld.TitleEquipped("wolf_cull") &&
+              fromOld.Attributes().Strength == bare + 1,
+          "a save from before slots wears the owned title when a slot is open");
+
+    TempDir bareFile("ascension-title-empty");
+    Emerald::SaveData emptyWorn;
+    emptyWorn.SetString("class", "fighter");
+    emptyWorn.SetInt("title.count", 1);
+    emptyWorn.SetString("title.0", "wolf_cull");
+    emptyWorn.SetInt("titleEquip.count", 0);
+    Emerald::SaveSystem explicitNone(bareFile.Path, 7);
+    Check(explicitNone.Save("run", emptyWorn, "v7"), "a worn count of zero is written");
+    const RunLoad none = RunSave(bareFile.Path).Read();
+    Hero unworn = StartHero(data);
+    Check(static_cast<bool>(none) && !none.Run.Career.EquippedLegacy &&
+              unworn.ImportCareer(none.Run.Career, why) && unworn.OwnsTitle("wolf_cull") &&
+              !unworn.TitleEquipped("wolf_cull") && unworn.Attributes().Strength == bare,
+          "a stored empty worn list stays empty");
+}
+
 } // namespace
 
 int main()
@@ -625,6 +837,8 @@ int main()
     TestReaver();
     TestTagDamage();
     TestSaveLedger();
+    TestTitleSheet();
+    TestTitleEquip();
     if (g_Failures == 0)
         std::printf("All system checks passed.\n");
     else
